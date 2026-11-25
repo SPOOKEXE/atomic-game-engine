@@ -1716,6 +1716,24 @@
 			]
 		},
 		{
+			"name": "RenderPass",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.RenderPass"],
+			"properties": [
+				{"name": "Composite", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.RenderPass"], "writes": ["scene.RenderPass"]},
+				{"name": "Demand", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.RenderPass"], "writes": ["scene.RenderPass"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.RenderPass"], "writes": ["scene.RenderPass"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Order", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.RenderPass"], "writes": ["scene.RenderPass"]},
+				{"name": "Parameters", "type": "String", "kind": "computed", "bytes": 32, "writable": true, "nullable": false, "reads": ["scene.RenderPass"], "writes": ["scene.RenderPass"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
+				{"name": "Scale", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.RenderPass"], "writes": ["scene.RenderPass"]},
+				{"name": "Shader", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.RenderPass"], "writes": ["scene.RenderPass"]}
+			]
+		},
+		{
 			"name": "LensShader",
 			"parent": "Instance",
 			"constructible": true,

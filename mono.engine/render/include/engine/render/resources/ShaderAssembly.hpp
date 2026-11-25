@@ -11,6 +11,8 @@
 //
 //   engine/surface   SurfaceInput, SurfaceOutput, LightSample, DefaultSurface
 //                    (always present in a surface)
+//   engine/pass      PassInput and the images a `vec4 Pass(PassInput i)` reads
+//                    (always present in a pass)
 //   engine/brdf      lobes for a Light function (always present in a surface)
 //
 // Text in, text out: nothing here touches a device or a store.
@@ -47,6 +49,8 @@ namespace engine::render {
 		std::string GBuffer;
 		// Whether the source declared a Surface.
 		bool Surface = false;
+		// Whether it declared a Pass, which is drawn over the lit image.
+		bool Pass = false;
 		// Whether it declared a Light as well.
 		bool Lit = false;
 		// Why there is no text; empty on success.

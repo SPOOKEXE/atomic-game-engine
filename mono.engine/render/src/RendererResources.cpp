@@ -191,6 +191,16 @@ namespace engine::render {
 			entry = State->LensPipelines.erase(entry);
 			shaders = true;
 		}
+		for (auto entry = State->PassPipelines.begin(); entry != State->PassPipelines.end();) {
+			if (static_cast<uint32_t>(entry->first >> 32) != owner.Id()) {
+				++entry;
+				continue;
+			}
+			if (!shaders) (void)WaitForFrame();
+			State->ReleasePass(entry->second);
+			entry = State->PassPipelines.erase(entry);
+			shaders = true;
+		}
 		if (const auto found = State->PostProcessPipelines.find(owner.Id());
 			found != State->PostProcessPipelines.end()) {
 			if (!shaders) (void)WaitForFrame();
@@ -410,6 +420,8 @@ namespace engine::render {
 		State->ShaderLensCount = std::min(lighting.ShaderLensCount, State->ShaderLenses.size());
 		State->WorldRenderFeatures = lighting.RenderFeatures;
 		State->HalfResolutionAmbientOcclusion = lighting.HalfResolutionAmbientOcclusion;
+		State->Passes = lighting.Passes;
+		State->PassCount = std::min(lighting.PassCount, State->Passes.size());
 	}
 
 	scene::WorldLighting Renderer::CurrentLighting() const {
@@ -447,6 +459,8 @@ namespace engine::render {
 		lighting.ShaderLensCount = State->ShaderLensCount;
 		lighting.RenderFeatures = State->WorldRenderFeatures;
 		lighting.HalfResolutionAmbientOcclusion = State->HalfResolutionAmbientOcclusion;
+		lighting.Passes = State->Passes;
+		lighting.PassCount = State->PassCount;
 		return lighting;
 	}
 
@@ -880,7 +894,8 @@ namespace engine::render {
 		std::span<const core::Name> materials,
 		std::span<const core::Name> lenses,
 		core::Name postProcess,
-		core::Name owner
+		core::Name owner,
+		std::span<const core::Name> passes
 	) {
 		if (State == nullptr || State->Device == nullptr) return false;
 		const auto before = State->ResourceEpoch;
@@ -947,7 +962,107 @@ namespace engine::render {
 					refusals[key] = module->CodeHash;
 			}
 		}
+		for (auto entry = State->PassPipelines.begin(); entry != State->PassPipelines.end();) {
+			const auto name = core::Name::FromId(static_cast<uint32_t>(entry->first));
+			const auto *module = library.Find(name, owner);
+			if (static_cast<uint32_t>(entry->first >> 32) != owner.Id() ||
+				(wanted(passes, name) && accepted(module) && module->Pass)) {
+				++entry;
+				continue;
+			}
+			(void)WaitForFrame();
+			State->ReleasePass(entry->second);
+			entry = State->PassPipelines.erase(entry);
+			++State->ResourceEpoch;
+		}
+		for (const auto name : passes) {
+			const auto *module = library.Find(name, owner);
+			if (!accepted(module) || !module->Pass) continue;
+			const auto key = Impl::ShaderVariantKey(name, owner);
+			const auto refused = State->PassRefusals.find(key);
+			if (refused != State->PassRefusals.end() && refused->second == module->CodeHash) continue;
+			if (AddPassShader(name, module->SpirV, owner))
+				State->PassRefusals.erase(key);
+			else
+				State->PassRefusals[key] = module->CodeHash;
+		}
 		return State->ResourceEpoch != before;
+	}
+
+	void Renderer::Impl::ReleasePass(PassVariant &variant) {
+		if (variant.Scratch != nullptr) SDL_ReleaseGPUGraphicsPipeline(Device, variant.Scratch);
+		if (variant.Composite != nullptr) SDL_ReleaseGPUGraphicsPipeline(Device, variant.Composite);
+		variant = {};
+	}
+
+	bool Renderer::HasPassShader(const core::Name &name, core::Name owner) const {
+		return State != nullptr && State->PassPipelines.contains(Impl::ShaderVariantKey(name, owner));
+	}
+
+	bool Renderer::AddPassShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner) {
+		if (State == nullptr || State->Device == nullptr || !name.IsValid() || spirv.empty()) return false;
+		const auto hash = assets::Hasher::Of(std::as_bytes(spirv));
+		const auto key = Impl::ShaderVariantKey(name, owner);
+		const auto held = State->PassPipelines.find(key);
+		if (held != State->PassPipelines.end() && held->second.CodeHash == hash) return true;
+		std::string translated;
+		const bool toMsl = State->Binary.Form == resources::ShaderForm::Msl;
+		if (toMsl) {
+			msl::Translation result = msl::Translate(spirv);
+			if (result.Failed) {
+				ENGINE_ERROR("pass '{}' cannot be translated to MSL: {}", name.Text(), result.Error);
+				return false;
+			}
+			translated = std::move(result.Source);
+		}
+		SDL_GPUShaderCreateInfo info{};
+		info.code = toMsl ? reinterpret_cast<const Uint8 *>(translated.data())
+						  : reinterpret_cast<const Uint8 *>(spirv.data());
+		info.code_size = toMsl ? translated.size() : spirv.size() * sizeof(uint32_t);
+		info.entrypoint = State->Binary.EntryPoint;
+		info.format = State->Binary.Format;
+		info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+		info.num_samplers = 6;
+		info.num_uniform_buffers = 1;
+		SDL_GPUShader *fragment = SDL_CreateGPUShader(State->Device, &info);
+		SDL_GPUShader *vertex = State->LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		Impl::PassVariant variant{.CodeHash = hash};
+		if (fragment != nullptr && vertex != nullptr) {
+			SDL_GPUColorTargetDescription target{};
+			target.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo pipeline{};
+			pipeline.vertex_shader = vertex;
+			pipeline.fragment_shader = fragment;
+			pipeline.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			pipeline.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			pipeline.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			pipeline.target_info.color_target_descriptions = &target;
+			pipeline.target_info.num_color_targets = 1;
+			variant.Scratch = SDL_CreateGPUGraphicsPipeline(State->Device, &pipeline);
+			// Over lit by the returned alpha, leaving lit's own alpha.
+			target.blend_state.enable_blend = true;
+			target.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+			target.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+			target.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+			target.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+			target.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+			target.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+			variant.Composite = SDL_CreateGPUGraphicsPipeline(State->Device, &pipeline);
+		}
+		if (fragment != nullptr) SDL_ReleaseGPUShader(State->Device, fragment);
+		if (vertex != nullptr) SDL_ReleaseGPUShader(State->Device, vertex);
+		if (variant.Scratch == nullptr || variant.Composite == nullptr) {
+			ENGINE_ERROR("pass '{}': {}", name.Text(), SDL_GetError());
+			State->ReleasePass(variant);
+			return false;
+		}
+		if (held != State->PassPipelines.end()) {
+			(void)WaitForFrame();
+			State->ReleasePass(held->second);
+		}
+		State->PassPipelines[key] = variant;
+		++State->ResourceEpoch;
+		return true;
 	}
 
 	bool Renderer::SetPostProcessShader(

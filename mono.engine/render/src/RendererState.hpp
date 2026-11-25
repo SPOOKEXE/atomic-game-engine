@@ -751,6 +751,18 @@ namespace engine::render {
 			assets::ContentHash CodeHash;
 			SDL_GPUGraphicsPipeline *Pipeline = nullptr;
 		};
+		// An authored pass: one pipeline that fills scratch and one that blends
+		// over the lit image by alpha.
+		struct PassVariant {
+			assets::ContentHash CodeHash;
+			SDL_GPUGraphicsPipeline *Scratch = nullptr;
+			SDL_GPUGraphicsPipeline *Composite = nullptr;
+		};
+		std::unordered_map<uint64_t, PassVariant> PassPipelines;
+		void ReleasePass(PassVariant &variant);
+		std::unordered_map<uint64_t, assets::ContentHash> PassRefusals;
+		std::array<scene::ResolvedPass, scene::MAX_RENDER_PASSES> Passes{};
+		size_t PassCount = 0;
 		std::unordered_map<uint32_t, PostProcessVariant> PostProcessPipelines;
 
 		struct PbrDimensions {
@@ -782,6 +794,10 @@ namespace engine::render {
 			SDL_GPUTexture *ObjectIds = nullptr;
 			SDL_GPUTexture *SemanticIds = nullptr;
 			SDL_GPUTexture *PartIds = nullptr;
+			// Authored passes: the lit image they read and what each leaves for the
+			// next, at Lit size, made on the first frame that runs one.
+			SDL_GPUTexture *PassColour = nullptr;
+			std::array<SDL_GPUTexture *, 2> PassScratch{};
 			SDL_GPUTexture *LinearDepth = nullptr;
 			SDL_GPUTexture *FirstSurfaceValidity = nullptr;
 			SDL_GPUTexture *CameraMotionVectors = nullptr;

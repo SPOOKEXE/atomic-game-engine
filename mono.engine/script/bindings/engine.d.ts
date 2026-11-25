@@ -2187,6 +2187,16 @@ declare interface MaterialLayer extends Instance {
 	Shader: string;
 }
 
+declare interface RenderPass extends Instance {
+	Composite: boolean;
+	Demand: string;
+	Enabled: boolean;
+	Order: number;
+	Parameters: string;
+	Scale: number;
+	Shader: string;
+}
+
 declare interface LensShader extends Instance {
 	readonly Revision: number;
 	Source: string;
@@ -4036,6 +4046,7 @@ declare const Instance: {
 		(className: "ShaderScript", parent?: Instance): ShaderScript;
 		(className: "ShaderModule", parent?: Instance): ShaderModule;
 		(className: "MaterialLayer", parent?: Instance): MaterialLayer;
+		(className: "RenderPass", parent?: Instance): RenderPass;
 		(className: "LensShader", parent?: Instance): LensShader;
 		(className: "EditableMesh", parent?: Instance): EditableMesh;
 		(className: "EditableImage", parent?: Instance): EditableImage;

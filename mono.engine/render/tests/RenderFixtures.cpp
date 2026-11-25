@@ -1833,6 +1833,58 @@ TEST_CASE("authored parameters and textures come from the part", "[render][gpu][
 	CHECK(masked[0] < 10);
 }
 
+TEST_CASE("authored passes chain, read the user tag and run on demand", "[render][gpu][material][.]") {
+	PlaneScene plane(core::Name("fixture.white"));
+	render::ShaderCompiler compiler;
+	compiler.SetOptimise(true);
+	const auto compile = [&](const char *name, const char *source) {
+		const auto assembled = render::AssembleShader(name, source, {});
+		REQUIRE(assembled.Error.empty());
+		auto compiled = compiler.Compile(assembled.Forward, render::ShaderStage::Fragment, name);
+		INFO(compiled.Error);
+		REQUIRE_FALSE(compiled.Failed);
+		return std::pair(assembled, compiled);
+	};
+	const char *const tagged = "void Surface(SurfaceInput i, inout SurfaceOutput o) { o.User = 0.5; }\n"
+							   "vec3 Light(SurfaceOutput s, LightSample l) { return vec3(0); }\n";
+	const auto [surface, forward] = compile("tagged", tagged);
+	const auto gbuffer = compiler.Compile(surface.GBuffer, render::ShaderStage::Fragment, "tagged");
+	REQUIRE(plane.Fixture.Render.AddMaterialShader(core::Name("tagged"), forward.SpirV, {}, gbuffer.SpirV));
+	const auto add = [&](const char *name, const char *source) {
+		const auto [assembled, compiled] = compile(name, source);
+		CHECK(assembled.Pass);
+		REQUIRE(plane.Fixture.Render.AddPassShader(core::Name(name), compiled.SpirV));
+	};
+	add("first", "vec4 Pass(PassInput i) { return vec4(User(i.UV) > 0.4 ? 1.0 : 0.0, 0, 0, 1); }");
+	add("second",
+		"#pragma parameter float gain = 1\n"
+		"vec4 Pass(PassInput i) { return vec4(0, 0, Previous(i.UV).r * gain, Previous(i.UV).r); }");
+	scene::WorldLighting lighting;
+	lighting.Ambient = lighting.OutdoorAmbient = {0, 0, 0};
+	lighting.Passes[0] = {
+		.Shader = core::Name("first"), .Demand = core::Name("tagged"), .Scale = 0.5f, .Composite = false
+	};
+	lighting.Passes[1] = {.Shader = core::Name("second"), .Demand = core::Name("tagged")};
+	lighting.PassCount = 2;
+	const auto light = [&] {
+		plane.Fixture.Render.SetLighting(lighting);
+		plane.View.Lighting = lighting;
+	};
+	light();
+	const uint32_t x = plane.Target.Width / 2, y = plane.Target.Height / 2;
+	// Nothing drawn asks for them.
+	const auto idle = plane.At(plane.Capture(), x, y);
+	CHECK(idle[0] == idle[2]);
+	plane.Surface.Shader = core::Name("tagged");
+	const auto blue = plane.At(plane.Capture(), x, y);
+	CHECK(blue[2] > 100);
+	CHECK(blue[0] < 10);
+	lighting.Passes[1].Parameters[0] = 0.0f;
+	lighting.Passes[1].ParameterMask = 1;
+	light();
+	CHECK(plane.At(plane.Capture(), x, y)[2] < 10);
+}
+
 TEST_CASE("a UDIM tile whose graph output is not ready draws the default", "[render][gpu][udim][.]") {
 	PlaneScene plane(core::Name("fixture.white"));
 	scene::WorldLighting bright;

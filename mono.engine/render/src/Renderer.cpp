@@ -1148,6 +1148,9 @@ namespace engine::render {
 			SDL_ReleaseGPUGraphicsPipeline(device, variant.Pipeline);
 		}
 		State->PostProcessPipelines.clear();
+		for (auto &[key, variant] : State->PassPipelines)
+			State->ReleasePass(variant);
+		State->PassPipelines.clear();
 		for (const auto &[name, variant] : State->LensPipelines) {
 			(void)name;
 			if (variant.Pipeline != nullptr) {

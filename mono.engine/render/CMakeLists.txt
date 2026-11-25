@@ -91,7 +91,7 @@ add_custom_command(
 	COMMAND "${CMAKE_COMMAND}"
 		"-DSOURCE_DIR=${embedded_shader_dir}"
 		"-DOUTPUT=${embedded_shaders}"
-		"-DENTRIES=SURFACE_SHADING_GLSL=surface-shading.glsl,ENGINE_BRDF_GLSL=engine-brdf.glsl,ENGINE_SURFACE_GLSL=engine-surface.glsl,ENGINE_SURFACE_MAIN_GLSL=engine-surface-main.glsl"
+		"-DENTRIES=SURFACE_SHADING_GLSL=surface-shading.glsl,ENGINE_BRDF_GLSL=engine-brdf.glsl,ENGINE_SURFACE_GLSL=engine-surface.glsl,ENGINE_SURFACE_MAIN_GLSL=engine-surface-main.glsl,ENGINE_PASS_GLSL=engine-pass.glsl"
 		-P "${CMAKE_SOURCE_DIR}/mono.build/EmbedShaders.cmake"
 	DEPENDS ${embedded_shader_inputs} "${CMAKE_SOURCE_DIR}/mono.build/EmbedShaders.cmake"
 	COMMENT "Embedding authored surface GLSL"

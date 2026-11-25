@@ -398,7 +398,9 @@ namespace engine::scene {
 									  "\nvoid Surface(SurfaceInput i, inout SurfaceOutput o) {}\n";
 					composed.Opacities.clear();
 				}
-				const core::Name shader("layers/" + TextKey(composed.Source));
+				const core::Name shader(
+					"layers/" + std::string(base.Text()) + "/" + TextKey(composed.Source)
+				);
 				auto &surface = held->Surfaces[shader.Id()];
 				++surface.Uses;
 				surface.Source = std::move(composed.Source);

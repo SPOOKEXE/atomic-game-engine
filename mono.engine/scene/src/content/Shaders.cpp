@@ -6,6 +6,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/content/MaterialLayers.hpp>
+#include <engine/scene/content/RenderPasses.hpp>
 #include <engine/scene/content/Shaders.hpp>
 
 #include <algorithm>
@@ -367,6 +368,9 @@ namespace engine::scene {
 		// rather than a row, so it is a plain read rather than a walk.
 		const core::Name postProcess = PostProcessShaderOf(store);
 		if (postProcess.IsValid()) out.push_back(postProcess);
+		std::vector<core::Name> passes;
+		(void)DemandedPassShaders(store, passes);
+		out.insert(out.end(), passes.begin(), passes.end());
 		SortUnique(out);
 		return out.size();
 	}

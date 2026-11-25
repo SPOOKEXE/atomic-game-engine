@@ -86,6 +86,8 @@ namespace engine::scene {
 
 			lighting.RenderFeatures = authored->RenderFeatures;
 		}
+		lighting.PassCount =
+			service == ecs::NULL_ENTITY ? 0 : ResolveRenderPasses(store, service, lighting.Passes);
 		if (const auto *occlusion = store.Get<AmbientOcclusionSettings>(service)) {
 			lighting.HalfResolutionAmbientOcclusion = occlusion->Quality == AmbientOcclusionQuality::Half;
 		}

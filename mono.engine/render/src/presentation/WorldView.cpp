@@ -13,6 +13,7 @@
 #include <engine/render/resources/ShaderLibrary.hpp>
 #include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/scene/content/Materials.hpp>
+#include <engine/scene/content/RenderPasses.hpp>
 #include <engine/scene/content/ShaderLens.hpp>
 #include <engine/scene/content/Shaders.hpp>
 #include <engine/scene/environment/Sunlight.hpp>
@@ -168,11 +169,12 @@ namespace engine::render {
 			if (module != nullptr && !module->Error.empty())
 				ENGINE_WARN("lens shader '{}': {}", name.Text(), module->Error);
 		}
-		std::vector<core::Name> materials, lenses, pictures;
+		std::vector<core::Name> materials, lenses, pictures, passes;
+		(void)scene::DemandedPassShaders(store, passes);
 		(void)scene::DemandedSurfaceShaders(store, materials);
 		scene::DemandedLensShaders(store, lenses);
 		const auto grade = postProcessing ? scene::PostProcessShaderOf(store) : core::Name{};
-		const bool deviceChanged = renderer.PrepareShaders(library, materials, lenses, grade, owner);
+		const bool deviceChanged = renderer.PrepareShaders(library, materials, lenses, grade, owner, passes);
 		if (interface == nullptr) return deviceChanged;
 		gui::DemandedShaders(store, pictures);
 		const bool ownerChanged = interface->SetContentOwner(owner);

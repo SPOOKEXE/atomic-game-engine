@@ -34,6 +34,7 @@
 #include <engine/scene/content/Materials.hpp>
 #include <engine/scene/content/MeshCatalogue.hpp>
 #include <engine/scene/content/PublishedCatalogue.hpp>
+#include <engine/scene/content/RenderPasses.hpp>
 #include <engine/scene/content/ShaderLens.hpp>
 #include <engine/scene/content/Shaders.hpp>
 #include <engine/scene/content/SurfaceTable.hpp>
@@ -1137,6 +1138,36 @@ namespace engine::scene {
 		// the texture names came from whatever registered the materials this run,
 		// and a save file carrying last run's would be names that resolve to
 		// nothing on a machine with different content.
+		void WriteRenderPasses(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *passes = static_cast<const RenderPass *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteName(passes[index].Shader);
+				writer.WriteName(passes[index].Demand);
+				writer.WriteFloat(passes[index].Scale);
+				writer.WriteInt32(passes[index].Order);
+				for (const float value : passes[index].Parameters)
+					writer.WriteFloat(value);
+				writer.WriteUInt16(passes[index].ParameterMask);
+				writer.WriteBool(passes[index].Composite);
+				writer.WriteBool(passes[index].Enabled);
+			}
+		}
+
+		void ReadRenderPasses(core::ByteReader &reader, void *destination, size_t count) {
+			auto *passes = static_cast<RenderPass *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				passes[index].Shader = reader.ReadName();
+				passes[index].Demand = reader.ReadName();
+				passes[index].Scale = reader.ReadFloat();
+				passes[index].Order = reader.ReadInt32();
+				for (float &value : passes[index].Parameters)
+					value = reader.ReadFloat();
+				passes[index].ParameterMask = reader.ReadUInt16();
+				passes[index].Composite = reader.ReadBool();
+				passes[index].Enabled = reader.ReadBool();
+			}
+		}
+
 		void WriteMaterialLayers(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *layers = static_cast<const MaterialLayer *>(source);
 			for (size_t index = 0; index < count; index++) {
@@ -2126,6 +2157,7 @@ namespace engine::scene {
 		// than derived, so it is saved rather than reset.** A game that
 		// picked a look for its screen expects a reopened place to still
 		// have it.
+		ecs::Components::Register<RenderPass>("scene.RenderPass", WriteRenderPasses, ReadRenderPasses);
 		ecs::Components::Register<MaterialLayer>(
 			"scene.MaterialLayer", WriteMaterialLayers, ReadMaterialLayers
 		);
@@ -2554,6 +2586,7 @@ namespace engine::scene {
 		(void)ShaderScriptClass();
 		(void)ShaderModuleClass();
 		(void)MaterialLayerClass();
+		(void)RenderPassClass();
 		(void)LensShaderClass();
 		(void)EditableMeshClass();
 		(void)EditableImageClass();

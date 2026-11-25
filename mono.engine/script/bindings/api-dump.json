@@ -1066,6 +1066,20 @@
 			]
 		},
 		{
+			"name": "RenderPass",
+			"superclass": "Instance",
+			"tags": [],
+			"members": [
+				{"kind":"property","name":"Composite","type":"boolean","writable":true,"valueType":"bool","storage":"field"},
+				{"kind":"property","name":"Demand","type":"string","writable":true,"valueType":"Name","storage":"field"},
+				{"kind":"property","name":"Enabled","type":"boolean","writable":true,"valueType":"bool","storage":"field"},
+				{"kind":"property","name":"Order","type":"number","writable":true,"valueType":"int32","storage":"field"},
+				{"kind":"property","name":"Parameters","type":"string","writable":true,"valueType":"String","storage":"computed"},
+				{"kind":"property","name":"Scale","type":"number","writable":true,"valueType":"float","storage":"field"},
+				{"kind":"property","name":"Shader","type":"string","writable":true,"valueType":"Name","storage":"field"}
+			]
+		},
+		{
 			"name": "LensShader",
 			"superclass": "Instance",
 			"tags": [],
@@ -4442,7 +4456,7 @@
 			"name": "Instance",
 			"kind": "library",
 			"functions": [
-				{"name":"new","parameters":[{"name":"className","type":"(\"Accessory\" | \"Animation\" | \"AnimationBuffer\" | \"AnimationTrack\" | \"Animator\" | \"ArcHandles\" | \"Atmosphere\" | \"AtmosphereComponent\" | \"AtmosphereProcedural\" | \"Attachment\" | \"BallSocketConstraint\" | \"Beam\" | \"BillboardGui\" | \"BindableEvent\" | \"BloomEffect\" | \"Bone\" | \"BoolValue\" | \"BoxHandleAdornment\" | \"BreakGroup\" | \"CFrameValue\" | \"Camera\" | \"CanvasGroup\" | \"CloudCompute\" | \"CloudShadows\" | \"Color3Value\" | \"ConeHandleAdornment\" | \"CylinderHandleAdornment\" | \"CylindricalConstraint\" | \"Decal\" | \"DepthOfFieldEffect\" | \"DockWidgetPluginGui\" | \"EditableImage\" | \"EditableMesh\" | \"FaceInstance\" | \"FogEffect\" | \"Folder\" | \"Frame\" | \"GodRaysEffect\" | \"GpuParticleField\" | \"GravitationalLens\" | \"Handles\" | \"HingeConstraint\" | \"Humanoid\" | \"ImageButton\" | \"ImageGraph\" | \"ImageLabel\" | \"IntValue\" | \"LensShader\" | \"Light\" | \"LineHandleAdornment\" | \"LocalScript\" | \"LocalizationTable\" | \"Material\" | \"MaterialLayer\" | \"MeshPart\" | \"Model\" | \"ModuleScript\" | \"NodeCanvas\" | \"NodeCanvasGroup\" | \"NodeCanvasLink\" | \"NodeCanvasNode\" | \"NodeCanvasPort\" | \"NumberValue\" | \"ObjectValue\" | \"Part\" | \"ParticleEmitter\" | \"PhysicalParticleField\" | \"Player\" | \"PointLight\" | \"Portal\" | \"PrismaticConstraint\" | \"RemoteEvent\" | \"RigKeypoint\" | \"RopeConstraint\" | \"ScreenGui\" | \"Script\" | \"ScrollingFrame\" | \"SelectionBox\" | \"SelectionSphere\" | \"ShaderLens\" | \"ShaderModule\" | \"ShaderScript\" | \"SkinnedMeshPart\" | \"SkyboxCompute\" | \"SkyboxTextures\" | \"Sound\" | \"SoundGroup\" | \"SpawnLocation\" | \"SphereHandleAdornment\" | \"SpotLight\" | \"SpringConstraint\" | \"StarsEffect\" | \"StringValue\" | \"SurfaceCamera\" | \"SurfaceGui\" | \"SurfaceLight\" | \"Team\" | \"TextBox\" | \"TextButton\" | \"TextLabel\" | \"Texture\" | \"Tool\" | \"Trail\" | \"UIAnimation\" | \"UIAspectRatioConstraint\" | \"UIBinding\" | \"UICorner\" | \"UIDragDetector\" | \"UIFlexItem\" | \"UIGradient\" | \"UIGridLayout\" | \"UIListLayout\" | \"UIMask\" | \"UIModalScope\" | \"UIPadding\" | \"UIPageLayout\" | \"UIScale\" | \"UISizeConstraint\" | \"UIStroke\" | \"UIStyle\" | \"UITableLayout\" | \"UITextSizeConstraint\" | \"UITheme\" | \"UIVirtualCollection\" | \"Vector3Value\" | \"VectorField2D\" | \"VectorField3D\" | \"ViewportFrame\" | \"Volume\" | \"WeatherCompute\" | \"Weld\" | \"WeldConstraint\" | \"WorldModel\") & T"},{"name":"parent","type":"Instance?"}],"returns":"index<CreatableInstances, T>"}
+				{"name":"new","parameters":[{"name":"className","type":"(\"Accessory\" | \"Animation\" | \"AnimationBuffer\" | \"AnimationTrack\" | \"Animator\" | \"ArcHandles\" | \"Atmosphere\" | \"AtmosphereComponent\" | \"AtmosphereProcedural\" | \"Attachment\" | \"BallSocketConstraint\" | \"Beam\" | \"BillboardGui\" | \"BindableEvent\" | \"BloomEffect\" | \"Bone\" | \"BoolValue\" | \"BoxHandleAdornment\" | \"BreakGroup\" | \"CFrameValue\" | \"Camera\" | \"CanvasGroup\" | \"CloudCompute\" | \"CloudShadows\" | \"Color3Value\" | \"ConeHandleAdornment\" | \"CylinderHandleAdornment\" | \"CylindricalConstraint\" | \"Decal\" | \"DepthOfFieldEffect\" | \"DockWidgetPluginGui\" | \"EditableImage\" | \"EditableMesh\" | \"FaceInstance\" | \"FogEffect\" | \"Folder\" | \"Frame\" | \"GodRaysEffect\" | \"GpuParticleField\" | \"GravitationalLens\" | \"Handles\" | \"HingeConstraint\" | \"Humanoid\" | \"ImageButton\" | \"ImageGraph\" | \"ImageLabel\" | \"IntValue\" | \"LensShader\" | \"Light\" | \"LineHandleAdornment\" | \"LocalScript\" | \"LocalizationTable\" | \"Material\" | \"MaterialLayer\" | \"MeshPart\" | \"Model\" | \"ModuleScript\" | \"NodeCanvas\" | \"NodeCanvasGroup\" | \"NodeCanvasLink\" | \"NodeCanvasNode\" | \"NodeCanvasPort\" | \"NumberValue\" | \"ObjectValue\" | \"Part\" | \"ParticleEmitter\" | \"PhysicalParticleField\" | \"Player\" | \"PointLight\" | \"Portal\" | \"PrismaticConstraint\" | \"RemoteEvent\" | \"RenderPass\" | \"RigKeypoint\" | \"RopeConstraint\" | \"ScreenGui\" | \"Script\" | \"ScrollingFrame\" | \"SelectionBox\" | \"SelectionSphere\" | \"ShaderLens\" | \"ShaderModule\" | \"ShaderScript\" | \"SkinnedMeshPart\" | \"SkyboxCompute\" | \"SkyboxTextures\" | \"Sound\" | \"SoundGroup\" | \"SpawnLocation\" | \"SphereHandleAdornment\" | \"SpotLight\" | \"SpringConstraint\" | \"StarsEffect\" | \"StringValue\" | \"SurfaceCamera\" | \"SurfaceGui\" | \"SurfaceLight\" | \"Team\" | \"TextBox\" | \"TextButton\" | \"TextLabel\" | \"Texture\" | \"Tool\" | \"Trail\" | \"UIAnimation\" | \"UIAspectRatioConstraint\" | \"UIBinding\" | \"UICorner\" | \"UIDragDetector\" | \"UIFlexItem\" | \"UIGradient\" | \"UIGridLayout\" | \"UIListLayout\" | \"UIMask\" | \"UIModalScope\" | \"UIPadding\" | \"UIPageLayout\" | \"UIScale\" | \"UISizeConstraint\" | \"UIStroke\" | \"UIStyle\" | \"UITableLayout\" | \"UITextSizeConstraint\" | \"UITheme\" | \"UIVirtualCollection\" | \"Vector3Value\" | \"VectorField2D\" | \"VectorField3D\" | \"ViewportFrame\" | \"Volume\" | \"WeatherCompute\" | \"Weld\" | \"WeldConstraint\" | \"WorldModel\") & T"},{"name":"parent","type":"Instance?"}],"returns":"index<CreatableInstances, T>"}
 			],
 			"values": []
 		},
@@ -4889,6 +4903,7 @@
 				{"name":"Portal","type":"Portal"},
 				{"name":"PrismaticConstraint","type":"PrismaticConstraint"},
 				{"name":"RemoteEvent","type":"RemoteEvent"},
+				{"name":"RenderPass","type":"RenderPass"},
 				{"name":"RigKeypoint","type":"RigKeypoint"},
 				{"name":"RopeConstraint","type":"RopeConstraint"},
 				{"name":"ScreenGui","type":"ScreenGui"},

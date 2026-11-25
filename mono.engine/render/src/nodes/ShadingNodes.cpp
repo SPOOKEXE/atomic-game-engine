@@ -1164,6 +1164,133 @@ namespace engine::render {
 				}
 			}
 			return true;
+		}; // Passes scripts added, over the lit image.
+		const auto applyPasses = [&]() {
+			const auto &lighting = recording.CurrentLighting;
+			const size_t count = std::min(lighting.PassCount, lighting.Passes.size());
+			if (count == 0 || pbr.Lit == nullptr || pbr.LinearDepth == nullptr) return true;
+			const core::Name owner = State->ShaderOwnerOf(*recording.Request.Source, {});
+			const auto drawn = [&](core::Name shader) {
+				if (!shader.IsValid()) return true;
+				// A layer stack is named for the base it covers.
+				const std::string stack = "layers/" + std::string(shader.Text()) + "/";
+				for (uint32_t slot = recording.SceneCount;
+					 slot < recording.SceneCount + recording.PlainOpaque && slot < State->SlotShader.size();
+					 ++slot) {
+					const core::Name held = State->SlotShader[slot];
+					if (held == shader || (held.IsValid() && held.Text().starts_with(stack))) return true;
+				}
+				return false;
+			};
+			struct Run {
+				const scene::ResolvedPass *Pass;
+				const Impl::PassVariant *Variant;
+			};
+			std::vector<Run> runs;
+			for (size_t index = 0; index < count; ++index) {
+				const auto found =
+					State->PassPipelines.find(Impl::ShaderVariantKey(lighting.Passes[index].Shader, owner));
+				if (found != State->PassPipelines.end() && drawn(lighting.Passes[index].Demand))
+					runs.push_back({&lighting.Passes[index], &found->second});
+			}
+			if (runs.empty()) return true;
+			ENGINE_PROFILE_CAT("authored passes", core::ProfileCategory::Render);
+			const uint32_t width = pbrDimensions.LitWidth, height = pbrDimensions.LitHeight;
+			for (SDL_GPUTexture **texture : {&pbr.PassColour, &pbr.PassScratch[0], &pbr.PassScratch[1]}) {
+				if (*texture != nullptr) continue;
+				SDL_GPUTextureCreateInfo info{};
+				info.type = SDL_GPU_TEXTURETYPE_2D;
+				info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+				info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+				info.width = width;
+				info.height = height;
+				info.layer_count_or_depth = 1;
+				info.num_levels = 1;
+				info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+				*texture = gpu::CreateTexture(State->Device, &info);
+				if (*texture == nullptr) return true;
+			}
+			struct PassUniforms {
+				glm::vec4 Target;
+				glm::vec4 Scale;
+				glm::vec4 View;
+				glm::vec4 Parameters[4];
+				glm::vec4 ParameterState;
+			} values{};
+			values.Target = {float(width), float(height), 1.0f / float(width), 1.0f / float(height)};
+			values.Scale = {1.0f, 1.0f, uniforms.Target.z, uniforms.Target.w};
+			values.View = {
+				static_cast<float>(std::fmod(State->AnimationSeconds, 1000.0)),
+				float(height) * 0.5f * recording.Matrices.Projection[1][1],
+				uniforms.Planes.y,
+				0.0f
+			};
+			bool colourCurrent = false;
+			size_t previous = 0;
+			bool havePrevious = false;
+			for (const Run &run : runs) {
+				if (!colourCurrent) {
+					SDL_GPUBlitInfo copy{};
+					copy.source.texture = pbr.Lit;
+					copy.source.w = width;
+					copy.source.h = height;
+					copy.destination.texture = pbr.PassColour;
+					copy.destination.w = width;
+					copy.destination.h = height;
+					copy.load_op = SDL_GPU_LOADOP_DONT_CARE;
+					copy.filter = SDL_GPU_FILTER_NEAREST;
+					SDL_BlitGPUTexture(Command, &copy);
+					colourCurrent = true;
+				}
+				const scene::ResolvedPass &pass = *run.Pass;
+				const float scale = pass.Composite ? 1.0f : std::clamp(pass.Scale, 0.125f, 1.0f);
+				const uint32_t drawWidth = std::max(1u, uint32_t(std::ceil(float(width) * scale)));
+				const uint32_t drawHeight = std::max(1u, uint32_t(std::ceil(float(height) * scale)));
+				std::copy(
+					pass.Parameters.begin(),
+					pass.Parameters.end(),
+					reinterpret_cast<float *>(values.Parameters)
+				);
+				values.ParameterState.x = static_cast<float>(pass.ParameterMask);
+				const size_t next = havePrevious ? 1 - previous : 0;
+				SDL_GPUTexture *const target = pass.Composite ? pbr.Lit : pbr.PassScratch[next];
+				const SDL_GPUTextureSamplerBinding bindings[]{
+					{pbr.PassColour, sampler},
+					{havePrevious ? pbr.PassScratch[previous] : State->FallbackTexture, sampler},
+					{pbr.LinearDepth, sampler},
+					{pbr.Normal, sampler},
+					{pbr.Albedo, sampler},
+					{pbr.Emissive, sampler},
+				};
+				recording.EnterNamedPass(context.Name);
+				SDL_GPUColorTargetInfo colour{};
+				colour.texture = target;
+				colour.load_op = pass.Composite ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
+				colour.store_op = SDL_GPU_STOREOP_STORE;
+				SDL_GPURenderPass *draw = SDL_BeginGPURenderPass(Command, &colour, 1, nullptr);
+				if (draw == nullptr) return false;
+				SDL_BindGPUGraphicsPipeline(
+					draw, pass.Composite ? run.Variant->Composite : run.Variant->Scratch
+				);
+				SDL_BindGPUFragmentSamplers(draw, 0, bindings, std::size(bindings));
+				SDL_PushGPUFragmentUniformData(Command, 0, &values, sizeof(values));
+				const SDL_GPUViewport viewport{0.0f, 0.0f, float(drawWidth), float(drawHeight), 0.0f, 1.0f};
+				const SDL_Rect scissor{0, 0, int(drawWidth), int(drawHeight)};
+				SDL_SetGPUViewport(draw, &viewport);
+				SDL_SetGPUScissor(draw, &scissor);
+				SDL_DrawGPUPrimitives(draw, 3, 1, 0, 0);
+				SDL_EndGPURenderPass(draw);
+				core::Metrics::Count("render.authored_passes", 1);
+				if (pass.Composite) {
+					colourCurrent = false;
+				} else {
+					previous = next;
+					havePrevious = true;
+					values.Scale.x = float(drawWidth) / float(width);
+					values.Scale.y = float(drawHeight) / float(height);
+				}
+			}
+			return true;
 		};
 
 		if (baselinePort != node->WritePorts.end()) {
@@ -1431,6 +1558,7 @@ namespace engine::render {
 				}
 			}
 			if (!emptyLighting && !applyLocalShadowCorrections()) return false;
+			if (!emptyLighting && !applyPasses()) return false;
 			if (emptyLighting && blackSkyLit) recording.BlackSkyLit = pbr.Lit;
 			return true;
 		}
@@ -1464,7 +1592,7 @@ namespace engine::render {
 			SDL_FColor{State->FogColour.r, State->FogColour.g, State->FogColour.b, 1.0f},
 			&State->Beams
 		);
-		return applyLocalShadowCorrections();
+		return applyLocalShadowCorrections() && applyPasses();
 	}
 
 	bool ViewRecording::RecordNodeWeatherResidency(const graph::RunContext &context) {

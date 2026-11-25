@@ -314,7 +314,10 @@ namespace engine::render {
 				const bool changed = ApplySourceCompilation(module, std::move(result), text, name);
 				module.AttemptCodeHash = codeHash;
 				module.AttemptModuleStamp = moduleStamp;
-				if (changed && module.Error.empty()) module.GBufferSpirV = std::move(gbuffer.SpirV);
+				if (changed && module.Error.empty()) {
+					module.GBufferSpirV = std::move(gbuffer.SpirV);
+					module.Pass = assembled.Pass;
+				}
 				scene::SetShaderError(store, text.Source, module.AttemptError);
 				if (changed) State->Changed.push_back(name);
 				continue;

@@ -143,6 +143,7 @@ namespace engine::render {
 	std::optional<std::string_view> EngineShaderModule(std::string_view name) {
 		if (name == "engine/surface") return ENGINE_SURFACE_GLSL;
 		if (name == "engine/brdf") return ENGINE_BRDF_GLSL;
+		if (name == "engine/pass") return ENGINE_PASS_GLSL;
 		return std::nullopt;
 	}
 
@@ -152,8 +153,9 @@ namespace engine::render {
 		const std::string code = WithoutComments(source);
 		const bool main = Declares(code, "void", "main");
 		result.Surface = !main && Declares(code, "void", "Surface");
+		result.Pass = !main && !result.Surface && Declares(code, "vec4", "Pass");
 		result.Lit = result.Surface && Declares(code, "vec3", "Light");
-		Expansion expansion{.Modules = modules, .Surface = result.Surface};
+		Expansion expansion{.Modules = modules, .Surface = result.Surface || result.Pass};
 		const std::string label = name.empty() ? std::string("shader") : std::string(name);
 		if (!expansion.Append(label, source)) {
 			result.Error = std::move(expansion.Error);
@@ -162,7 +164,7 @@ namespace engine::render {
 		// A Light can live in a module the script includes.
 		if (result.Surface && !result.Lit)
 			result.Lit = Declares(WithoutComments(expansion.Out), "vec3", "Light");
-		if (!result.Surface) {
+		if (!result.Surface && !result.Pass) {
 			if (expansion.Seen.empty()) {
 				result.Forward = std::string(source);
 			} else {
@@ -181,6 +183,10 @@ namespace engine::render {
 		const scene::MaterialLayout layout = scene::ParseMaterialLayout(source);
 		if (!layout.Error.empty()) {
 			result.Error = label + ":" + layout.Error;
+			return result;
+		}
+		if (result.Pass && !layout.Textures.empty()) {
+			result.Error = label + ": a pass has no textures of its own";
 			return result;
 		}
 		std::string declared;
@@ -206,6 +212,18 @@ namespace engine::render {
 									 std::string("xyzw").substr(parameter.Offset % 4, parameter.Components);
 			declared += type + " " + parameter.Name + " = (int(lighting.ParameterState.x + 0.5) >> " +
 						std::to_string(parameter.Offset) + " & 1) != 0 ? " + from + " : " + fallback + ");\n";
+		}
+		if (result.Pass) {
+			result.Forward = "#version 450\n#extension GL_GOOGLE_cpp_style_line_directive : require\n";
+			result.Forward += ENGINE_PASS_GLSL;
+			result.Forward += declared;
+			result.Forward += expansion.Out;
+			result.Forward += "\n#line 1 \"engine/pass\"\nvoid main() {\n"
+							  "	PassInput i;\n	i.UV = inUv;\n	i.Texel = lighting.Target.zw;\n"
+							  "	i.Depth = Depth(inUv);\n"
+							  "	i.PixelsPerUnit = lighting.View.y / max(i.Depth, 1e-4);\n"
+							  "	i.Time = lighting.View.x;\n	outColour = Pass(i);\n}\n";
+			return result;
 		}
 		const auto wrap = [&](bool gbuffer) {
 			std::string text = "#version 450\n#extension GL_GOOGLE_cpp_style_line_directive : require\n";

@@ -25,6 +25,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/content/MaterialLayers.hpp>
+#include <engine/scene/content/RenderPasses.hpp>
 #include <engine/scene/content/Shaders.hpp>
 #include <engine/scene/editable/EditableImage.hpp>
 #include <engine/scene/editable/EditableMesh.hpp>
@@ -5858,6 +5859,7 @@ int main(int argc, char **argv) {
 	(void)engine::scene::ShaderScriptClass();
 	(void)engine::scene::ShaderModuleClass();
 	(void)engine::scene::MaterialLayerClass();
+	(void)engine::scene::RenderPassClass();
 	(void)engine::scene::LensShaderClass();
 	(void)engine::scene::EditableMeshClass();
 	(void)engine::scene::EditableImageClass();

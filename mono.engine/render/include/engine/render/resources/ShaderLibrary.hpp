@@ -82,6 +82,9 @@ namespace engine::render {
 		// program, which is drawn lit before that pass.
 		std::vector<uint32_t> GBufferSpirV;
 
+		// Whether this is a `Pass`, which `Renderer::AddPassShader` takes.
+		bool Pass = false;
+
 		// Identity of accepted words, independent of source identity and revision.
 		// Zero when no program is accepted; failed edits preserve this with SpirV.
 		assets::ContentHash CodeHash;

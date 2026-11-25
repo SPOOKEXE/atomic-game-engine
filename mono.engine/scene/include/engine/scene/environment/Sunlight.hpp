@@ -22,6 +22,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/scene/Volume.hpp>
 #include <engine/scene/content/RenderFeatures.hpp>
+#include <engine/scene/content/RenderPasses.hpp>
 #include <engine/scene/content/ShaderLens.hpp>
 #include <engine/scene/environment/Atmosphere.hpp>
 #include <engine/scene/environment/LightingEffects.hpp>
@@ -99,6 +100,10 @@ namespace engine::scene {
 		// Whether ambient occlusion traces at half resolution and upsamples by
 		// depth, from `Lighting.AmbientOcclusionQuality`.
 		bool HalfResolutionAmbientOcclusion = false;
+
+		// Passes a script added over the lit image, in order.
+		std::array<ResolvedPass, MAX_RENDER_PASSES> Passes{};
+		size_t PassCount = 0;
 
 		// Where the distance fade starts and becomes complete, in metres. The
 		// far default range keeps a world without FogEffect clear in normal views.

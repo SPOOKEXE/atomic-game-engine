@@ -1073,6 +1073,13 @@ namespace engine::render {
 		// @since v0.10
 		bool DropTexture(const core::Name &name, core::Name owner = {});
 
+		// Builds an authored `Pass` for drawing over the lit image. Same rules for
+		// replacing and refusing as `AddShader`.
+		bool AddPassShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner = {});
+
+		// Whether a pass of that name is ready.
+		bool HasPassShader(const core::Name &name, core::Name owner = {}) const;
+
 		// Registers a fragment shader under a name a draw instance can select.
 		//
 		// **The words are already SPIR-V.** Where they came from is the caller's
@@ -1214,7 +1221,8 @@ namespace engine::render {
 			std::span<const core::Name> materials,
 			std::span<const core::Name> lenses,
 			core::Name postProcess,
-			core::Name owner = {}
+			core::Name owner = {},
+			std::span<const core::Name> passes = {}
 		);
 
 		// Selects this shader in place of the engine tonemap for one content owner.

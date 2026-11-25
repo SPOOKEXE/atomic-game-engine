@@ -78,6 +78,7 @@
 #include <engine/scene/characters/Controls.hpp>
 #include <engine/scene/characters/Skinning.hpp>
 #include <engine/scene/content/MaterialLayout.hpp>
+#include <engine/scene/content/RenderPasses.hpp>
 #include <engine/scene/content/Shaders.hpp>
 #include <engine/scene/content/TileSets.hpp>
 #include <engine/scene/editable/EditableImage.hpp>
@@ -769,24 +770,53 @@ namespace engine::script {
 			}
 		}
 
+		// The numbers argument 1 holds for `parameter`, or none to clear it.
+		size_t ReadMaterialValue(
+			ScriptCall &call, const scene::MaterialParameter &parameter, std::array<float, 4> &values
+		) {
+			if (call.IsNil(1)) return 0;
+			ecs::AttributeValue value;
+			call.ReadAttribute(1, value);
+			const size_t count = MaterialValueOf(value, values);
+			if (count != parameter.Components)
+				call.Raise(("'" + parameter.Name + "' takes " + std::to_string(parameter.Components) +
+							" number(s)")
+							   .c_str());
+			return count;
+		}
+
+		// `SetMaterialParameter` on a RenderPass.
+		void SetPassParameter(ScriptCall &call, const std::string &name, const scene::RenderPass &pass) {
+			const scene::ShaderText text = scene::ShaderTextOf(call.World(), pass.Shader);
+			if (!text.Found) call.Raise("the pass names no ShaderScript");
+			const scene::MaterialLayout layout = scene::ParseMaterialLayout(text.Code);
+			const scene::MaterialParameter *parameter = layout.Find(name);
+			if (parameter == nullptr) call.Raise(("the shader declares no parameter '" + name + "'").c_str());
+			std::array<float, 4> values{};
+			const size_t count = ReadMaterialValue(call, *parameter, values);
+			scene::SurfaceAppearance held;
+			std::copy(
+				std::begin(pass.Parameters), std::end(pass.Parameters), std::begin(held.MaterialParameters)
+			);
+			held.MaterialParameterMask = pass.ParameterMask;
+			scene::SetMaterialParameter(held, *parameter, values.data(), count);
+			const std::string encoded = scene::FormatMaterialParameters(held);
+			WriteMaterialProperty(call, call.Subject(), "Parameters", &encoded, sizeof(encoded));
+		}
+
 		// `part:SetMaterialParameter(name, value)`: one value its shader declared with
 		// `#pragma parameter`. Nil goes back to the shader's default.
 		void SetMaterialParameter(ScriptCall &call) {
 			const std::string name = call.AsString(0);
+			if (const auto *pass = call.World().Get<scene::RenderPass>(call.Subject())) {
+				SetPassParameter(call, name, *pass);
+				return;
+			}
 			const auto [part, layout] = MaterialSubject(call);
 			const scene::MaterialParameter *parameter = layout.Find(name);
 			if (parameter == nullptr) call.Raise(("the shader declares no parameter '" + name + "'").c_str());
 			std::array<float, 4> values{};
-			size_t count = 0;
-			if (!call.IsNil(1)) {
-				ecs::AttributeValue value;
-				call.ReadAttribute(1, value);
-				count = MaterialValueOf(value, values);
-				if (count != parameter->Components)
-					call.Raise(("'" + name + "' takes " + std::to_string(parameter->Components) +
-								" number(s)")
-								   .c_str());
-			}
+			const size_t count = ReadMaterialValue(call, *parameter, values);
 			scene::SurfaceAppearance appearance = *call.World().Get<scene::SurfaceAppearance>(part);
 			scene::SetMaterialParameter(appearance, *parameter, values.data(), count);
 			const std::string encoded = scene::FormatMaterialParameters(appearance);

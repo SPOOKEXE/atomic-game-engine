@@ -525,6 +525,18 @@ namespace engine::render {
 			signature = FoldPresentation(signature, lighting.RenderFeatures.Enable);
 			signature = FoldPresentation(signature, lighting.RenderFeatures.Disable);
 			signature = FoldPresentation(signature, lighting.HalfResolutionAmbientOcclusion ? 1u : 0u);
+			signature = FoldPresentation(signature, lighting.PassCount);
+			for (size_t index = 0; index < lighting.PassCount; ++index) {
+				const auto &pass = lighting.Passes[index];
+				signature = FoldPresentation(signature, pass.Shader.Id());
+				signature = FoldPresentation(signature, pass.Demand.Id());
+				signature = FoldPresentation(
+					signature, (pass.Composite ? 1u : 0u) | uint32_t(pass.ParameterMask) << 1u
+				);
+				signature = FoldPresentationObject(signature, pass.Scale);
+				for (const float value : pass.Parameters)
+					signature = FoldPresentationObject(signature, value);
+			}
 			const size_t volumeCount = std::min(lighting.VolumeCount, lighting.Volumes.size());
 			signature = FoldPresentation(signature, volumeCount);
 			for (const auto &volume : std::span(lighting.Volumes).first(volumeCount))
