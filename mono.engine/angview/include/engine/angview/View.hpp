@@ -115,6 +115,8 @@ namespace engine::angview {
 		}
 		// The graph was replaced or edited outside the view.
 		void GraphChanged();
+		// NodeTitle or NodeImages would now answer differently; lays out again.
+		void VisualsChanged();
 
 		// --- Input, view-space pixels ---------------------------------------------------------
 		// Each returns true when the view consumed the event.
@@ -176,6 +178,14 @@ namespace engine::angview {
 		// Fits the selection, or every node, in the viewport.
 		void Frame();
 
+		// Puts the selected nodes in a new group, as one edit. The group has no
+		// size, so it frames its members wherever they move. Returns its id, or
+		// empty when nothing is selected.
+		std::string GroupSelection(std::string label);
+		// Graph-space frame of a group: its own Position and Size, or, when Size
+		// is zero, its members' bounds with room for the label above them.
+		Rect GroupFrame(const ang::Group &group);
+
 		// Opens the palette at a view position, unfiltered by type.
 		void OpenPalette(core::Vector2 view);
 		void ClosePalette();
@@ -210,6 +220,16 @@ namespace engine::angview {
 		// Replaces painting: the function receives the default list and may edit or
 		// replace it. Scripts use this to restyle or draw their own.
 		std::function<void(DrawList &, const View &)> CustomPaint{};
+
+		// Host title per node; empty keeps the definition label.
+		std::function<std::string(const ang::NodeInstance &)> NodeTitle{};
+		// Host picture per node, drawn below its ports at its aspect. The painter
+		// resolves the handle. Call VisualsChanged() when the answer changes.
+		std::function<NodeImage(const ang::NodeInstance &)> NodeImages{};
+
+		// Header colour per node; no value keeps Theme::NodeHeader. Hosts use it
+		// to tint headers by category.
+		std::function<std::optional<Rgba>(const ang::NodeInstance &)> NodeHeader{};
 
 		// Host geometry. When set, the view never lays nodes out from the theme:
 		// the source fills the layout, in graph space, every time the view needs

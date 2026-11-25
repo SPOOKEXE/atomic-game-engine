@@ -1,13 +1,16 @@
 #include <engine/core/FrameGraph.hpp>
 #include <engine/graph/ExecutionPlan.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
+#include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/ui/Metrics.hpp>
+#include <engine/ui/NodeGraphPainter.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <functional>
 #include <imgui.h>
 #include <string_view>
 #include <studio/Editor.hpp>
@@ -16,6 +19,18 @@
 namespace studio {
 
 	namespace {
+		// Microseconds for a pass from a renderer timing table, by name then kind.
+		template <typename Timings>
+		double RenderPassTiming(const Timings &timings, const engine::graph::ProfilePass &pass) {
+			if (const auto named = timings.find(pass.Name.Id()); named != timings.end()) {
+				return named->second;
+			}
+			if (const auto kind = timings.find(pass.Kind.Id()); kind != timings.end()) {
+				return kind->second;
+			}
+			return 0.0;
+		}
+
 		bool ContainsInsensitive(std::string text, std::string wanted) {
 			for (char &letter : text) {
 				letter = static_cast<char>(std::tolower(static_cast<unsigned char>(letter)));
@@ -86,7 +101,10 @@ namespace studio {
 					RenderPipelineName = {};
 					RenderPipelineBasis = engine::graph::DefaultPbrDocument();
 					LoadRenderPipelineGraph(RenderPipelineBasis, RenderPipelineGraph, RenderPipelineStatus);
-					RenderPipelineCanvas.Fit(RenderPipelineGraph);
+					RenderPipelineHistory.Clear();
+					RenderPipelineCanvas->Select({});
+					RenderPipelineCanvas->GraphChanged();
+					RenderPipelineFrameWanted = true;
 					RenderPipelineDirty = true;
 					RenderPipelineNewName[0] = '\0';
 					RenderPipelineSaveAsWanted = true;
@@ -103,8 +121,23 @@ namespace studio {
 				SaveRenderPipeline();
 			}
 			ImGui::EndDisabled();
+			if (ImGui::BeginMenu("Edit")) {
+				if (ImGui::MenuItem("Undo", nullptr, false, RenderPipelineHistory.CanUndo())) {
+					UndoRenderPipeline();
+				}
+				if (ImGui::MenuItem("Redo", nullptr, false, RenderPipelineHistory.CanRedo())) {
+					RedoRenderPipeline();
+				}
+				ImGui::Separator();
+				if (ImGui::MenuItem(
+						"Group Selection", nullptr, false, !RenderPipelineCanvas->Selection().empty()
+					)) {
+					RenderPipelineCanvas->GroupSelection("group");
+				}
+				ImGui::EndMenu();
+			}
 			if (ImGui::MenuItem("Fit")) {
-				RenderPipelineCanvas.Fit(RenderPipelineGraph);
+				RenderPipelineCanvas->Frame();
 			}
 			ImGui::Separator();
 			ImGui::TextUnformatted("Preview");
@@ -149,9 +182,9 @@ namespace studio {
 		const float side = engine::ui::Scaled(280.0f);
 		const ImVec2 room = ImGui::GetContentRegionAvail();
 		if (ImGui::BeginChild("##render-pipeline-canvas", ImVec2(std::max(room.x - side, side), room.y))) {
-			RenderPipelinePreviewEvaluator.Run(RenderPipelineGraph);
-			RenderPipelinePreviewTextures.clear();
-			RenderPipelinePreviewAspects.clear();
+			std::unordered_map<uint64_t, void *> textures;
+			std::unordered_map<uint64_t, float> aspects;
+			std::unordered_map<std::string, uint64_t> handles;
 			const double previewNow = Clock.Now();
 			const bool refreshPreviews = previewNow >= RenderPipelinePreviewNext;
 			if (refreshPreviews) {
@@ -172,16 +205,17 @@ namespace studio {
 				) &&
 				engine::graph::Build(previewDocument, previewGraph, previewOffender) ==
 					engine::graph::PipelineDocumentStatus::Ok) {
-				for (size_t index = 0; index < RenderPipelineGraph.Nodes().size(); index++) {
-					const nodegraph::Node &canvasNode = RenderPipelineGraph.Nodes()[index];
-					const nodegraph::NodeType *canvasType = nodegraph::NodeTypes::Find(canvasNode.Type);
+				const auto canvasNodes = RenderPipelineGraph.Nodes();
+				for (size_t index = 0; index < canvasNodes.size(); index++) {
+					const engine::ang::NodeInstance &canvasNode = canvasNodes[index];
+					const std::string previewPort = RenderPipelinePreviewPort(canvasNode.Def);
 					const engine::graph::Node *renderNode =
 						previewGraph.Find(engine::graph::NodeId{static_cast<uint32_t>(index + 1)});
-					if (canvasType == nullptr || canvasType->PreviewPort.empty() || renderNode == nullptr) {
+					if (previewPort.empty() || renderNode == nullptr) {
 						continue;
 					}
-					const auto previewEnabled = canvasNode.Widgets.find("preview.enabled");
-					if (previewEnabled == canvasNode.Widgets.end() || !previewEnabled->second.Flag) {
+					const engine::ang::Value enabled = RenderPipelineParam(canvasNode, "preview.enabled");
+					if (enabled.Get<bool>() == nullptr || !*enabled.Get<bool>()) {
 						continue;
 					}
 					const engine::graph::NodeKindSpec *kind =
@@ -193,7 +227,7 @@ namespace studio {
 						kind->Outputs.begin(),
 						kind->Outputs.end(),
 						[&](const engine::graph::PortSpec &output) {
-							return output.Name.Text() == canvasType->PreviewPort;
+							return output.Name.Text() == previewPort;
 						}
 					);
 					const size_t output = static_cast<size_t>(port - kind->Outputs.begin());
@@ -203,12 +237,13 @@ namespace studio {
 					const engine::graph::ResourceDesc *resource =
 						previewGraph.FindResourceDesc(renderNode->Writes[output]);
 					if (resource != nullptr && refreshPreviews && previewSourceReady) {
-						const auto reverse = canvasNode.Widgets.find("preview.reverse-spectrum");
+						const engine::ang::Value reverse =
+							RenderPipelineParam(canvasNode, "preview.reverse-spectrum");
 						Renderer.RefreshResourcePreview(
 							RenderPipelineInstalledName,
 							resource->Name,
 							previewSlot,
-							reverse != canvasNode.Widgets.end() && reverse->second.Flag
+							reverse.Get<bool>() != nullptr && *reverse.Get<bool>()
 						);
 					}
 					void *texture = resource == nullptr
@@ -217,17 +252,61 @@ namespace studio {
 											  RenderPipelineInstalledName, resource->Name, previewSlot
 										  );
 					if (texture != nullptr) {
-						const uint64_t key = nodegraph::PictureKey(
-							RenderPipelinePreviewEvaluator.RanAt(canvasNode.Id), canvasType->PreviewPort
-						);
-						RenderPipelinePreviewTextures[key] = texture;
-						RenderPipelinePreviewAspects[key] = Renderer.ResourcePreviewAspect(
+						// Handles are stable per node so the painter can resolve them every frame.
+						const uint64_t handle = index + 1;
+						handles[canvasNode.Id] = handle;
+						textures[handle] = texture;
+						aspects[handle] = Renderer.ResourcePreviewAspect(
 							RenderPipelineInstalledName, resource->Name, previewSlot
 						);
 					}
 				}
+				if (refreshPreviews) {
+					engine::graph::CompiledGraph compiled;
+					engine::core::Name compileOffender;
+					if (previewGraph.Compile(compiled, compileOffender) == engine::graph::GraphStatus::Ok) {
+						const uint32_t width = WorldTarget.IsValid() ? WorldTarget.Width : 1920;
+						const uint32_t height = WorldTarget.IsValid() ? WorldTarget.Height : 1080;
+						engine::graph::PipelineProfile profile =
+							engine::graph::ProfilePipeline(previewGraph, compiled, width, height);
+						for (engine::graph::ProfilePass &pass : profile.Passes) {
+							pass.Elapsed = RenderPassTiming(Renderer.PassTimings(), pass);
+							pass.Wall = RenderPassTiming(Renderer.PassWallTimes(), pass);
+						}
+						engine::ang::Plan plan;
+						engine::ang::RunReport report;
+						RenderPipelineFeedback(RenderPipelineGraph, previewGraph, profile, plan, report);
+						RenderPipelineCanvas->SetRunReport(plan, report);
+					}
+				}
 			}
-			RenderPipelineCanvas.Draw(RenderPipelineGraph);
+			// A picture appearing, leaving or changing shape changes node sizes.
+			if (handles != RenderPipelinePreviewHandles || aspects != RenderPipelinePreviewAspects) {
+				RenderPipelinePreviewHandles = std::move(handles);
+				RenderPipelinePreviewAspects = std::move(aspects);
+				RenderPipelineCanvas->VisualsChanged();
+			}
+			RenderPipelinePreviewTextures = std::move(textures);
+			const ImVec2 canvasSize = ImGui::GetContentRegionAvail();
+			RenderPipelineCanvas->SetViewport({canvasSize.x, canvasSize.y});
+			if (RenderPipelineFrameWanted) {
+				RenderPipelineCanvas->Frame();
+				RenderPipelineFrameWanted = false;
+			}
+			engine::ui::NodeGraphCanvas(
+				"##render-pipeline-graph", *RenderPipelineCanvas, {0.0f, 0.0f}, [this](uint64_t handle) {
+					const auto found = RenderPipelinePreviewTextures.find(handle);
+					return found == RenderPipelinePreviewTextures.end()
+							   ? ImTextureID{}
+							   : reinterpret_cast<ImTextureID>(found->second);
+				}
+			);
+			std::vector<engine::ang::EditRecord> records = RenderPipelineCanvas->TakeEdits();
+			if (!records.empty()) {
+				RenderPipelineHistory.Record(std::move(records));
+				RenderPipelineEditing.clear();
+				RenderPipelineDirty = true;
+			}
 		}
 		ImGui::EndChild();
 
@@ -303,12 +382,14 @@ namespace studio {
 			if (ImGui::Selectable(
 					title.c_str(), false, capability.Accepted() ? 0 : ImGuiSelectableFlags_Disabled
 				)) {
-				const nodegraph::NodeId made =
-					RenderPipelineGraph.Add("render.pass." + std::string(spec.Kind.Text()), 0.0f, 0.0f);
-				if (made != nodegraph::NO_NODE) {
-					RenderPipelineCanvas.Select(made);
-					RenderPipelineCanvas.Centre(RenderPipelineGraph, made);
-					RenderPipelineDirty = true;
+				const std::string def = "render.pass." + std::string(spec.Kind.Text());
+				const std::string made = RenderPipelineGraph.NewNodeId(def);
+				const engine::core::Vector2 centre =
+					RenderPipelineCanvas->ToGraph(RenderPipelineCanvas->Viewport() * 0.5f);
+				if (ApplyRenderPipelineEdit(
+						engine::ang::edit::AddNode{{.Id = made, .Def = def, .Position = centre}}
+					)) {
+					RenderPipelineCanvas->Select({made});
 				}
 			}
 			if (ImGui::IsItemHovered()) {

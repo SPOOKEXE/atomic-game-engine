@@ -1094,22 +1094,19 @@ namespace studio {
 		ImGui::Spacing();
 		ImGui::SeparatorText("Dispatch");
 
-		// The engine pool, world lanes and render pipeline preview are independently
-		// selectable domains. The master includes all three.
+		// The engine pool and world lanes are independently selectable domains.
+		// The master includes both.
 		bool engineSerial = engine::parallel::ForceSerialCompute();
 		bool worldsSerial = Universe->Settings().Mode == engine::world::ExecutionMode::WorldSerial;
-		bool renderPreviewSerial = RenderPipelinePreviewEvaluator.IsSerial();
-		bool serial = engineSerial && worldsSerial && renderPreviewSerial;
+		bool serial = engineSerial && worldsSerial;
 		if (ImGui::Checkbox("Force all serial compute", &serial)) {
 			engine::parallel::SetForceSerialCompute(serial);
 			Universe->SetMode(
 				serial ? engine::world::ExecutionMode::WorldSerial
 					   : engine::world::ExecutionMode::WorldParallel
 			);
-			RenderPipelinePreviewEvaluator.SetSerial(serial);
 			engineSerial = serial;
 			worldsSerial = serial;
-			renderPreviewSerial = serial;
 			Modified = true;
 			Say(serial ? "every compute dispatch now runs on the thread that asked"
 					   : "parallel dispatch restored");
@@ -1140,9 +1137,6 @@ namespace studio {
 							 : engine::world::ExecutionMode::WorldParallel
 			);
 			Modified = true;
-		}
-		if (ImGui::Checkbox("Render pipeline preview", &renderPreviewSerial)) {
-			RenderPipelinePreviewEvaluator.SetSerial(renderPreviewSerial);
 		}
 		ImGui::Unindent();
 

@@ -95,6 +95,10 @@ namespace engine::ang {
 			core::Vector2 Position{};
 			core::Vector2 Size{};
 		};
+		struct SetGroupLabel {
+			std::string Group{};
+			std::string Label{};
+		};
 	}
 
 	using Edit = std::variant<
@@ -108,7 +112,8 @@ namespace engine::ang {
 		edit::RemoveLink,
 		edit::AddGroup,
 		edit::RemoveGroup,
-		edit::SetGroupFrame>;
+		edit::SetGroupFrame,
+		edit::SetGroupLabel>;
 
 	// What an applied edit did and the edits that undo it, in the order to apply them.
 	struct EditRecord {

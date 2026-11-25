@@ -118,7 +118,7 @@ runtime has an executor, a second non-render consumer, bounded real-time
 execution rules, and evidence that migration removes code rather than wrapping
 it.
 
-Studio may reuse its nodegraph widget as a view. The saved audio graph schema
+Studio may reuse `angview` and its ImGui painter as a view. The saved audio graph schema
 and compiler remain engine-owned data and are not Qt objects.
 
 ## Non-negotiable rules

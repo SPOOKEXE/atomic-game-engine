@@ -2,6 +2,8 @@
 
 #include <engine/testing/Suite.hpp>
 
+#include <algorithm>
+
 TEST_SUITE_ID("engine.angview.view")
 TEST_DEPENDS("engine.angview.layout")
 TEST_DEPENDS("engine.ang.compile")
@@ -485,4 +487,115 @@ TEST_CASE("Ctrl+D duplicates the selection and the links inside it", "[angview][
 	REQUIRE(copy != nullptr);
 	CHECK(copy->Position.Y == 24.0f);
 	CHECK(view.TakeEdits().size() == 1);
+}
+
+TEST_CASE("host titles and pictures decorate the theme layout", "[angview][view]") {
+	Scene scene;
+	View &view = *scene.Canvas;
+	const float plain = view.Geometry().Find("one")->Bounds.Max.Y;
+	float aspect = 2.0f;
+	view.NodeTitle = [](const engine::ang::NodeInstance &node) {
+		return node.Id == "one" ? std::string("first pass") : std::string();
+	};
+	view.NodeImages = [&](const engine::ang::NodeInstance &node) {
+		return node.Id == "one" ? NodeImage{.Handle = 7, .Aspect = aspect} : NodeImage{};
+	};
+	view.VisualsChanged();
+	const NodeLayout *one = view.Geometry().Find("one");
+	CHECK(one->Title == "first pass");
+	CHECK(view.Geometry().Find("add")->Title == "Add");
+	// Inner width 148 at aspect 2 is 74 tall, plus one padding below it.
+	CHECK(one->Image == 7);
+	CHECK(one->ImageBounds.Max.Y - one->ImageBounds.Min.Y == 74.0f);
+	CHECK(one->Bounds.Max.Y == plain + 80.0f);
+	const DrawList &list = view.Paint();
+	CHECK(tests::HasText(list, "first pass"));
+	CHECK(std::any_of(list.begin(), list.end(), [](const DrawCommand &command) {
+		return command.Kind == DrawKind::Image && command.Image == 7;
+	}));
+	// A new aspect shows only after the host says so.
+	aspect = 1.0f;
+	CHECK(view.Geometry().Find("one")->Bounds.Max.Y == plain + 80.0f);
+	view.VisualsChanged();
+	CHECK(view.Geometry().Find("one")->Bounds.Max.Y == plain + 154.0f);
+}
+
+TEST_CASE("a group made from the selection frames its members as they move", "[angview][view]") {
+	Scene scene;
+	View &view = *scene.Canvas;
+	CHECK(view.GroupSelection("empty").empty());
+	CHECK(view.TakeEdits().empty());
+	view.Select({"one", "add"});
+	const std::string id = view.GroupSelection("inputs");
+	REQUIRE(id == "group1");
+	CHECK(scene.Document.FindNode("one")->Group == id);
+	CHECK(scene.Document.FindNode("add")->Group == id);
+	CHECK(scene.Document.FindNode("text")->Group.empty());
+	CHECK(view.TakeEdits().size() == 1);
+	const Rect frame = view.GroupFrame(*scene.Document.FindGroup(id));
+	CHECK(frame.Min.X == -12.0f);
+	CHECK(frame.Min.Y == -36.0f);
+	CHECK(frame.Max.X == 472.0f);
+	CHECK(tests::HasText(view.Paint(), "inputs"));
+	// The header sits above the members; dragging it moves both.
+	tests::Drag(view, {0.0f, -30.0f}, {50.0f, -30.0f});
+	CHECK(scene.Document.FindNode("one")->Position.X == 50.0f);
+	CHECK(scene.Document.FindNode("add")->Position.X == 350.0f);
+	CHECK(view.GroupFrame(*scene.Document.FindGroup(id)).Min.X == 38.0f);
+	scene.Undo();
+	CHECK(scene.Document.FindNode("one")->Position.X == 0.0f);
+}
+
+TEST_CASE("run feedback shows bytes beside time", "[angview][view]") {
+	Scene scene;
+	View &view = *scene.Canvas;
+	engine::ang::Plan plan;
+	plan.Nodes.resize(1);
+	plan.Nodes[0].Id = "one";
+	engine::ang::RunReport report;
+	report.Nodes = {{.Status = engine::ang::NodeStatus::Ran, .Milliseconds = 1.5, .Bytes = 2 * 1024 * 1024}};
+	view.SetRunReport(plan, report);
+	CHECK(tests::HasText(view.Paint(), "1.50 ms  2.0 MiB"));
+	// Unmeasured but sized: the bytes show alone, never as a zero time.
+	report.Nodes = {{.Status = engine::ang::NodeStatus::Idle, .Bytes = 4096}};
+	view.SetRunReport(plan, report);
+	const DrawList &list = view.Paint();
+	CHECK(tests::HasText(list, "4.0 KiB"));
+	CHECK(!tests::HasText(list, "ms"));
+}
+
+TEST_CASE("presses and keys that change nothing record no edit", "[angview][view]") {
+	Scene scene;
+	REQUIRE(scene.Document.Apply(edit::AddLink{{"one", "value", "add", "a"}}).Ok);
+	View &view = *scene.Canvas;
+	view.GraphChanged();
+	// Inside the drag threshold a press is a click, not a move.
+	tests::Drag(view, {50.0f, 10.0f}, {51.0f, 11.0f});
+	CHECK(scene.Document.FindNode("one")->Position.X == 0.0f);
+	// Clicking a linked input picks the wire up and drops it back where it was.
+	tests::Drag(view, tests::InputPort({300.0f, 0.0f}, 0), tests::InputPort({300.0f, 0.0f}, 0));
+	CHECK(scene.Document.Links().size() == 1);
+	view.Select({});
+	view.KeyDown(Key::Delete);
+	view.KeyDown(Key::D, {.Control = true});
+	view.KeyDown(Key::Escape);
+	view.KeyDown(Key::F);
+	CHECK(view.TakeEdits().empty());
+	CHECK(scene.Document.Nodes().size() == 3);
+}
+
+TEST_CASE("a host can tint node headers", "[angview][view]") {
+	Scene scene;
+	View &view = *scene.Canvas;
+	const Rgba blue{0.28f, 0.46f, 0.66f, 1.0f};
+	view.NodeHeader = [&](const engine::ang::NodeInstance &node) -> std::optional<Rgba> {
+		if (node.Id == "add") return blue;
+		return std::nullopt;
+	};
+	view.GraphChanged();
+	size_t tinted = 0;
+	for (const DrawCommand &command : view.Paint()) {
+		tinted += command.Kind == DrawKind::Rect && command.Fill == blue ? 1 : 0;
+	}
+	CHECK(tinted == 1);
 }

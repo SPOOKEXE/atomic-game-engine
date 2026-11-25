@@ -1,7 +1,13 @@
+#include "GraphParams.hpp"
+
 #include <engine/core/FrameGraph.hpp>
+#include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineProfile.hpp>
+#include <engine/ui/Metrics.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cstdio>
 #include <imgui.h>
 #include <studio/Editor.hpp>
 #include <studio/RenderPipelineGraph.hpp>
@@ -27,32 +33,106 @@ namespace studio {
 					microseconds += static_cast<double>(span.Milliseconds) * 1000.0;
 			return microseconds;
 		}
+
+		// Text input over a fixed buffer; true when the text changed this frame.
+		bool EditText(const char *label, std::string &text, bool multiline) {
+			std::array<char, 8192> buffer{};
+			std::snprintf(buffer.data(), buffer.size(), "%s", text.c_str());
+			const bool changed = multiline ? ImGui::InputTextMultiline(
+												 label,
+												 buffer.data(),
+												 buffer.size(),
+												 ImVec2(-1.0f, ImGui::GetTextLineHeight() * 8.0f)
+											 )
+										   : ImGui::InputText(label, buffer.data(), buffer.size());
+			if (changed) text = buffer.data();
+			return changed;
+		}
 	}
 
 	void Editor::DrawRenderPipelineInspector() {
-		const std::vector<nodegraph::NodeId> &selection = RenderPipelineCanvas.Selection();
+		const std::vector<std::string> &selection = RenderPipelineCanvas->Selection();
 		if (selection.size() != 1) {
 			ImGui::TextDisabled(selection.empty() ? "select a pass" : "multiple passes selected");
 			return;
 		}
-		const nodegraph::Node *node = RenderPipelineGraph.Find(selection.front());
+		const std::string id = selection.front();
+		const engine::ang::NodeInstance *node = RenderPipelineGraph.FindNode(id);
 		if (node == nullptr) {
 			return;
 		}
-		const nodegraph::NodeType *type = nodegraph::NodeTypes::Find(node->Type);
-		ImGui::TextUnformatted(node->Label.empty() ? node->Type.c_str() : node->Label.c_str());
+		const auto type = RenderPipelineTypes().FindNode(node->Def);
+		const engine::graph::NodeKindSpec *spec = engine::graph::NodeCatalogue::Find(
+			engine::core::Name(std::string_view(node->Def).substr(std::string_view("render.pass.").size()))
+		);
+
+		// One drag or typing run in a field is one undo step.
+		const auto commit = [&](const std::string &field, engine::ang::Value value) {
+			const std::string editing = id + "\n" + field;
+			const bool amend = RenderPipelineEditing == editing;
+			if (ApplyRenderPipelineEdit(engine::ang::edit::SetParam{id, field, std::move(value)}, amend)) {
+				RenderPipelineEditing = editing;
+			}
+		};
+		const auto finished = [&] {
+			if (ImGui::IsItemDeactivated()) RenderPipelineEditing.clear();
+		};
+
+		std::string label = RenderPipelineLabel(*node);
+		ImGui::SetNextItemWidth(-1.0f);
+		if (EditText("##pass-name", label, false)) commit(RENDER_PIPELINE_LABEL, engine::ang::Value(label));
+		finished();
+		if (spec != nullptr) ImGui::TextDisabled("%s", spec->Summary.c_str());
+
+		if (const engine::ang::Group *group =
+				node->Group.empty() ? nullptr : RenderPipelineGraph.FindGroup(node->Group)) {
+			std::string title = group->Label;
+			ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
+			if (EditText("Group", title, false)) {
+				const std::string editing = id + "\ngroup";
+				if (ApplyRenderPipelineEdit(
+						engine::ang::edit::SetGroupLabel{group->Id, title}, RenderPipelineEditing == editing
+					))
+					RenderPipelineEditing = editing;
+			}
+			finished();
+			ImGui::SameLine();
+			if (ImGui::SmallButton("Ungroup")) {
+				ApplyRenderPipelineEdit(engine::ang::edit::RemoveGroup{group->Id});
+				node = RenderPipelineGraph.FindNode(id);
+			}
+		}
+
 		if (type != nullptr) {
-			ImGui::TextDisabled("%s", type->Subtitle.c_str());
+			ImGui::SeparatorText("Settings");
+			for (const engine::ang::ParamDef &param : type->Params) {
+				engine::ang::Value value = RenderPipelineParam(*node, param.Name);
+				ImGui::PushID(param.Name.c_str());
+				ImGui::SetNextItemWidth(
+					std::max(80.0f, ImGui::GetContentRegionAvail().x - engine::ui::Scaled(110.0f))
+				);
+				if (DrawGraphParam(param, value, param.Name == "source"))
+					commit(param.Name, std::move(value));
+				finished();
+				ImGui::PopID();
+			}
+
 			ImGui::SeparatorText("Inputs");
-			for (const nodegraph::PortSpec &port : type->Inputs) {
-				const nodegraph::Link *link = RenderPipelineGraph.LinkInto(node->Id, port.Name);
-				ImGui::BulletText("%s  %s", port.Name.c_str(), link == nullptr ? "unwired" : "connected");
+			for (const engine::ang::PortDef &port : type->Inputs) {
+				const bool linked = std::any_of(
+					RenderPipelineGraph.Links().begin(),
+					RenderPipelineGraph.Links().end(),
+					[&](const engine::ang::Link &link) {
+						return link.ToNode == id && link.ToPort == port.Name;
+					}
+				);
+				ImGui::BulletText("%s  %s", port.Name.c_str(), linked ? "connected" : "unwired");
 			}
 			ImGui::SeparatorText("Outputs");
-			for (const nodegraph::PortSpec &port : type->Outputs) {
+			for (const engine::ang::PortDef &port : type->Outputs) {
 				size_t consumers = 0;
-				for (const nodegraph::Link &link : RenderPipelineGraph.Links())
-					consumers += link.From == node->Id && link.FromPort == port.Name ? 1 : 0;
+				for (const engine::ang::Link &link : RenderPipelineGraph.Links())
+					consumers += link.FromNode == id && link.FromPort == port.Name ? 1 : 0;
 				ImGui::BulletText(
 					"%s  %zu consumer%s", port.Name.c_str(), consumers, consumers == 1 ? "" : "s"
 				);
@@ -67,7 +147,7 @@ namespace studio {
 		const auto canvasNode = std::find_if(
 			RenderPipelineGraph.Nodes().begin(),
 			RenderPipelineGraph.Nodes().end(),
-			[node](const nodegraph::Node &candidate) { return candidate.Id == node->Id; }
+			[&](const engine::ang::NodeInstance &candidate) { return candidate.Id == id; }
 		);
 		if (canvasNode != RenderPipelineGraph.Nodes().end() &&
 			SaveRenderPipelineGraph(RenderPipelineGraph, RenderPipelineBasis, document, error) &&
@@ -105,9 +185,6 @@ namespace studio {
 			}
 		}
 		ImGui::Spacing();
-		ImGui::TextWrapped(
-			"Queue, async, culling, and compute dispatch controls live on the node body. Wires determine "
-			"data order; box position does not."
-		);
+		ImGui::TextDisabled("Wires determine data order; box position does not.");
 	}
 }

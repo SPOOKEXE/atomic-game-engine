@@ -37,7 +37,7 @@ namespace {
 
 TEST_CASE("an asset pipeline opened and saved unchanged writes the same text", "[studio]") {
 	const Document original = Sample();
-	nodegraph::Graph graph;
+	engine::ang::Graph graph;
 	std::string problem;
 	REQUIRE(studio::LoadAssetPipelineGraph(original, graph, problem));
 	CHECK(graph.Nodes().size() == 10);
@@ -49,22 +49,22 @@ TEST_CASE("an asset pipeline opened and saved unchanged writes the same text", "
 }
 
 TEST_CASE("a loaded asset pipeline lays each chain out left to right", "[studio]") {
-	nodegraph::Graph graph;
+	engine::ang::Graph graph;
 	std::string problem;
 	REQUIRE(studio::LoadAssetPipelineGraph(Sample(), graph, problem));
 	const auto &nodes = graph.Nodes();
 	// Each chain's steps advance one column; the two chains take separate rows.
-	CHECK(nodes[0].X < nodes[1].X);
-	CHECK(nodes[1].X < nodes[4].X);
-	CHECK(nodes[0].Y != nodes[5].Y);
-	CHECK(nodes[0].X == nodes[5].X);
+	CHECK(nodes[0].Position.X < nodes[1].Position.X);
+	CHECK(nodes[1].Position.X < nodes[4].Position.X);
+	CHECK(nodes[0].Position.Y != nodes[5].Position.Y);
+	CHECK(nodes[0].Position.X == nodes[5].Position.X);
 }
 
 TEST_CASE("an asset pipeline wire to a missing node is refused on load", "[studio]") {
 	Document document;
 	document.Record({.Kind = OperationKind::AddSource, .Text = "a.png"});
 	document.Record({.Kind = OperationKind::Connect, .From = 1, .To = 2});
-	nodegraph::Graph graph;
+	engine::ang::Graph graph;
 	std::string problem;
 	CHECK_FALSE(studio::LoadAssetPipelineGraph(document, graph, problem));
 	CHECK_FALSE(problem.empty());
@@ -76,7 +76,7 @@ TEST_CASE("an asset pipeline wire between mismatched kinds is dropped and report
 	document.Record({.Kind = OperationKind::AddBuiltin, .Text = "cube"});
 	document.Record({.Kind = OperationKind::AddNode, .Node = NodeKind::Opaque});
 	document.Record({.Kind = OperationKind::Connect, .From = 1, .To = 2});
-	nodegraph::Graph graph;
+	engine::ang::Graph graph;
 	std::string problem;
 	CHECK_FALSE(studio::LoadAssetPipelineGraph(document, graph, problem));
 	CHECK(graph.Nodes().size() == 2);
@@ -94,7 +94,7 @@ TEST_CASE("an asset pipeline bakes a raw file from disk into the baked folder", 
 	}
 
 	// Built on the canvas and saved, the way the panel's Bake button does it.
-	nodegraph::Graph graph;
+	engine::ang::Graph graph;
 	std::string problem;
 	Document chain;
 	chain.Record({.Kind = OperationKind::AddSource, .Text = "tri.obj"});

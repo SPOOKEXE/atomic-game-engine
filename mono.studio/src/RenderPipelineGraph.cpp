@@ -8,8 +8,7 @@
 #include <charconv>
 #include <cmath>
 #include <limits>
-#include <nodegraph/Registry.hpp>
-#include <nodegraph/Types.hpp>
+#include <map>
 #include <studio/RenderPipelineGraph.hpp>
 #include <tuple>
 #include <unordered_map>
@@ -20,6 +19,7 @@ namespace studio {
 	namespace {
 		using engine::core::Name;
 		using namespace engine::graph;
+		namespace ang = engine::ang;
 		using render_pipeline::AuthoredNode;
 		using render_pipeline::Binding;
 
@@ -30,11 +30,15 @@ namespace studio {
 			return std::string(TYPE_PREFIX) + std::string(kind.Text());
 		}
 
-		Name KindOf(const nodegraph::Node &node) {
-			if (!node.Type.starts_with(TYPE_PREFIX)) {
+		Name KindOf(std::string_view def) {
+			if (!def.starts_with(TYPE_PREFIX)) {
 				return {};
 			}
-			return Name(std::string_view(node.Type).substr(TYPE_PREFIX.size()));
+			return Name(def.substr(TYPE_PREFIX.size()));
+		}
+
+		Name KindOf(const ang::NodeInstance &node) {
+			return KindOf(node.Def);
 		}
 
 		bool IsImageResource(ResourceKind kind) {
@@ -64,78 +68,41 @@ namespace studio {
 			case ResourceKind::Entities:
 				return "render.entities";
 			}
-			return nodegraph::ANY_TYPE;
-		}
-
-		nodegraph::Colour Accent(NodeCategory category) {
-			switch (category) {
-			case NodeCategory::Draw:
-				return nodegraph::Colour::Hex(0x4776A8);
-			case NodeCategory::Composite:
-				return nodegraph::Colour::Hex(0x8059A6);
-			case NodeCategory::Interface:
-				return nodegraph::Colour::Hex(0xA86F47);
-			case NodeCategory::Output:
-				return nodegraph::Colour::Hex(0x4A9164);
-			}
-			return nodegraph::Colour::Hex(0x666666);
+			return std::string(ang::ANY_TYPE);
 		}
 
 		std::string Key(std::string_view group, std::string_view name) {
 			return std::string(INTERNAL_PREFIX) + std::string(group) + "." + std::string(name);
 		}
 
-		void PutText(nodegraph::Node &node, std::string key, std::string value) {
-			nodegraph::Value held;
-			held.Kind = nodegraph::WidgetKind::Text;
-			held.Text = std::move(value);
-			node.Widgets[std::move(key)] = std::move(held);
+		using Params = std::map<std::string, ang::Value>;
+
+		std::string TextOf(const ang::NodeInstance &node, const std::string &key) {
+			const ang::Value value = RenderPipelineParam(node, key);
+			const std::string *text = value.Get<std::string>();
+			return text == nullptr ? std::string() : *text;
 		}
 
-		std::string TextOf(const nodegraph::Node &node, const std::string &key) {
-			const auto found = node.Widgets.find(key);
-			return found == node.Widgets.end() ? std::string() : found->second.Text;
+		bool ToggleOf(const ang::NodeInstance &node, const char *key, bool fallback) {
+			const ang::Value value = RenderPipelineParam(node, key);
+			const bool *flag = value.Get<bool>();
+			return flag == nullptr ? fallback : *flag;
 		}
 
-		void PutToggle(nodegraph::Node &node, const char *key, bool value) {
-			nodegraph::Value held;
-			held.Kind = nodegraph::WidgetKind::Toggle;
-			held.Flag = value;
-			node.Widgets[key] = held;
+		std::string SelectOf(const ang::NodeInstance &node, const char *key, std::string fallback) {
+			std::string text = TextOf(node, key);
+			return text.empty() ? fallback : text;
 		}
 
-		bool ToggleOf(const nodegraph::Node &node, const char *key, bool fallback) {
-			const auto found = node.Widgets.find(key);
-			return found == node.Widgets.end() ? fallback : found->second.Flag;
-		}
-
-		void PutSelect(nodegraph::Node &node, const char *key, std::string value) {
-			nodegraph::Value held;
-			held.Kind = nodegraph::WidgetKind::Select;
-			held.Text = std::move(value);
-			node.Widgets[key] = std::move(held);
-		}
-
-		std::string SelectOf(const nodegraph::Node &node, const char *key, std::string fallback) {
-			const auto found = node.Widgets.find(key);
-			return found == node.Widgets.end() || found->second.Text.empty() ? fallback : found->second.Text;
-		}
-
-		void PutNumber(nodegraph::Node &node, const char *key, double value) {
-			nodegraph::Value held;
-			held.Kind = nodegraph::WidgetKind::Number;
-			held.Number = value;
-			node.Widgets[key] = held;
-		}
-
-		uint32_t NumberOf(const nodegraph::Node &node, const std::string &key, uint32_t fallback) {
-			const auto found = node.Widgets.find(key);
-			if (found == node.Widgets.end() || !std::isfinite(found->second.Number)) {
+		uint32_t NumberOf(const ang::NodeInstance &node, const std::string &key, uint32_t fallback) {
+			const ang::Value value = RenderPipelineParam(node, key);
+			const double number = value.AsNumber(std::numeric_limits<double>::quiet_NaN());
+			if (value.Empty() || !std::isfinite(number)) {
 				return fallback;
 			}
-			return static_cast<uint32_t>(std::clamp(
-				found->second.Number, 1.0, static_cast<double>(std::numeric_limits<uint32_t>::max())
-			));
+			return static_cast<uint32_t>(
+				std::clamp(number, 1.0, static_cast<double>(std::numeric_limits<uint32_t>::max()))
+			);
 		}
 
 		std::string ResourceKey(std::string_view setting, std::string_view port) {
@@ -151,33 +118,30 @@ namespace studio {
 			return std::string(INTERNAL_PREFIX) + "binding." + (write ? "write" : "read") + ".count";
 		}
 
-		void PutBindings(nodegraph::Node &node, bool write, const std::vector<Binding> &bindings) {
-			PutNumber(node, BindingCountKey(write).c_str(), static_cast<double>(bindings.size()));
+		void PutBindings(Params &params, bool write, const std::vector<Binding> &bindings) {
+			params[BindingCountKey(write)] = ang::Value(static_cast<int64_t>(bindings.size()));
 			for (size_t index = 0; index < bindings.size(); index++) {
-				PutText(node, BindingMetadataKey(write, index, "port"), bindings[index].Port);
-				PutText(
-					node,
-					BindingMetadataKey(write, index, "resource"),
-					std::string(bindings[index].Resource.Text())
-				);
+				params[BindingMetadataKey(write, index, "port")] = ang::Value(bindings[index].Port);
+				params[BindingMetadataKey(write, index, "resource")] =
+					ang::Value(std::string(bindings[index].Resource.Text()));
 			}
 		}
 
-		size_t BindingCount(const nodegraph::Node &node, bool write) {
-			const auto found = node.Widgets.find(BindingCountKey(write));
-			if (found == node.Widgets.end() || !std::isfinite(found->second.Number) ||
-				found->second.Number < 0.0) {
+		size_t BindingCount(const ang::NodeInstance &node, bool write) {
+			const auto found = node.Params.find(BindingCountKey(write));
+			if (found == node.Params.end()) {
 				return 0;
 			}
-			return static_cast<size_t>(found->second.Number);
+			const double count = found->second.AsNumber(0.0);
+			return std::isfinite(count) && count > 0.0 ? static_cast<size_t>(count) : 0;
 		}
 
 		std::string
-		BindingMetadata(const nodegraph::Node &node, bool write, size_t index, std::string_view field) {
+		BindingMetadata(const ang::NodeInstance &node, bool write, size_t index, std::string_view field) {
 			return TextOf(node, BindingMetadataKey(write, index, field));
 		}
 
-		bool HasBinding(const nodegraph::Node &node, bool write, std::string_view port) {
+		bool HasBinding(const ang::NodeInstance &node, bool write, std::string_view port) {
 			for (size_t index = 0; index < BindingCount(node, write); index++) {
 				if (BindingMetadata(node, write, index, "port") == port) {
 					return true;
@@ -186,7 +150,8 @@ namespace studio {
 			return false;
 		}
 
-		std::string OriginalBindingResource(const nodegraph::Node &node, bool write, std::string_view port) {
+		std::string
+		OriginalBindingResource(const ang::NodeInstance &node, bool write, std::string_view port) {
 			std::string resource;
 			for (size_t index = 0; index < BindingCount(node, write); index++) {
 				if (BindingMetadata(node, write, index, "port") == port) {
@@ -255,12 +220,11 @@ namespace studio {
 		}
 
 		std::string
-		ParameterNumberText(const nodegraph::Node &node, const char *key, const ParameterSpec &parameter) {
-			const auto found = node.Widgets.find(key);
+		ParameterNumberText(const ang::NodeInstance &node, const char *key, const ParameterSpec &parameter) {
+			const ang::Value held = RenderPipelineParam(node, key);
 			const double fallback = ParameterNumber(parameter, parameter.Default);
-			double value = found == node.Widgets.end() || !std::isfinite(found->second.Number)
-							   ? fallback
-							   : found->second.Number;
+			const double number = held.AsNumber(std::numeric_limits<double>::quiet_NaN());
+			double value = held.Empty() || !std::isfinite(number) ? fallback : number;
 			if (parameter.HasRange) {
 				value = std::clamp(value, parameter.Minimum, parameter.Maximum);
 			}
@@ -269,8 +233,9 @@ namespace studio {
 			return encoded.ec == std::errc{} ? std::string(written.data(), encoded.ptr) : parameter.Default;
 		}
 
-		Name UniqueNodeName(const nodegraph::Node &node, Name kind, std::unordered_set<uint32_t> &used) {
-			const std::string base = node.Label.empty() ? std::string(kind.Text()) : node.Label;
+		Name UniqueNodeName(const ang::NodeInstance &node, Name kind, std::unordered_set<uint32_t> &used) {
+			const std::string label = TextOf(node, RENDER_PIPELINE_LABEL);
+			const std::string base = label.empty() ? std::string(kind.Text()) : label;
 			Name candidate(base);
 			uint32_t suffix = 2;
 			while (!used.insert(candidate.Id()).second) {
@@ -279,10 +244,63 @@ namespace studio {
 			return candidate;
 		}
 
+		const ang::Link *LinkInto(const ang::Graph &graph, const std::string &node, std::string_view port) {
+			for (const ang::Link &link : graph.Links()) {
+				if (link.ToNode == node && link.ToPort == port) {
+					return &link;
+				}
+			}
+			return nullptr;
+		}
+
+		ang::ParamDef Toggle(std::string name, std::string label, bool fallback) {
+			return {
+				.Name = std::move(name),
+				.Type = "bool",
+				.Default = ang::Value(fallback),
+				.Label = std::move(label),
+				.Widget = "toggle"
+			};
+		}
+
+		ang::ParamDef
+		Select(std::string name, std::string label, std::vector<std::string> choices, size_t chosen) {
+			ang::Value fallback =
+				chosen < choices.size() ? ang::Value(choices[chosen]) : ang::Value(std::string());
+			return {
+				.Name = std::move(name),
+				.Type = "string",
+				.Default = std::move(fallback),
+				.Label = std::move(label),
+				.Widget = "select",
+				.Choices = std::move(choices)
+			};
+		}
+
+		ang::ParamDef Number(std::string name, std::string label, double fallback) {
+			return {
+				.Name = std::move(name),
+				.Type = "number",
+				.Default = ang::Value(fallback),
+				.Label = std::move(label),
+				.Widget = "number"
+			};
+		}
+
+		ang::ParamDef Text(std::string name, std::string label, std::string fallback) {
+			return {
+				.Name = std::move(name),
+				.Type = "string",
+				.Default = ang::Value(std::move(fallback)),
+				.Label = std::move(label),
+				.Widget = "text"
+			};
+		}
+
 		void AppendEditedAuthoringMetadata(
 			const PipelineDocument &basis,
-			const nodegraph::Graph &graph,
-			const std::unordered_map<nodegraph::NodeId, Name> &names,
+			const ang::Graph &graph,
+			const std::unordered_map<std::string, Name> &names,
 			PipelineDocument &document
 		) {
 			using namespace engine::graph;
@@ -299,23 +317,23 @@ namespace studio {
 				}
 			}
 
-			std::unordered_map<uint32_t, const nodegraph::Node *> nodesByOriginalName;
-			for (const nodegraph::Node &node : graph.Nodes()) {
+			std::unordered_map<uint32_t, const ang::NodeInstance *> nodesByOriginalName;
+			for (const ang::NodeInstance &node : graph.Nodes()) {
 				const std::string original = TextOf(node, ORIGINAL_NAME);
 				if (!original.empty()) {
 					nodesByOriginalName[Name(original).Id()] = &node;
 				}
 			}
 
-			const auto groupKey = [](nodegraph::GroupId group, nodegraph::NodeId member) {
-				return (static_cast<uint64_t>(group) << 32) | member;
+			const auto groupKey = [](std::string_view group, std::string_view member) {
+				return std::string(group) + '\n' + std::string(member);
 			};
-			std::unordered_map<uint64_t, size_t> recordedGroupMembers;
+			std::unordered_map<std::string, size_t> recordedGroupMembers;
 			std::unordered_set<uint32_t> originalComments;
 			std::unordered_set<uint32_t> originalMutes;
-			std::unordered_set<uint64_t> originalPreviews;
-			std::unordered_map<uint32_t, std::vector<std::pair<nodegraph::NodeId, std::string>>> writers;
-			for (const nodegraph::Node &node : graph.Nodes()) {
+			std::unordered_set<std::string> originalPreviews;
+			std::unordered_map<uint32_t, std::vector<std::pair<std::string, std::string>>> writers;
+			for (const ang::NodeInstance &node : graph.Nodes()) {
 				for (size_t index = 0; index < BindingCount(node, true); index++) {
 					const std::string resource = BindingMetadata(node, true, index, "resource");
 					const std::string port = BindingMetadata(node, true, index, "port");
@@ -332,6 +350,9 @@ namespace studio {
 				edit.Target = target;
 				document.Record(std::move(edit));
 			};
+			const auto groupTitle = [](const ang::Group &group) {
+				return Name(group.Label.empty() ? group.Id : group.Label);
+			};
 			for (const Edit &edit : basis.Edits()) {
 				switch (edit.Kind) {
 				case EditKind::Group: {
@@ -342,12 +363,11 @@ namespace studio {
 						}
 						break;
 					}
-					const nodegraph::Node &node = *found->second;
-					const nodegraph::GroupId groupId = graph.GroupOf(node.Id);
-					const nodegraph::Group *group = graph.FindGroup(groupId);
+					const ang::NodeInstance &node = *found->second;
+					const ang::Group *group = node.Group.empty() ? nullptr : graph.FindGroup(node.Group);
 					if (group != nullptr) {
-						recordGroup(Name(group->Title), names.at(node.Id));
-						recordedGroupMembers[groupKey(groupId, node.Id)]++;
+						recordGroup(groupTitle(*group), names.at(node.Id));
+						recordedGroupMembers[groupKey(group->Id, node.Id)]++;
 					}
 					break;
 				}
@@ -358,8 +378,8 @@ namespace studio {
 						if (!basisNodeNames.contains(edit.Name.Id())) document.Record(edit);
 						break;
 					}
-					const nodegraph::Node &node = *found->second;
-					if (node.Widgets.contains(AUTHORING_COMMENT)) {
+					const ang::NodeInstance &node = *found->second;
+					if (node.Params.contains(AUTHORING_COMMENT)) {
 						Edit updated = edit;
 						updated.Name = names.at(node.Id);
 						if (TextOf(node, AUTHORING_COMMENT) != basisComments.at(edit.Name.Id())) {
@@ -376,8 +396,8 @@ namespace studio {
 						if (!basisNodeNames.contains(edit.Name.Id())) document.Record(edit);
 						break;
 					}
-					const nodegraph::Node &node = *found->second;
-					if (node.Widgets.contains(AUTHORING_MUTED)) {
+					const ang::NodeInstance &node = *found->second;
+					if (node.Params.contains(AUTHORING_MUTED)) {
 						Edit updated = edit;
 						updated.Name = names.at(node.Id);
 						if (ToggleOf(node, AUTHORING_MUTED, edit.Enabled) != basisMutes.at(edit.Name.Id())) {
@@ -393,8 +413,8 @@ namespace studio {
 						document.Record(edit);
 						break;
 					}
-					const auto [nodeId, port] = found->second.front();
-					const nodegraph::Node *node = graph.Find(nodeId);
+					const auto &[nodeId, port] = found->second.front();
+					const ang::NodeInstance *node = graph.FindNode(nodeId);
 					if (node == nullptr) {
 						break;
 					}
@@ -408,7 +428,7 @@ namespace studio {
 					Edit updated = edit;
 					updated.Target = Name(resource);
 					document.Record(std::move(updated));
-					originalPreviews.insert(groupKey(0, nodeId));
+					originalPreviews.insert(nodeId);
 					break;
 				}
 				default:
@@ -416,40 +436,41 @@ namespace studio {
 				}
 			}
 
-			for (const nodegraph::Group &group : graph.Groups()) {
-				for (const nodegraph::NodeId member : group.Members) {
-					const uint64_t key = groupKey(group.Id, member);
-					auto recorded = recordedGroupMembers.find(key);
+			for (const ang::Group &group : graph.Groups()) {
+				for (const ang::NodeInstance &member : graph.Nodes()) {
+					if (member.Group != group.Id) {
+						continue;
+					}
+					auto recorded = recordedGroupMembers.find(groupKey(group.Id, member.Id));
 					if (recorded != recordedGroupMembers.end() && recorded->second > 0) {
 						recorded->second--;
 						continue;
 					}
-					const auto name = names.find(member);
+					const auto name = names.find(member.Id);
 					if (name != names.end()) {
-						recordGroup(Name(group.Title), name->second);
+						recordGroup(groupTitle(group), name->second);
 					}
 				}
 			}
 
-			for (const nodegraph::Node &node : graph.Nodes()) {
+			for (const ang::NodeInstance &node : graph.Nodes()) {
 				const std::string original = TextOf(node, ORIGINAL_NAME);
 				const uint32_t oldName = original.empty() ? 0 : Name(original).Id();
-				if (node.Widgets.contains(AUTHORING_COMMENT) && !originalComments.contains(oldName)) {
+				if (node.Params.contains(AUTHORING_COMMENT) && !originalComments.contains(oldName)) {
 					Edit edit;
 					edit.Kind = EditKind::Comment;
 					edit.Name = names.at(node.Id);
 					edit.Value = TextOf(node, AUTHORING_COMMENT);
 					document.Record(std::move(edit));
 				}
-				if (node.Widgets.contains(AUTHORING_MUTED) && !originalMutes.contains(oldName)) {
+				if (node.Params.contains(AUTHORING_MUTED) && !originalMutes.contains(oldName)) {
 					Edit edit;
 					edit.Kind = EditKind::Mute;
 					edit.Name = names.at(node.Id);
 					edit.Enabled = ToggleOf(node, AUTHORING_MUTED, false);
 					document.Record(std::move(edit));
 				}
-				if (ToggleOf(node, AUTHORING_PREVIEW, false) &&
-					!originalPreviews.contains(groupKey(0, node.Id))) {
+				if (ToggleOf(node, AUTHORING_PREVIEW, false) && !originalPreviews.contains(node.Id)) {
 					const std::string port = TextOf(node, AUTHORING_PREVIEW_PORT);
 					const std::string resource = TextOf(node, Key("write", port));
 					if (!resource.empty()) {
@@ -476,151 +497,165 @@ namespace studio {
 				}
 			}
 		}
-	}
 
-	void RegisterRenderPipelineNodeTypes() {
-		using namespace engine::graph;
-		RegisterRenderNodeKinds();
-
-		for (const auto &[id, label, tint, description] : std::array{
-				 std::tuple{
-					 "render.image", "IMAGE", 0xD07852u, "A sampled, colour, depth, or compute image."
-				 },
-				 std::tuple{"render.buffer", "Buffer", 0xB39A58u, "A structured GPU buffer."},
-				 std::tuple{"render.camera", "Camera", 0x53A7A0u, "A viewpoint and projection."},
-				 std::tuple{"render.entities", "Entities", 0x73A856u, "A filtered ordered draw list."},
-			 }) {
-			nodegraph::DataType type;
-			type.Id = id;
-			type.Label = label;
-			type.Tint = nodegraph::Colour::Hex(tint);
-			type.Description = description;
-			nodegraph::DataTypes::Register(type);
-		}
-
-		for (const NodeKindSpec &spec : NodeCatalogue::All()) {
-			nodegraph::NodeType type;
-			type.Id = std::string(TYPE_PREFIX) + spec.Declaration.Id;
-			type.Title = spec.Label.empty() ? std::string(spec.Kind.Text()) : spec.Label;
-			type.Category = Describe(spec.Category);
-			type.Accent = Accent(spec.Category);
-			type.Subtitle = spec.Summary;
-			for (const auto &port : spec.Declaration.Ports) {
-				ResourceKind kind;
-				if (!ResourceKindFromPortType(port.ValueType, kind)) continue;
-				auto &side =
-					port.Direction == engine::graphcore::PortDirection::Input ? type.Inputs : type.Outputs;
-				side.push_back(nodegraph::Port(port.Id, ResourceType(kind)));
-			}
-
-			type.Evaluate = [outputs = type.Outputs](const nodegraph::Inputs &) {
-				nodegraph::Outputs made;
-				for (const nodegraph::PortSpec &output : outputs) {
-					made.emplace(output.Name, uint8_t{0});
-				}
-				return made;
+		ang::Registry BuildRegistry() {
+			using namespace engine::graph;
+			RegisterRenderNodeKinds();
+			ang::Registry types = ang::Registry::WithScalars();
+			const auto unpack = [](uint32_t hex) {
+				return engine::core::Color3{
+					static_cast<float>((hex >> 16) & 0xFF) / 255.0f,
+					static_cast<float>((hex >> 8) & 0xFF) / 255.0f,
+					static_cast<float>(hex & 0xFF) / 255.0f
+				};
 			};
-			for (const PortSpec &port : spec.Outputs) {
-				if (IsImageResource(port.Kind)) {
-					type.PreviewPort = std::string(port.Name.Text());
-					type.Preview = [](const std::any &, nodegraph::PreviewImage &) { return false; };
-					type.Widgets.push_back(nodegraph::Toggle(PREVIEW_ENABLED, "Preview", true));
-					type.Widgets.push_back(nodegraph::Toggle(PREVIEW_REVERSE, "Reverse spectrum", false));
-					break;
-				}
+			for (const auto &[id, label, tint] : std::array{
+					 std::tuple{"render.image", "IMAGE", 0xD07852u},
+					 std::tuple{"render.buffer", "Buffer", 0xB39A58u},
+					 std::tuple{"render.camera", "Camera", 0x53A7A0u},
+					 std::tuple{"render.entities", "Entities", 0x73A856u},
+				 }) {
+				types.DefineType({.Id = id, .Label = label, .Wire = unpack(tint)});
 			}
-			const std::array commonWidgets{
-				nodegraph::Toggle("enabled", "Enabled", true),
-				nodegraph::Toggle("profile", "Profile", true),
-				nodegraph::Select(
+
+			for (const NodeKindSpec &spec : NodeCatalogue::All()) {
+				ang::NodeDef def;
+				def.Id = std::string(TYPE_PREFIX) + spec.Declaration.Id;
+				def.Label = spec.Label.empty() ? std::string(spec.Kind.Text()) : spec.Label;
+				def.Category = Describe(spec.Category);
+				for (const auto &port : spec.Declaration.Ports) {
+					ResourceKind kind;
+					if (!ResourceKindFromPortType(port.ValueType, kind)) continue;
+					const bool input = port.Direction == engine::graphcore::PortDirection::Input;
+					// Inputs are optional: an unlinked read names an external resource.
+					(input ? def.Inputs : def.Outputs)
+						.push_back(
+							{.Name = port.Id,
+							 .Type = ResourceType(kind),
+							 .Dir = input ? ang::Direction::Input : ang::Direction::Output,
+							 .Optional = input}
+						);
+				}
+				if (!RenderPipelinePreviewPort(def.Id).empty()) {
+					def.Params.push_back(Toggle(PREVIEW_ENABLED, "Preview", true));
+					def.Params.push_back(Toggle(PREVIEW_REVERSE, "Reverse spectrum", false));
+				}
+				def.Params.push_back(Toggle("enabled", "Enabled", true));
+				def.Params.push_back(Toggle("profile", "Profile", true));
+				def.Params.push_back(Select(
 					"scope",
 					"Scope",
 					{"world", "view", "frame"},
 					spec.Scope == NodeScope::World	? 0
 					: spec.Scope == NodeScope::View ? 1
 													: 2
-				),
-				nodegraph::Select("queue", "Queue", {"auto", "cpu", "graphics", "compute", "transfer"}, 0),
-				nodegraph::Select("async", "Async", {"auto", "allow", "serial"}, 0),
-			};
-			type.Widgets.insert(type.Widgets.end(), commonWidgets.begin(), commonWidgets.end());
-			for (const ParameterSpec &parameter : spec.Params) {
-				const std::string key(parameter.Name.Text());
-				switch (parameter.Widget) {
-				case ParameterWidget::Text:
-					type.Widgets.push_back(nodegraph::Text(key, parameter.Label, parameter.Default));
-					break;
-				case ParameterWidget::Number:
-					type.Widgets.push_back(
-						nodegraph::Number(key, parameter.Label, ParameterNumber(parameter, parameter.Default))
-					);
-					if (parameter.HasRange) {
-						nodegraph::WidgetSpec &number = type.Widgets.back();
-						number.Minimum = parameter.Minimum;
-						number.Maximum = parameter.Maximum;
-						number.Step = parameter.Maximum - parameter.Minimum <= 10.0 ? 0.01 : 0.1;
-						number.Precision = 3;
-					}
-					break;
-				case ParameterWidget::Toggle:
-					type.Widgets.push_back(
-						nodegraph::Toggle(key, parameter.Label, parameter.Default == "true")
-					);
-					break;
-				case ParameterWidget::Select: {
-					const auto selected =
-						std::find(parameter.Options.begin(), parameter.Options.end(), parameter.Default);
-					type.Widgets.push_back(
-						nodegraph::Select(
+				));
+				def.Params.push_back(
+					Select("queue", "Queue", {"auto", "cpu", "graphics", "compute", "transfer"}, 0)
+				);
+				def.Params.push_back(Select("async", "Async", {"auto", "allow", "serial"}, 0));
+				for (const ParameterSpec &parameter : spec.Params) {
+					const std::string key(parameter.Name.Text());
+					switch (parameter.Widget) {
+					case ParameterWidget::Text:
+						def.Params.push_back(Text(key, parameter.Label, parameter.Default));
+						break;
+					case ParameterWidget::Number:
+						def.Params.push_back(
+							Number(key, parameter.Label, ParameterNumber(parameter, parameter.Default))
+						);
+						if (parameter.HasRange) {
+							def.Params.back().Minimum = parameter.Minimum;
+							def.Params.back().Maximum = parameter.Maximum;
+						}
+						break;
+					case ParameterWidget::Toggle:
+						def.Params.push_back(Toggle(key, parameter.Label, parameter.Default == "true"));
+						break;
+					case ParameterWidget::Select: {
+						const auto selected =
+							std::find(parameter.Options.begin(), parameter.Options.end(), parameter.Default);
+						def.Params.push_back(Select(
 							key,
 							parameter.Label,
 							parameter.Options,
 							selected == parameter.Options.end()
 								? 0
-								: static_cast<int>(selected - parameter.Options.begin())
-						)
-					);
-					break;
+								: static_cast<size_t>(selected - parameter.Options.begin())
+						));
+						break;
+					}
+					}
 				}
-				}
-			}
-			for (const PortSpec &port : spec.Outputs) {
-				const std::string output(port.Name.Text());
-				type.Widgets.push_back(
-					nodegraph::Select(
+				for (const PortSpec &port : spec.Outputs) {
+					const std::string output(port.Name.Text());
+					def.Params.push_back(Select(
 						ResourceKey("lifetime", output), output + " lifetime", {"transient", "external"}, 0
-					)
-				);
-				type.Widgets.push_back(
-					nodegraph::Select(
+					));
+					def.Params.push_back(Select(
 						ResourceKey("resolution", output),
 						output + " resolution",
 						{"full", "half", "quarter", "eighth", "fixed"},
 						0
-					)
-				);
-				type.Widgets.push_back(
-					nodegraph::Number(ResourceKey("width", output), output + " width", 1920)
-				);
-				type.Widgets.push_back(
-					nodegraph::Number(ResourceKey("height", output), output + " height", 1080)
-				);
+					));
+					def.Params.push_back(Number(ResourceKey("width", output), output + " width", 1920));
+					def.Params.push_back(Number(ResourceKey("height", output), output + " height", 1080));
+				}
+				types.DefineNode(std::move(def));
 			}
-			nodegraph::NodeTypes::Register(type);
+			return types;
 		}
 	}
 
-	bool
-	LoadRenderPipelineGraph(const PipelineDocument &document, nodegraph::Graph &graph, std::string &error) {
+	const ang::Registry &RenderPipelineTypes() {
+		static const ang::Registry types = BuildRegistry();
+		return types;
+	}
+
+	ang::Value RenderPipelineParam(const ang::NodeInstance &node, std::string_view key) {
+		if (const auto held = node.Params.find(std::string(key)); held != node.Params.end()) {
+			return held->second;
+		}
+		if (const auto def = RenderPipelineTypes().FindNode(node.Def)) {
+			if (const ang::ParamDef *param = def->FindParam(key)) {
+				return param->Default;
+			}
+		}
+		return {};
+	}
+
+	std::string RenderPipelineLabel(const ang::NodeInstance &node) {
+		const std::string label = TextOf(node, RENDER_PIPELINE_LABEL);
+		return label.empty() ? std::string(KindOf(node).Text()) : label;
+	}
+
+	std::string RenderPipelinePreviewPort(std::string_view def) {
+		RegisterRenderNodeKinds();
+		const NodeKindSpec *spec = NodeCatalogue::Find(KindOf(def));
+		if (spec == nullptr) {
+			return {};
+		}
+		for (const PortSpec &port : spec->Outputs) {
+			if (IsImageResource(port.Kind)) {
+				return std::string(port.Name.Text());
+			}
+		}
+		return {};
+	}
+
+	bool LoadRenderPipelineGraph(const PipelineDocument &document, ang::Graph &graph, std::string &error) {
 		using namespace engine::graph;
-		RegisterRenderPipelineNodeTypes();
-		graph.Clear();
+		const ang::Registry &types = RenderPipelineTypes();
+		graph = {};
 		error.clear();
 
 		const std::vector<AuthoredNode> authored = render_pipeline::AuthoredNodes(document);
 		std::unordered_map<uint32_t, Edit> resourceSettings;
 		std::unordered_map<uint32_t, std::string> comments;
 		std::unordered_map<uint32_t, bool> muteStates;
+		// Each pass belongs to the last group that names it; groups keep first-mention order.
+		std::unordered_map<uint32_t, std::string> groupOf;
+		std::vector<std::string> groupOrder;
 		for (const Edit &edit : document.Edits()) {
 			if (edit.Kind == EditKind::AddResource) {
 				resourceSettings[edit.Name.Id()] = edit;
@@ -628,141 +663,135 @@ namespace studio {
 				comments[edit.Name.Id()] = edit.Value;
 			} else if (edit.Kind == EditKind::Mute) {
 				muteStates[edit.Name.Id()] = edit.Enabled;
+			} else if (edit.Kind == EditKind::Group) {
+				const std::string title(edit.Name.Text());
+				if (std::find(groupOrder.begin(), groupOrder.end(), title) == groupOrder.end()) {
+					groupOrder.push_back(title);
+				}
+				groupOf[edit.Target.Id()] = title;
 			}
 		}
-		std::vector<nodegraph::NodeId> ids;
-		std::unordered_map<uint32_t, nodegraph::NodeId> nodeIdsByName;
+		std::unordered_set<std::string> usedGroups;
+		for (const AuthoredNode &source : authored) {
+			if (const auto group = groupOf.find(source.Name.Id()); group != groupOf.end()) {
+				usedGroups.insert(group->second);
+			}
+		}
+		std::vector<ang::Edit> edits;
+		for (const std::string &title : groupOrder) {
+			if (usedGroups.contains(title)) {
+				edits.push_back(ang::edit::AddGroup{{.Id = title, .Label = title}});
+			}
+		}
+
+		// Writers by resource, with the authored slot that wrote it.
+		struct Writer {
+			std::string Node;
+			std::string Port;
+			size_t Index = 0;
+		};
+		std::unordered_map<uint32_t, std::vector<Writer>> writers;
+		std::vector<std::string> ids;
 		ids.reserve(authored.size());
+		ang::Graph probe;
 		for (size_t index = 0; index < authored.size(); index++) {
 			const AuthoredNode &source = authored[index];
+			const std::string def = TypeId(source.Kind);
+			const auto definition = types.FindNode(def);
+			if (definition == nullptr) {
+				error = "no render node type is registered for " + std::string(source.Kind.Text());
+				return false;
+			}
 			const float x = source.Moved ? source.X : static_cast<float>(index) * 230.0f;
 			const float y = source.Moved					   ? source.Y
 							: source.Scope == NodeScope::World ? 0.0f
 							: source.Scope == NodeScope::View  ? 180.0f
 															   : 360.0f;
-			const nodegraph::NodeId id = graph.Add(TypeId(source.Kind), x, y);
-			if (id == nodegraph::NO_NODE) {
-				error = "no render node type is registered for " + std::string(source.Kind.Text());
-				graph.Clear();
-				return false;
-			}
-			nodegraph::Node &node = *graph.Find(id);
-			node.Label = std::string(source.Name.Text());
-			PutText(node, ORIGINAL_NAME, std::string(source.Name.Text()));
-			PutToggle(node, "enabled", source.Enabled);
-			PutSelect(node, "scope", Describe(source.Scope));
-			PutBindings(node, false, source.Reads);
-			PutBindings(node, true, source.Writes);
+			const std::string name(source.Name.Text());
+			ang::NodeInstance node{
+				.Id = probe.FindNode(name) == nullptr && !name.empty() ? name : probe.NewNodeId(name),
+				.Def = def,
+				.Version = definition->Version,
+				.Position = {x, y},
+			};
+			Params &params = node.Params;
+			params[RENDER_PIPELINE_LABEL] = ang::Value(name);
+			params[ORIGINAL_NAME] = ang::Value(name);
+			params["enabled"] = ang::Value(source.Enabled);
+			params["scope"] = ang::Value(std::string(Describe(source.Scope)));
+			PutBindings(params, false, source.Reads);
+			PutBindings(params, true, source.Writes);
 			if (const auto comment = comments.find(source.Name.Id()); comment != comments.end()) {
-				PutText(node, AUTHORING_COMMENT, comment->second);
+				params[AUTHORING_COMMENT] = ang::Value(comment->second);
 			}
 			if (const auto mute = muteStates.find(source.Name.Id()); mute != muteStates.end()) {
-				PutToggle(node, AUTHORING_MUTED, mute->second);
+				params[AUTHORING_MUTED] = ang::Value(mute->second);
 			}
-			nodeIdsByName[source.Name.Id()] = id;
+			if (const auto group = groupOf.find(source.Name.Id()); group != groupOf.end()) {
+				node.Group = group->second;
+			}
 			const NodeKindSpec *spec = NodeCatalogue::Find(source.Kind);
 			for (const NodeParameter &parameter : source.Parameters) {
 				const std::string key(parameter.Key.Text());
-				PutText(node, Key("original-parameter", key), parameter.Value);
+				params[Key("original-parameter", key)] = ang::Value(parameter.Value);
 				if (key == PREVIEW_ENABLED || key == PREVIEW_REVERSE || key == "profile") {
-					PutToggle(node, key.c_str(), parameter.Value == "true");
+					params[key] = ang::Value(parameter.Value == "true");
 				} else if (key == "queue" || key == "async") {
-					PutSelect(node, key.c_str(), parameter.Value);
+					params[key] = ang::Value(parameter.Value);
 				} else {
 					const ParameterSpec *declared = spec == nullptr ? nullptr : ParameterNamed(*spec, key);
 					if (declared == nullptr) {
-						PutText(node, Key("parameter", key), parameter.Value);
+						params[Key("parameter", key)] = ang::Value(parameter.Value);
 						continue;
 					}
 					switch (declared->Widget) {
 					case ParameterWidget::Text:
-						PutText(node, key, parameter.Value);
+					case ParameterWidget::Select:
+						params[key] = ang::Value(parameter.Value);
 						break;
 					case ParameterWidget::Number:
-						PutNumber(node, key.c_str(), ParameterNumber(*declared, parameter.Value));
+						params[key] = ang::Value(ParameterNumber(*declared, parameter.Value));
 						break;
 					case ParameterWidget::Toggle:
-						PutToggle(node, key.c_str(), parameter.Value == "true");
-						break;
-					case ParameterWidget::Select:
-						PutSelect(node, key.c_str(), parameter.Value);
+						params[key] = ang::Value(parameter.Value == "true");
 						break;
 					}
 				}
 			}
 
-			for (size_t index = 0; spec != nullptr && index < source.Reads.size(); index++) {
-				const std::string port = BindingPort(source.Reads[index], *spec, PortDirection::Input, index);
-				PutText(node, Key("read", port), std::string(source.Reads[index].Resource.Text()));
+			for (size_t slot = 0; spec != nullptr && slot < source.Reads.size(); slot++) {
+				const std::string port = BindingPort(source.Reads[slot], *spec, PortDirection::Input, slot);
+				params[Key("read", port)] = ang::Value(std::string(source.Reads[slot].Resource.Text()));
 			}
-			for (size_t index = 0; spec != nullptr && index < source.Writes.size(); index++) {
-				const std::string port =
-					BindingPort(source.Writes[index], *spec, PortDirection::Output, index);
-				PutText(node, Key("write", port), std::string(source.Writes[index].Resource.Text()));
-				const auto found = resourceSettings.find(source.Writes[index].Resource.Id());
+			for (size_t slot = 0; spec != nullptr && slot < source.Writes.size(); slot++) {
+				const std::string port = BindingPort(source.Writes[slot], *spec, PortDirection::Output, slot);
+				params[Key("write", port)] = ang::Value(std::string(source.Writes[slot].Resource.Text()));
+				writers[source.Writes[slot].Resource.Id()].push_back({node.Id, port, index});
+				const auto found = resourceSettings.find(source.Writes[slot].Resource.Id());
 				if (found != resourceSettings.end()) {
 					const Edit &resource = found->second;
-					PutSelect(node, ResourceKey("lifetime", port).c_str(), LifetimeOf(resource));
-					const std::string resolution = resource.Width > 0 && resource.Height > 0 ? "fixed"
-												   : resource.Divisor >= 8					 ? "eighth"
-												   : resource.Divisor >= 4					 ? "quarter"
-												   : resource.Divisor >= 2					 ? "half"
-																							 : "full";
-					PutSelect(node, ResourceKey("resolution", port).c_str(), resolution);
-					PutNumber(
-						node, ResourceKey("width", port).c_str(), resource.Width > 0 ? resource.Width : 1920
-					);
-					PutNumber(
-						node,
-						ResourceKey("height", port).c_str(),
-						resource.Height > 0 ? resource.Height : 1080
-					);
+					params[ResourceKey("lifetime", port)] = ang::Value(LifetimeOf(resource));
+					params[ResourceKey("resolution", port)] = ang::Value(ResolutionOf(resource));
+					params[ResourceKey("width", port)] =
+						ang::Value(static_cast<double>(resource.Width > 0 ? resource.Width : 1920));
+					params[ResourceKey("height", port)] =
+						ang::Value(static_cast<double>(resource.Height > 0 ? resource.Height : 1080));
 				}
 			}
-			ids.push_back(id);
+			ids.push_back(node.Id);
+			probe.Apply(ang::edit::AddNode{node});
+			edits.push_back(ang::edit::AddNode{std::move(node)});
+		}
+		const ang::EditResult placed = graph.Apply(std::span<const ang::Edit>(edits));
+		if (!placed.Ok) {
+			error = placed.Error;
+			graph = {};
+			return false;
 		}
 
-		struct GroupProjection {
-			std::string Title;
-			std::vector<nodegraph::NodeId> Members;
+		const auto setText = [&](const std::string &node, std::string key, std::string value) {
+			graph.Apply(ang::edit::SetParam{node, std::move(key), ang::Value(std::move(value))});
 		};
-		std::vector<GroupProjection> groups;
-		std::unordered_map<std::string, size_t> groupIndices;
-		for (const Edit &edit : document.Edits()) {
-			if (edit.Kind != EditKind::Group) {
-				continue;
-			}
-			const auto member = nodeIdsByName.find(edit.Target.Id());
-			if (member == nodeIdsByName.end()) {
-				continue;
-			}
-			const std::string title(edit.Name.Text());
-			auto [found, inserted] = groupIndices.emplace(title, groups.size());
-			if (inserted) {
-				groups.push_back({title, {}});
-			}
-			groups[found->second].Members.push_back(member->second);
-		}
-		for (GroupProjection &group : groups) {
-			graph.Group(std::move(group.Members), std::move(group.Title), nodegraph::Colour::Hex(0x5F6675));
-		}
-
-		struct Writer {
-			nodegraph::NodeId Node = nodegraph::NO_NODE;
-			std::string Port;
-			size_t Index = 0;
-		};
-		std::unordered_map<uint32_t, std::vector<Writer>> writers;
-		for (size_t index = 0; index < authored.size(); index++) {
-			const NodeKindSpec *spec = NodeCatalogue::Find(authored[index].Kind);
-			for (size_t slot = 0; spec != nullptr && slot < authored[index].Writes.size(); slot++) {
-				writers[authored[index].Writes[slot].Resource.Id()].push_back(
-					{ids[index],
-					 BindingPort(authored[index].Writes[slot], *spec, PortDirection::Output, slot),
-					 index}
-				);
-			}
-		}
 		for (const Edit &edit : document.Edits()) {
 			if (edit.Kind != EditKind::Preview) {
 				continue;
@@ -771,11 +800,9 @@ namespace studio {
 			if (found == writers.end() || found->second.empty()) {
 				continue;
 			}
-			nodegraph::Node *node = graph.Find(found->second.front().Node);
-			if (node != nullptr) {
-				PutToggle(*node, AUTHORING_PREVIEW, true);
-				PutText(*node, AUTHORING_PREVIEW_PORT, found->second.front().Port);
-			}
+			const Writer &writer = found->second.front();
+			graph.Apply(ang::edit::SetParam{writer.Node, AUTHORING_PREVIEW, ang::Value(true)});
+			setText(writer.Node, AUTHORING_PREVIEW_PORT, writer.Port);
 		}
 
 		for (size_t index = 0; index < authored.size(); index++) {
@@ -783,12 +810,10 @@ namespace studio {
 			for (size_t slot = 0; spec != nullptr && slot < authored[index].Reads.size(); slot++) {
 				const Binding &read = authored[index].Reads[slot];
 				const std::string input = BindingPort(read, *spec, PortDirection::Input, slot);
-				PutText(
-					*graph.Find(ids[index]), Key("read-baseline", input), std::string(read.Resource.Text())
-				);
+				setText(ids[index], Key("read-baseline", input), std::string(read.Resource.Text()));
 				const auto found = writers.find(read.Resource.Id());
 				if (found == writers.end()) {
-					PutText(*graph.Find(ids[index]), Key("external", input), "yes");
+					setText(ids[index], Key("external", input), "yes");
 					continue;
 				}
 
@@ -802,20 +827,16 @@ namespace studio {
 					producer = &found->second.front();
 				}
 				if (producer != nullptr && !producer->Port.empty() && !input.empty()) {
-					const nodegraph::LinkResult linked =
-						graph.Connect(producer->Node, producer->Port, ids[index], input);
-					if (linked != nodegraph::LinkResult::Made) {
-						error = "could not restore " + std::string(read.Resource.Text()) + ": " +
-								nodegraph::Describe(linked);
-						graph.Clear();
+					const ang::Link link{producer->Node, producer->Port, ids[index], input};
+					const ang::LinkVerdict verdict = ang::CheckNewLink(graph, types, link);
+					if (!verdict.Ok) {
+						error =
+							"could not restore " + std::string(read.Resource.Text()) + ": " + verdict.Reason;
+						graph = {};
 						return false;
 					}
-					PutText(*graph.Find(ids[index]), Key("connected", input), "yes");
-					PutText(
-						*graph.Find(ids[index]),
-						Key("read-baseline", input),
-						std::string(read.Resource.Text())
-					);
+					graph.Apply(ang::edit::AddLink{link});
+					setText(ids[index], Key("connected", input), "yes");
 				}
 			}
 		}
@@ -823,15 +844,12 @@ namespace studio {
 	}
 
 	bool SaveRenderPipelineGraph(
-		const nodegraph::Graph &graph,
-		const PipelineDocument &basis,
-		PipelineDocument &document,
-		std::string &error
+		const ang::Graph &graph, const PipelineDocument &basis, PipelineDocument &document, std::string &error
 	) {
 		using namespace engine::graph;
 		document.Clear();
 		error.clear();
-		RegisterRenderPipelineNodeTypes();
+		RegisterRenderNodeKinds();
 
 		std::unordered_map<uint32_t, Edit> resources;
 		std::vector<Name> resourceOrder;
@@ -843,26 +861,29 @@ namespace studio {
 		}
 		const std::unordered_map<uint32_t, Edit> originalResources = resources;
 
-		std::unordered_map<nodegraph::NodeId, Name> names;
+		std::unordered_map<std::string, Name> names;
 		std::unordered_set<uint32_t> usedNames;
-		for (const nodegraph::Node &node : graph.Nodes()) {
+		for (const ang::NodeInstance &node : graph.Nodes()) {
 			const Name kind = KindOf(node);
 			if (!kind.IsValid()) {
 				error = "the canvas contains a non-render node";
 				return false;
 			}
 			const std::string originalName = TextOf(node, ORIGINAL_NAME);
-			if (!originalName.empty() && node.Label == originalName) {
+			if (!originalName.empty() && TextOf(node, RENDER_PIPELINE_LABEL) == originalName) {
 				names[node.Id] = Name(originalName);
 				usedNames.insert(names[node.Id].Id());
-			} else {
-				names[node.Id] = UniqueNodeName(node, kind, usedNames);
+			}
+		}
+		for (const ang::NodeInstance &node : graph.Nodes()) {
+			if (!names.contains(node.Id)) {
+				names[node.Id] = UniqueNodeName(node, KindOf(node), usedNames);
 			}
 		}
 
-		for (const nodegraph::Link &link : graph.Links()) {
-			const nodegraph::Node *from = graph.Find(link.From);
-			const nodegraph::Node *to = graph.Find(link.To);
+		for (const ang::Link &link : graph.Links()) {
+			const ang::NodeInstance *from = graph.FindNode(link.FromNode);
+			const ang::NodeInstance *to = graph.FindNode(link.ToNode);
 			if (from == nullptr || to == nullptr) {
 				error = "a render link names a node that no longer exists";
 				return false;
@@ -902,7 +923,7 @@ namespace studio {
 			resourceOrder.push_back(name);
 		};
 
-		for (const nodegraph::Node &node : graph.Nodes()) {
+		for (const ang::NodeInstance &node : graph.Nodes()) {
 			const Name kind = KindOf(node);
 			const NodeKindSpec *spec = NodeCatalogue::Find(kind);
 			if (spec == nullptr) {
@@ -914,12 +935,12 @@ namespace studio {
 				const std::string originalResource = OriginalBindingResource(node, true, output);
 				const auto original = originalResources.find(Name(originalResource).Id());
 				const Edit *baseline = original == originalResources.end() ? nullptr : &original->second;
-				const bool isExisting = node.Widgets.contains(ORIGINAL_NAME);
+				const bool isExisting = node.Params.contains(ORIGINAL_NAME);
 				const bool hadBinding = HasBinding(node, true, output);
 				std::string resource = TextOf(node, Key("write", output));
 				const bool outputLinked =
-					std::any_of(graph.Links().begin(), graph.Links().end(), [&](const nodegraph::Link &link) {
-						return link.From == node.Id && link.FromPort == output;
+					std::any_of(graph.Links().begin(), graph.Links().end(), [&](const ang::Link &link) {
+						return link.FromNode == node.Id && link.FromPort == output;
 					});
 				if (resource.empty() && (!isExisting || outputLinked)) {
 					resource = std::string(names[node.Id].Text()) + "." + output;
@@ -941,7 +962,7 @@ namespace studio {
 					const std::string defaultFormat = format == nullptr ? "RGBA16F" : format->Default;
 					const std::string originalKey = Key("original-parameter", "format");
 					const std::string originalValue =
-						node.Widgets.contains(originalKey) ? TextOf(node, originalKey) : defaultFormat;
+						node.Params.contains(originalKey) ? TextOf(node, originalKey) : defaultFormat;
 					if (!isExisting || SelectOf(node, "format", defaultFormat) != originalValue) {
 						settings.Format = selected;
 					}
@@ -982,7 +1003,7 @@ namespace studio {
 
 		std::vector<Edit> enables;
 		std::vector<Edit> moves;
-		for (const nodegraph::Node &node : graph.Nodes()) {
+		for (const ang::NodeInstance &node : graph.Nodes()) {
 			const Name kind = KindOf(node);
 			const NodeKindSpec &spec = *NodeCatalogue::Find(kind);
 			const Name name = names.at(node.Id);
@@ -998,9 +1019,8 @@ namespace studio {
 			document.Record(add);
 
 			const auto currentRead = [&](std::string_view port) {
-				if (const nodegraph::Link *link = graph.LinkInto(node.Id, std::string(port));
-					link != nullptr) {
-					const nodegraph::Node *producer = graph.Find(link->From);
+				if (const ang::Link *link = LinkInto(graph, node.Id, port); link != nullptr) {
+					const ang::NodeInstance *producer = graph.FindNode(link->FromNode);
 					if (producer == nullptr) {
 						return std::string();
 					}
@@ -1068,7 +1088,7 @@ namespace studio {
 					continue;
 				}
 				std::string resource = TextOf(node, Key("write", key));
-				if (resource.empty() && !node.Widgets.contains(ORIGINAL_NAME)) {
+				if (resource.empty() && !node.Params.contains(ORIGINAL_NAME)) {
 					resource = std::string(name.Text()) + "." + key;
 				}
 				if (!resource.empty()) {
@@ -1076,14 +1096,15 @@ namespace studio {
 				}
 			}
 
-			for (const auto &[key, value] : node.Widgets) {
-				if (!key.starts_with(std::string(INTERNAL_PREFIX) + "parameter.")) {
+			const std::string unknownPrefix = std::string(INTERNAL_PREFIX) + "parameter.";
+			for (const auto &[key, value] : node.Params) {
+				if (!key.starts_with(unknownPrefix)) {
 					continue;
 				}
 				Edit set;
 				set.Kind = EditKind::Set;
-				set.Key = Name(std::string_view(key).substr(INTERNAL_PREFIX.size() + 10));
-				set.Value = value.Text;
+				set.Key = Name(std::string_view(key).substr(unknownPrefix.size()));
+				set.Value = value.Get<std::string>() != nullptr ? *value.Get<std::string>() : std::string();
 				document.Record(set);
 			}
 			for (const char *key : {"queue", "async"}) {
@@ -1100,7 +1121,7 @@ namespace studio {
 				set.Value = ToggleOf(node, "profile", true) ? "true" : "false";
 				document.Record(set);
 			}
-			if (node.Widgets.contains(PREVIEW_ENABLED)) {
+			if (!RenderPipelinePreviewPort(node.Def).empty()) {
 				for (const char *key : {PREVIEW_ENABLED, PREVIEW_REVERSE}) {
 					Edit set;
 					set.Kind = EditKind::Set;
@@ -1140,8 +1161,8 @@ namespace studio {
 			Edit move;
 			move.Kind = EditKind::Move;
 			move.Name = name;
-			move.X = node.X;
-			move.Y = node.Y;
+			move.X = node.Position.X;
+			move.Y = node.Position.Y;
 			moves.push_back(move);
 		}
 
@@ -1154,5 +1175,44 @@ namespace studio {
 		AppendEditedAuthoringMetadata(basis, graph, names, document);
 		AppendOrphanNodeEdits(basis, document);
 		return true;
+	}
+
+	void RenderPipelineFeedback(
+		const ang::Graph &graph,
+		const RenderGraph &built,
+		const PipelineProfile &profile,
+		ang::Plan &plan,
+		ang::RunReport &report
+	) {
+		plan = {};
+		report = {};
+		const auto nodes = graph.Nodes();
+		for (size_t index = 0; index < nodes.size(); index++) {
+			ang::PlannedNode planned;
+			planned.Id = nodes[index].Id;
+			plan.Nodes.push_back(std::move(planned));
+			ang::NodeReport entry;
+			const NodeId id{static_cast<uint32_t>(index + 1)};
+			if (const Node *pass = built.Find(id)) {
+				for (const ResourceId written : pass->Writes) {
+					for (const ProfileResource &resource : profile.Resources) {
+						if (resource.Id == written) {
+							entry.Bytes += static_cast<size_t>(resource.Bytes);
+						}
+					}
+				}
+			}
+			for (const ProfilePass &pass : profile.Passes) {
+				if (pass.Node == id) {
+					const double microseconds = pass.Elapsed > 0.0 ? pass.Elapsed : pass.Wall;
+					if (microseconds > 0.0) {
+						entry.Status = ang::NodeStatus::Ran;
+						entry.Milliseconds = microseconds / 1000.0;
+					}
+				}
+			}
+			report.Nodes.push_back(std::move(entry));
+		}
+		plan.Reindex();
 	}
 }

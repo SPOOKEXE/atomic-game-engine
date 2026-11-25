@@ -59,6 +59,22 @@ namespace engine::angview {
 			return slash == std::string_view::npos ? id : id.substr(0, slash);
 		}
 
+		std::string FormatBytes(size_t bytes) {
+			char text[32];
+			const double value = static_cast<double>(bytes);
+			if (bytes >= 1024 * 1024) {
+				std::snprintf(text, sizeof(text), "%.1f MiB", value / (1024.0 * 1024.0));
+			} else if (bytes >= 1024) {
+				std::snprintf(text, sizeof(text), "%.1f KiB", value / 1024.0);
+			} else {
+				std::snprintf(text, sizeof(text), "%zu B", bytes);
+			}
+			return text;
+		}
+
+		// Room around an auto-framed group's members.
+		constexpr float GROUP_PADDING = 12.0f;
+
 		std::string FormatMilliseconds(double milliseconds) {
 			char text[32];
 			std::snprintf(text, sizeof(text), milliseconds < 10.0 ? "%.2f ms" : "%.1f ms", milliseconds);
@@ -91,6 +107,11 @@ namespace engine::angview {
 		Dirty();
 	}
 
+	void View::VisualsChanged() {
+		LayoutStale = true;
+		Dirty();
+	}
+
 	void View::EnsureLayout() {
 		// Host geometry can change without a graph edit, so it is always asked.
 		if (!GeometrySource && !LayoutStale && LayoutRevision == Document.Revision()) {
@@ -100,7 +121,7 @@ namespace engine::angview {
 			Shapes.Clear();
 			GeometrySource(Shapes);
 		} else {
-			Shapes.Build(Document, Types, Style);
+			Shapes.Build(Document, Types, Style, {.Title = NodeTitle, .Image = NodeImages});
 		}
 		if (Drag == DragKind::Nodes || Drag == DragKind::Group) {
 			Shapes.Offset(DragNodes, DragOffset);
@@ -183,9 +204,8 @@ namespace engine::angview {
 			}
 		}
 		for (const ang::Group &group : Document.Groups()) {
-			const Rect header{
-				group.Position, {group.Position.X + group.Size.X, group.Position.Y + Style.HeaderHeight}
-			};
+			const Rect frame = GroupFrame(group);
+			const Rect header{frame.Min, {frame.Max.X, frame.Min.Y + Style.HeaderHeight}};
 			if (header.Contains(point)) {
 				return {.Kind = HitKind::Group, .Group = group.Id};
 			}
@@ -675,6 +695,45 @@ namespace engine::angview {
 		}
 	}
 
+	Rect View::GroupFrame(const ang::Group &group) {
+		if (group.Size.X != 0.0f || group.Size.Y != 0.0f) {
+			return {group.Position, group.Position + group.Size};
+		}
+		EnsureLayout();
+		std::vector<std::string> members;
+		for (const ang::NodeInstance &node : Document.Nodes()) {
+			if (node.Group == group.Id) {
+				members.push_back(node.Id);
+			}
+		}
+		if (members.empty()) {
+			return {group.Position, group.Position};
+		}
+		const Rect bounds = Shapes.Bounds(&members);
+		return {
+			{bounds.Min.X - GROUP_PADDING, bounds.Min.Y - GROUP_PADDING - Style.HeaderHeight},
+			{bounds.Max.X + GROUP_PADDING, bounds.Max.Y + GROUP_PADDING},
+		};
+	}
+
+	std::string View::GroupSelection(std::string label) {
+		std::vector<ang::Edit> edits;
+		std::string id;
+		for (size_t number = 1; id.empty() || Document.FindGroup(id) != nullptr; ++number) {
+			id = "group" + std::to_string(number);
+		}
+		edits.push_back(ang::edit::AddGroup{{.Id = id, .Label = std::move(label)}});
+		for (const std::string &node : Selected) {
+			if (Document.FindNode(node) != nullptr) {
+				edits.push_back(ang::edit::SetNodeGroup{node, id});
+			}
+		}
+		if (edits.size() == 1 || !Apply(edits)) {
+			return {};
+		}
+		return id;
+	}
+
 	void View::Frame() {
 		EnsureLayout();
 		const Rect bounds = Shapes.Bounds(Selected.empty() ? nullptr : &Selected);
@@ -986,12 +1045,17 @@ namespace engine::angview {
 		}
 
 		for (const ang::Group &group : Document.Groups()) {
-			core::Vector2 position = group.Position;
-			if (Drag == DragKind::Group && group.Id == DragGroup) {
-				position = position + DragOffset;
+			Rect frame = GroupFrame(group);
+			// An auto frame follows its members, which the layout already offsets.
+			const bool sized = group.Size.X != 0.0f || group.Size.Y != 0.0f;
+			if (sized && Drag == DragKind::Group && group.Id == DragGroup) {
+				frame = {frame.Min + DragOffset, frame.Max + DragOffset};
 			}
-			const core::Vector2 min = ToView(position);
-			const core::Vector2 max = ToView(position + group.Size);
+			if (frame.Max.X <= frame.Min.X && frame.Max.Y <= frame.Min.Y) {
+				continue;
+			}
+			const core::Vector2 min = ToView(frame.Min);
+			const core::Vector2 max = ToView(frame.Max);
 			list.push_back(
 				{.Kind = DrawKind::Rect,
 				 .A = min,
@@ -1130,12 +1194,18 @@ namespace engine::angview {
 			const float radius = Style.CornerRadius * zoom;
 			list.push_back({.Kind = DrawKind::Rect, .A = min, .B = max, .Fill = body, .Radius = radius});
 			const float header = Style.HeaderHeight * zoom;
+			Rgba headerColour = Style.NodeHeader;
+			if (NodeHeader && instance != nullptr) {
+				if (const auto tint = NodeHeader(*instance)) {
+					headerColour = *tint;
+				}
+			}
 			if (Style.ShowHeaders) {
 				list.push_back(
 					{.Kind = DrawKind::Rect,
 					 .A = min,
 					 .B = {max.X, min.Y + header},
-					 .Fill = Style.NodeHeader,
+					 .Fill = headerColour,
 					 .Radius = radius}
 				);
 			}
@@ -1196,12 +1266,26 @@ namespace engine::angview {
 					);
 				}
 			}
-			if (Style.ShowTimings && status != nullptr && status->Status != ang::NodeStatus::Idle) {
+			if (node.Image != 0) {
+				list.push_back(
+					{.Kind = DrawKind::Image,
+					 .A = ToView(node.ImageBounds.Min),
+					 .B = ToView(node.ImageBounds.Max),
+					 .Image = node.Image}
+				);
+			}
+			// Idle with bytes is memory known without a measured run: bytes alone.
+			const bool idle = status != nullptr && status->Status == ang::NodeStatus::Idle;
+			if (Style.ShowTimings && status != nullptr && (!idle || status->Bytes > 0)) {
 				const float slow =
 					static_cast<float>(status->Milliseconds / std::max(1e-6, Style.TimingSlowMilliseconds));
-				std::string label = status->Status == ang::NodeStatus::Ran
+				std::string label = idle ? std::string()
+									: status->Status == ang::NodeStatus::Ran
 										? FormatMilliseconds(status->Milliseconds)
 										: std::string(ang::Describe(status->Status));
+				if (status->Bytes > 0) {
+					label += (label.empty() ? "" : "  ") + FormatBytes(status->Bytes);
+				}
 				list.push_back(
 					{.Kind = DrawKind::Text,
 					 .A = {min.X, max.Y + 2.0f * zoom},

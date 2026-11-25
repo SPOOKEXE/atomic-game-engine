@@ -2,10 +2,9 @@
 
 The editor. `client` tier, with a named escape to `Mono::server`.
 
-**Two libraries live here, not one.** `Mono::studio` is this directory's
-`include/`, `src/` and `app/`. `Mono::nodegraph` is `nodegraph/` beside them, a
-node graph and its ImGui canvas that nothing else in the repository links; it
-has its own `AGENTS.md` and the section below says what each half owns.
+`Mono::studio` is this directory's `include/`, `src/` and `app/`. Its node
+graph editors build on the engine's `ang` and `angview`; the section below says
+what each side owns.
 
 ## Nothing in this program is world state
 
@@ -459,42 +458,32 @@ testable, and moving logic out to avoid testing it is no longer the only option.
 
 ## The node graph library is shared; Studio owns its editors
 
-`nodegraph/` beside this file is `Mono::nodegraph`: the registry, the model,
-folding, layout, evaluation, the canvas, the save format and pictures as pixels.
-It has its own `AGENTS.md`, its own `tests/` and no first-party dependency at
-all, and it is here because this editor is the only thing in the repository that
-links it.
+`ang` (`mono.engine/ang`) is the graph model: registry, edits with inverses,
+compile, runner and timing. `angview` (`mono.engine/angview`) is the headless
+view: drags, wires, selection, pan, zoom, palette, groups and the draw list.
+`ui::NodeGraphCanvas` paints a view with ImGui and forwards input. All three
+are engine modules with their own `AGENTS.md` and tests.
 
-It has moved three times and the trail matters. `studio/NodeGraph.hpp` was this
-program's own implementation of a design that already existed as a standalone
-library, and `D00113` closed by taking the further-along copy - this one -
-upstream. Upstream was a private repository, which made this public one
-unclonable by anybody but its owner and stopped the v0.18.0 release at checkout,
-so at v0.18.0 the library came back in as `Engine::nodegraph`. At v0.19 it came
-the rest of the way: an imgui-carrying `client` target that nothing in the
-engine reaches is an editor widget library, and `mono.engine` ships nothing on
-its own. Its row in `expected_graph.json` has no `layer`, which is what makes
-"only the editor links this" a rule the architecture check enforces rather than
-a fact about today.
+**The libraries own everything that is true of any node graph.** **Studio owns
+host-specific documents, node types and presentation.** Each editor builds its
+own `ang::Registry`, so a palette only offers its own nodes:
+`src/RenderPipelineGraph.cpp` adapts render pipeline documents,
+`src/AssetPipelineGraph.cpp` adapts bake documents and
+`src/ImageComposerGraph.cpp` adapts image-composer documents. Node ids are
+durable document ids, params hold values with `ParamDef::Widget` hints, and
+the inspectors draw params from those hints (`src/GraphParams.cpp`).
 
-The split matters whenever an editor is added. **The library owns everything
-that is true of any node graph.** **Studio owns host-specific documents, node
-types and presentation.** `src/RenderPipelineGraph.cpp` adapts render pipeline
-documents, and `src/ImageComposerGraph.cpp` adapts image-composer documents.
-Each registers only the node types for its document through the public
-`NodeTypes::Register` API. The library contains no Studio node vocabulary, and
-its tests register their own fixture.
+Editor undo stores the `ang::EditRecord`s the graph returns
+(`studio/GraphHistory.hpp`): a canvas gesture is one record from
+`View::TakeEdits`, an inspector field edit is one record, and a typing run in
+one field folds into one step. Render pipeline previews are host pictures the
+view lays out at their aspect (`View::NodeImages`); per-pass time and bytes
+come from the pipeline profile as the view's run feedback.
 
-The canvas works from CPU `PreviewImage` pixels and accepts an `ImageSink` from
-the host when a texture is needed. Its `Chrome` settings are plain values, with
-no dependency on Studio preferences or renderer assets. Keep those host choices
-outside `mono.studio/nodegraph` so headless tests need no GPU.
-
-Do not build a second graph model or canvas for another editor. Both current
-editors use the shared library, and future ones should too. `just
+Do not build a second graph model or canvas for another editor. `just
 check-one-node-graph` enforces the boundary: no first-party file outside
-`mono.studio/nodegraph` may open `namespace nodegraph`. Host files may register
-node types through its public API without opening that namespace.
+`mono.engine/ang` may open `namespace ang`, and nothing may open a `nodegraph`
+namespace.
 
 ## Configuration lives in the person's folder, not beside the binary
 

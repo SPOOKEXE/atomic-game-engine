@@ -58,7 +58,7 @@ build parallel copies.
 | scene services and registered properties | Inspectable object model | Hold `NavigationService`, path objects, modifiers, links, agents, and sensors |
 | generated Luau and JavaScript bindings | One reflected script surface | Expose navigation through registered scene classes and methods |
 | content-addressed assets and manifests | Stable delivery by content | Publish baked tile sets and compiled behaviour plans as immutable artifacts |
-| `nodegraph` | Studio-only generic graph editing library | Edit behaviour documents in Studio without linking editor types into engine runtime |
+| `ang` and `angview` | General node graph model and headless view | Edit behaviour documents in Studio without linking editor types into engine runtime |
 | `scene::Portal` and seam transforms | Traversal between remote regions | Form explicit navigation links rather than teaching the mesh about portal rendering |
 | character isolation plan | Neutral character intent and player-independent characters | Let player clients, bots, scripts, and replays share one character input path |
 
@@ -1003,7 +1003,7 @@ description, and semantic labels for logical components.
 
 ### Compile format
 
-Studio may use its `nodegraph` library to edit a behaviour document. Editor
+Studio may use `ang` and `angview` to edit a behaviour document. Editor
 node ids, positions, groups, comments, and collapsed state are authoring data.
 The engine compiler consumes a canonical domain document containing stable node
 types, named ports, typed fields, and stable connections.
@@ -1380,7 +1380,7 @@ overlays and docks do no tessellation, upload, or query work.
 
 ### Behaviour editor
 
-Studio uses the existing nodegraph library as a view and editing tool. The
+Studio uses `ang` and `angview` as a view and editing tool. The
 navigation module owns the domain schema and compiler. The editor provides:
 
 - searchable domain-specific nodes;
@@ -1683,7 +1683,7 @@ Gate:
 - script requests commit at declared barriers and never run in worker callbacks
   or solvers;
 - SVG/HTML exports are deterministic, self-contained, escaped, and read-only;
-- runtime uses no Studio nodegraph objects;
+- runtime uses no `angview` or Studio editor objects;
 - operation budgets suspend safely without losing task state;
 - goal state does not duplicate character or animation state;
 - custom scripts can drive goals without extending the plan language.

@@ -81,6 +81,8 @@ namespace engine::angview {
 			NodeLayout &node = NodeList[found->second];
 			node.Bounds.Min = node.Bounds.Min + offset;
 			node.Bounds.Max = node.Bounds.Max + offset;
+			node.ImageBounds.Min = node.ImageBounds.Min + offset;
+			node.ImageBounds.Max = node.ImageBounds.Max + offset;
 			for (auto *ports : {&node.Inputs, &node.Outputs}) {
 				for (PortLayout &port : *ports) {
 					port.Centre = port.Centre + offset;
@@ -89,7 +91,9 @@ namespace engine::angview {
 		}
 	}
 
-	void Layout::Build(const ang::Graph &graph, const ang::Registry &registry, const Theme &theme) {
+	void Layout::Build(
+		const ang::Graph &graph, const ang::Registry &registry, const Theme &theme, const LayoutHooks &hooks
+	) {
 		Clear();
 		for (const ang::NodeInstance &node : graph.Nodes()) {
 			NodeLayout layout;
@@ -100,12 +104,30 @@ namespace engine::angview {
 			layout.Title = def != nullptr									 ? def->Label
 						   : subgraph != nullptr && !subgraph->Label.empty() ? subgraph->Label
 																			 : node.Def;
+			if (hooks.Title) {
+				std::string title = hooks.Title(node);
+				if (!title.empty()) {
+					layout.Title = std::move(title);
+				}
+			}
 			const core::Vector2 origin = node.Position;
 			const auto inputs = PortsOf(graph, registry, node, ang::Direction::Input);
 			const auto outputs = PortsOf(graph, registry, node, ang::Direction::Output);
 			const size_t rows = std::max<size_t>(1, std::max(inputs.size(), outputs.size()));
-			const float height =
+			float height =
 				theme.HeaderHeight + theme.NodePadding * 2.0f + theme.RowHeight * static_cast<float>(rows);
+			if (hooks.Image) {
+				const NodeImage image = hooks.Image(node);
+				if (image.Handle != 0) {
+					// Full inner width; very wide or tall pictures are clamped so a node stays usable.
+					const float width = theme.NodeWidth - theme.NodePadding * 2.0f;
+					const float aspect = std::clamp(image.Aspect > 0.0f ? image.Aspect : 1.0f, 0.25f, 4.0f);
+					const core::Vector2 min{origin.X + theme.NodePadding, origin.Y + height};
+					layout.Image = image.Handle;
+					layout.ImageBounds = {min, {min.X + width, min.Y + width / aspect}};
+					height += width / aspect + theme.NodePadding;
+				}
+			}
 			layout.Bounds = {origin, {origin.X + theme.NodeWidth, origin.Y + height}};
 			const float firstRow = origin.Y + theme.HeaderHeight + theme.NodePadding + theme.RowHeight * 0.5f;
 			for (size_t index = 0; index < inputs.size(); ++index) {

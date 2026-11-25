@@ -74,9 +74,8 @@ endfunction()
 # a member is `mono.<name>`, and a tool is under `mono.tools`.
 #
 # **The glob at the end is not a fourth guess, it is the general case.** A module
-# can live under the one program that owns it - `mono.studio/nodegraph` is a node
-# editor nothing else links - and hard-coding a prefix per owner is a list that
-# goes stale the next time one moves.
+# can live under the one program that owns it, and hard-coding a prefix per
+# owner is a list that goes stale the next time one moves.
 function(_directory_of name out)
 	foreach(candidate "mono.engine/${name}" "mono.${name}" "mono.tools/${name}")
 		if(IS_DIRECTORY "${ROOT}/${candidate}")
