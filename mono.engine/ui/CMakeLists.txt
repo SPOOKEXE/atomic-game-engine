@@ -41,6 +41,10 @@ mono_add_library(ui
 		# still does not link it.
 		Engine::gui
 
+		# L4, `shared`. The ImGui painter for node graph views draws what
+		# `angview` decides; the interaction itself never lives here.
+		Engine::angview
+
 	# SDL_Window and SDL_Event appear in the public header as forward
 	# declarations only, exactly as `render` declares SDL_Window. The GPU types
 	# are behind the pimpl.
