@@ -133,3 +133,29 @@ TEST_CASE("upgrade migrates step by step and refuses without a migrator", "[ang]
 	CHECK(graph.FindNode("stuck")->Version == 1);
 	CHECK(refused == std::vector<std::string>{"stuck"});
 }
+
+TEST_CASE("load replaces the document or refuses and leaves it alone", "[ang][graph]") {
+	Graph graph;
+	tests::Add(graph, tests::Node("old", "test.const"));
+	const uint64_t revision = graph.Revision();
+	CHECK(!graph.Load({tests::Node("a", "x"), tests::Node("a", "x")}, {}).Ok);
+	CHECK(!graph.Load({tests::Node("a", "x")}, {{"a", "out", "b", "in"}}).Ok);
+	CHECK(!graph
+			   .Load(
+				   {tests::Node("a", "x"), tests::Node("b", "x")},
+				   {{"a", "o", "b", "i"}, {"a", "o", "b", "i"}}
+			   )
+			   .Ok);
+	CHECK(graph.FindNode("old") != nullptr);
+	CHECK(graph.Revision() == revision);
+	REQUIRE(graph.Load({tests::Node("a", "x"), tests::Node("b", "x")}, {{"a", "o", "b", "i"}}).Ok);
+	CHECK(graph.FindNode("old") == nullptr);
+	CHECK(graph.Revision() == revision + 1);
+	// Lookups stay right after a node in the middle goes.
+	tests::Add(graph, tests::Node("c", "x"));
+	REQUIRE(graph.Apply(edit::RemoveNode{"a"}).Ok);
+	CHECK(graph.FindNode("b")->Id == "b");
+	CHECK(graph.FindNode("c")->Id == "c");
+	CHECK(graph.Links().empty());
+	CHECK(!graph.Apply(edit::AddNode{tests::Node("c", "x")}).Ok);
+}

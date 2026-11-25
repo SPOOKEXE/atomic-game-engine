@@ -130,8 +130,8 @@ namespace engine::graph {
 
 		// Lowers the derived dependencies to an ang Tick graph and lets ang (and
 		// graphcore under it) compute waves and the LowestReady serial order.
-		// Each node gets its own definition: an input per read resource, an
-		// output per written resource, typed by the resource lifetime, plus
+		// Nodes with the same ports share a definition: an input per read resource,
+		// an output per written resource, typed by the resource lifetime, plus
 		// `after`/`done` order ports for edges that carry no resource.
 		EngineGraphStatus OrderThroughAng(
 			const EngineGraph &graph,
@@ -155,12 +155,26 @@ namespace engine::graph {
 				return std::string(LifetimeType(graph.FindResourceDesc(resource)->Lifetime));
 			};
 
-			std::vector<ang::Edit> edits;
-			edits.reserve(nodes.size() * 2);
-			size_t links = 0;
+			std::vector<ang::NodeInstance> instances;
+			instances.reserve(nodes.size());
+			std::vector<ang::Link> links;
+			std::unordered_map<std::string, std::string> definitions;
 			for (size_t index = 0; index < nodes.size(); ++index) {
 				const EngineNode &node = nodes[index];
-				ang::NodeDef def{.Id = "engine.node." + std::to_string(index)};
+				std::string signature;
+				for (const auto *resources : {&node.Reads, &node.Writes}) {
+					for (const core::Name resource : *resources) {
+						signature += std::to_string(resource.Id()) + ',';
+					}
+					signature += ';';
+				}
+				const auto [known, added] =
+					definitions.emplace(std::move(signature), "engine.node." + std::to_string(index));
+				instances.push_back({.Id = std::to_string(index), .Def = known->second});
+				if (!added) {
+					continue;
+				}
+				ang::NodeDef def{.Id = known->second};
 				def.Inputs.push_back(
 					{.Name = "after", .Type = std::string(ORDER_TYPE), .Optional = true, .MaximumLinks = 0}
 				);
@@ -189,11 +203,6 @@ namespace engine::graph {
 					offender = node.Name;
 					return EngineGraphStatus::InvalidDependency;
 				}
-				edits.push_back(
-					ang::edit::AddNode{
-						{.Id = std::to_string(index), .Def = "engine.node." + std::to_string(index)}
-					}
-				);
 			}
 			for (size_t before = 0; before < nodes.size(); ++before) {
 				// Sorted so link order, and with it graphcore's tie breaks, never
@@ -208,29 +217,22 @@ namespace engine::graph {
 						if (producer != before) {
 							continue;
 						}
-						edits.push_back(
-							ang::edit::AddLink{
-								{std::to_string(before),
-								 ResourcePort(resource),
-								 std::to_string(consumer),
-								 ResourcePort(resource)}
-							}
+						links.push_back(
+							{std::to_string(before),
+							 ResourcePort(resource),
+							 std::to_string(consumer),
+							 ResourcePort(resource)}
 						);
 						carried = true;
-						++links;
 					}
 					if (!carried) {
-						edits.push_back(
-							ang::edit::AddLink{
-								{std::to_string(before), "done", std::to_string(consumer), "after"}
-							}
-						);
-						++links;
+						links.push_back({std::to_string(before), "done", std::to_string(consumer), "after"});
 					}
 				}
 			}
+			const size_t linkCount = links.size();
 			ang::Graph lowered;
-			if (!lowered.Apply(edits).Ok) {
+			if (!lowered.Load(std::move(instances), std::move(links)).Ok) {
 				offender = {};
 				return EngineGraphStatus::InvalidDependency;
 			}
@@ -238,7 +240,7 @@ namespace engine::graph {
 			const ang::CompileOptions options{
 				.Runs = ang::Domain::Tick,
 				.MaximumNodes = EngineGraph::MAXIMUM_NODES,
-				.MaximumLinks = links + 1,
+				.MaximumLinks = linkCount + 1,
 				.MaximumPorts =
 					size_t{EngineGraph::MAXIMUM_NODES} * (2 * EngineGraph::MAXIMUM_RESOURCE_USES + 2),
 				.MaximumIdentityBytes = 64u * 1024u * 1024u,

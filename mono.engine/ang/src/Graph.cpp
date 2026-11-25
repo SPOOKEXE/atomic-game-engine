@@ -36,12 +36,43 @@ namespace engine::ang {
 	}
 
 	const NodeInstance *Graph::FindNode(std::string_view id) const {
-		for (const auto &node : NodeList) {
-			if (node.Id == id) {
-				return &node;
+		const auto found = NodeAt.find(id);
+		return found == NodeAt.end() ? nullptr : &NodeList[found->second];
+	}
+
+	void Graph::IndexNodes() {
+		NodeAt.clear();
+		for (size_t index = 0; index < NodeList.size(); ++index) {
+			NodeAt.emplace(NodeList[index].Id, index);
+		}
+	}
+
+	EditResult Graph::Load(std::vector<NodeInstance> nodes, std::vector<Link> links) {
+		Graph loaded;
+		loaded.NodeList = std::move(nodes);
+		loaded.NodeAt.reserve(loaded.NodeList.size());
+		for (size_t index = 0; index < loaded.NodeList.size(); ++index) {
+			const std::string &id = loaded.NodeList[index].Id;
+			if (id.empty() || !loaded.NodeAt.emplace(id, index).second) {
+				return Refuse("node id '" + id + "' is empty or repeated");
 			}
 		}
-		return nullptr;
+		loaded.LinkKeys.reserve(links.size());
+		for (const Link &wire : links) {
+			if (!loaded.NodeAt.contains(wire.FromNode) || !loaded.NodeAt.contains(wire.ToNode)) {
+				return Refuse("link names a node that does not exist");
+			}
+			if (wire.FromPort.empty() || wire.ToPort.empty()) {
+				return Refuse("link port is empty");
+			}
+			if (!loaded.LinkKeys.insert(LinkKey(wire)).second) {
+				return Refuse("link already exists");
+			}
+		}
+		loaded.LinkList = std::move(links);
+		loaded.RevisionCount = RevisionCount + 1;
+		*this = std::move(loaded);
+		return {.Ok = true};
 	}
 
 	const Group *Graph::FindGroup(std::string_view id) const {
@@ -108,6 +139,7 @@ namespace engine::ang {
 					if (FindNode(add.Node.Id) != nullptr) {
 						return Refuse("node '" + add.Node.Id + "' already exists");
 					}
+					NodeAt.emplace(add.Node.Id, NodeList.size());
 					NodeList.push_back(add.Node);
 					return Done(change, {edit::RemoveNode{add.Node.Id}});
 				},
@@ -132,6 +164,7 @@ namespace engine::ang {
 						LinkKeys.insert(LinkKey(wire));
 					}
 					NodeList.erase(found);
+					IndexNodes();
 					return Done(change, std::move(inverse));
 				},
 				[&](const edit::MoveNode &move) -> EditResult {

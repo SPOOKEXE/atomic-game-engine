@@ -244,7 +244,13 @@ namespace engine::ang {
 				if (Refused) {
 					return;
 				}
-				for (size_t pass = 0; pass <= Links.size(); ++pass) {
+				const bool generic = std::any_of(Nodes.begin(), Nodes.end(), [](const WorkNode &node) {
+					const auto named = [](const PortDef &port) { return !port.Generic.empty(); };
+					return node.Def != nullptr &&
+						   (std::any_of(node.Def->Inputs.begin(), node.Def->Inputs.end(), named) ||
+							std::any_of(node.Def->Outputs.begin(), node.Def->Outputs.end(), named));
+				});
+				for (size_t pass = 0; generic && pass <= Links.size(); ++pass) {
 					bool changed = false;
 					for (const Link &wire : Links) {
 						WorkNode *from = Find(wire.FromNode);

@@ -13,6 +13,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <variant>
 #include <vector>
@@ -150,6 +151,11 @@ namespace engine::ang {
 		// Applies edits in order, all or nothing. The record's inverse undoes the batch.
 		EditResult Apply(std::span<const Edit> changes);
 
+		// Replaces the document's nodes and links in one step and drops its groups.
+		// Makes no undo record, so it is for loading and generated graphs. Refuses
+		// what Apply would, leaving the graph unchanged.
+		EditResult Load(std::vector<NodeInstance> nodes, std::vector<Link> links);
+
 		// A node id not yet used, built from `stem` ("math.add" -> "add1", "add2").
 		std::string NewNodeId(std::string_view stem) const;
 
@@ -165,7 +171,18 @@ namespace engine::ang {
 	  private:
 		EditResult ApplyOne(const Edit &change);
 
+		struct TextHash {
+			using is_transparent = void;
+			size_t operator()(std::string_view text) const {
+				return std::hash<std::string_view>{}(text);
+			}
+		};
+
+		void IndexNodes();
+
 		std::vector<NodeInstance> NodeList{};
+		// Position of each node id in NodeList.
+		std::unordered_map<std::string, size_t, TextHash, std::equal_to<>> NodeAt{};
 		std::vector<Link> LinkList{};
 		// Every link as one key, so a duplicate is refused without a scan.
 		std::unordered_set<std::string> LinkKeys{};
