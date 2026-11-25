@@ -634,7 +634,7 @@ namespace engine::script {
 		// into one texture slot (`TextureID`, `NormalMap`, ...) as the slot's value, so it
 		// replicates and saves like a single name. Nil or an empty table clears the slot.
 		void SetTileTextures(ScriptCall &call) {
-			static constexpr std::array<std::string_view, 8> SLOTS{
+			static constexpr std::array<std::string_view, 10> SLOTS{
 				"TextureID",
 				"NormalMap",
 				"RoughnessMap",
@@ -642,7 +642,9 @@ namespace engine::script {
 				"OcclusionMap",
 				"HeightMap",
 				"EmissiveMap",
-				"PackedPbrMap"
+				"PackedPbrMap",
+				"ThicknessMap",
+				"SecondaryRoughnessMap"
 			};
 			const std::string slot = call.AsString(0);
 			if (std::find(SLOTS.begin(), SLOTS.end(), slot) == SLOTS.end())
