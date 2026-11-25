@@ -20,6 +20,7 @@ namespace studio {
 	}
 
 	void Editor::LoadRenderPipeline(WorldId world, engine::core::Name wanted) {
+		RenderPipelineTriedWorld = world.Index;
 		if (Universe == nullptr || !world.IsValid()) {
 			RenderPipelineGraph.Clear();
 			RenderPipelineWorld = {};

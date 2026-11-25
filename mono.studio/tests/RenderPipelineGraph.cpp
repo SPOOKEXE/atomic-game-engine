@@ -3,6 +3,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/World.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -961,4 +962,18 @@ TEST_CASE("render canvas sockets consume the registered common declarations", "[
 		CHECK(type->Inputs.size() == inputs);
 		CHECK(type->Outputs.size() == outputs);
 	}
+}
+
+TEST_CASE("the pipeline panels load once per world, not once per frame", "[studio][pipeline]") {
+	std::optional<uint32_t> tried;
+	CHECK(studio::RenderPipelineNeedsLoad(tried, 0));
+	// The load records the world whether it worked or not, so the next frames
+	// keep the canvas selection and view instead of reloading over a drag.
+	tried = 0;
+	CHECK(!studio::RenderPipelineNeedsLoad(tried, 0));
+	CHECK(!studio::RenderPipelineNeedsLoad(tried, 0));
+	CHECK(studio::RenderPipelineNeedsLoad(tried, 1));
+	// No active world is a world change too, tried once like any other.
+	tried = engine::world::WorldId::INVALID;
+	CHECK(!studio::RenderPipelineNeedsLoad(tried, engine::world::WorldId::INVALID));
 }

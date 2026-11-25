@@ -10,6 +10,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 
 #include <nodegraph/Graph.hpp>
+#include <optional>
 #include <string>
 
 namespace engine::render {
@@ -37,6 +38,14 @@ namespace studio {
 		engine::graph::PipelineDocument &document,
 		std::string &error
 	);
+
+	// Whether the render pipeline panels should load for `activeWorld`. Only a
+	// change of world loads: a failed or empty load is reported once and not
+	// retried every frame, because each load resets selection and view and so
+	// killed every drag in the canvas. Explicit profile picks load directly.
+	inline bool RenderPipelineNeedsLoad(std::optional<uint32_t> triedWorld, uint32_t activeWorld) {
+		return !triedWorld.has_value() || *triedWorld != activeWorld;
+	}
 
 	// Reports the renderer's admission failure without changing the document.
 	bool ValidateRenderPipelineAdmission(
