@@ -207,7 +207,9 @@ namespace engine::imagegraph {
 		// Interpolated lattice values.
 		Value,
 		// Interpolated lattice gradients.
-		Gradient
+		Gradient,
+		// Oriented, windowed sinusoids scattered over the cells.
+		Gabor
 	};
 	// Fractal lattice noise in [0, 1], alpha one.
 	struct Noise {
@@ -227,6 +229,14 @@ namespace engine::imagegraph {
 		double Gain = 0.5;
 		// Selects an independent lattice.
 		uint32_t Seed = 0;
+		// Gabor only: direction the sinusoids vary along, in degrees.
+		double Degrees = 0;
+		// Gabor only: sinusoid cycles across one cell.
+		double Frequency = 2;
+		// Gabor only: how quickly each sinusoid fades across its one-cell reach.
+		double Bandwidth = 1;
+		// Gabor only: sinusoids per cell.
+		uint32_t Impulses = 4;
 	};
 	// Value a voronoi node writes.
 	enum class VoronoiFeature : uint8_t {

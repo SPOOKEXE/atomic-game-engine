@@ -6,6 +6,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <set>
 
 TEST_SUITE_ID("engine.imagegraph.nodes")
@@ -47,7 +48,8 @@ namespace {
 }
 
 TEST_CASE("generators are deterministic per seed and stay within their range", "[imagegraph][nodes]") {
-	const std::array<Operation, 4> generators{
+	const std::array<Operation, 5> generators{
+		Noise{32, 32, NoiseType::Gabor, 4, 1, 2, 0.5, 7, 30, 2, 1, 4},
 		Noise{32, 32, NoiseType::Gradient, 6, 5, 2, 0.5, 7},
 		Voronoi{32, 32, 5, 1, VoronoiFeature::F2MinusF1, 7},
 		Wave{32, 32, WaveType::Rings, WaveProfile::Sine, 3, 0, 0, 0.4, 3, 3, 7},
@@ -69,6 +71,34 @@ TEST_CASE("generators are deterministic per seed and stay within their range", "
 			}
 		CHECK(values.size() > 8);
 	}
+}
+
+TEST_CASE("gabor noise streaks across its direction at a fixed spacing", "[imagegraph][nodes]") {
+	// Lag, in fractions of the image, at which the pattern best repeats along a direction.
+	const auto correlation = [](uint32_t size, double alongDegrees, double lag) {
+		const Image image = Run(One(Noise{size, size, NoiseType::Gabor, 8, 1, 2, 0.5, 5, 30, 2, 1, 8}));
+		const double radians = alongDegrees * 3.14159265358979 / 180;
+		const auto dx = int(std::lround(std::cos(radians) * lag * size));
+		const auto dy = int(std::lround(std::sin(radians) * lag * size));
+		double sum = 0, square = 0;
+		for (int y = int(size) / 4; y < int(size) * 3 / 4; ++y)
+			for (int x = int(size) / 4; x < int(size) * 3 / 4; ++x) {
+				const double a = At(image, x, y)[0] - 127.5, b = At(image, x + dx, y + dy)[0] - 127.5;
+				sum += a * b;
+				square += a * a;
+			}
+		return sum / square;
+	};
+	// Eight cells of two cycles: one period is 1/16 of the image at any size.
+	for (const uint32_t size : {256u, 512u}) {
+		CHECK(correlation(size, 30, 1.0 / 32) < -0.2);
+		CHECK(correlation(size, 120, 1.0 / 32) > 0.4);
+	}
+	// The gabor-only properties leave other noise's encoding alone.
+	Operation noise = Noise{};
+	CHECK_FALSE(SetProperty(noise, "degrees", 10.0));
+	REQUIRE(SetProperty(noise, "type", std::string("gabor")));
+	CHECK(SetProperty(noise, "degrees", 10.0));
 }
 
 TEST_CASE("voronoi features order and gradients reach their endpoints", "[imagegraph][nodes]") {

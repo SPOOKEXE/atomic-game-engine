@@ -6,6 +6,7 @@
 #include <engine/imagegraph/Document.hpp>
 #include <engine/render/compute/ImageGraphMeshes.hpp>
 #include <engine/render/resources/EditableImages.hpp>
+#include <engine/render/resources/TextureTable.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/editable/EditableImage.hpp>
 #include <engine/scene/editable/EditableMesh.hpp>
@@ -714,6 +715,12 @@ TEST_CASE("GPU procedural colour and filter nodes match the CPU evaluator", "[re
 			Procedural({{"noise", Noise{32, 32, NoiseType::Gradient, 4, 2, 2, 0.5, 9}, {}, {}}}, "noise");
 		mismatched = 16;
 	}
+	SECTION("gabor noise") {
+		document = Procedural(
+			{{"noise", Noise{32, 32, NoiseType::Gabor, 4, 2, 2, 0.5, 9, 30, 2, 1, 4}, {}, {}}}, "noise"
+		);
+		mismatched = 16;
+	}
 	SECTION("voronoi driven by a vector input") {
 		document = Procedural(
 			{gradient, {"cells", Voronoi{32, 32, 4, 1, VoronoiFeature::F1, 3}, {"gradient"}, {}}}, "cells"
@@ -1164,4 +1171,23 @@ TEST_CASE(
 		REQUIRE(images.Refresh(store, fixture.Render, owner) == 1);
 		check();
 	}
+}
+
+TEST_CASE("a banded upload publishes only with its last rows", "[render][gpu][imagegraph][.]") {
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	const core::Name owner("gpu-banded"), name("banded.png");
+	assets::TextureData image;
+	image.Width = 16;
+	image.Height = 5;
+	image.Format = assets::TextureFormat::RGBA8_LINEAR;
+	for (size_t byte = 0; byte < size_t(16) * 5 * 4; ++byte)
+		image.Pixels.push_back(std::byte(byte));
+	// Two rows a call.
+	REQUIRE(fixture.Render.AddTextureBand(name, image, 128, owner) == render::TextureBandStatus::Partial);
+	CHECK(fixture.Render.TextureHandle(name, owner) == nullptr);
+	REQUIRE(fixture.Render.AddTextureBand(name, image, 128, owner) == render::TextureBandStatus::Partial);
+	REQUIRE(fixture.Render.AddTextureBand(name, image, 128, owner) == render::TextureBandStatus::Added);
+	Same(fixture.Render, name, owner, image);
+	CHECK(fixture.Render.AddTextureBand(name, image, 128, owner) == render::TextureBandStatus::Refused);
 }

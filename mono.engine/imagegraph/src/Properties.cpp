@@ -28,7 +28,7 @@ namespace engine::imagegraph {
 		constexpr std::array<std::string_view, 8> BLEND_MODES{
 			"normal", "multiply", "screen", "overlay", "add", "subtract", "soft_light", "difference"
 		};
-		constexpr std::array<std::string_view, 2> NOISE_TYPES{"value", "gradient"};
+		constexpr std::array<std::string_view, 3> NOISE_TYPES{"value", "gradient", "gabor"};
 		constexpr std::array<std::string_view, 5> VORONOI_FEATURES{"f1", "f2", "f2_f1", "edge", "cell"};
 		constexpr std::array<std::string_view, 2> GRADIENT_TYPES{"linear", "radial"};
 		constexpr std::array<std::string_view, 2> WAVE_TYPES{"bands", "rings"};
@@ -247,6 +247,12 @@ namespace engine::imagegraph {
 			v.Number("lacunarity", value.Lacunarity, 1, 16);
 			v.Number("gain", value.Gain, 0, 1);
 			v.Count("seed", value.Seed, 0, UINT32_MAX);
+			// Present only for gabor, so other noise keeps its encoding.
+			if (value.Type != NoiseType::Gabor) return;
+			v.Number("degrees", value.Degrees, -1e6, 1e6);
+			v.Number("frequency", value.Frequency, 0, 64);
+			v.Number("bandwidth", value.Bandwidth, 0, 16);
+			v.Count("impulses", value.Impulses, 1, 16);
 		}
 		template <class V> void Describe(Voronoi &value, V &v) {
 			Extent(value.Width, value.Height, v);

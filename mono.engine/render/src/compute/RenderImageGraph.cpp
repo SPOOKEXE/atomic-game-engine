@@ -141,6 +141,14 @@ namespace engine::render {
 							static_cast<float>(value.Lacunarity),
 							static_cast<float>(value.Gain)
 						};
+						out.Values[1] = {
+							static_cast<float>(
+								std::remainder(value.Degrees, 360.0) * std::numbers::pi / 180.0
+							),
+							static_cast<float>(value.Frequency),
+							static_cast<float>(value.Bandwidth),
+							static_cast<float>(value.Impulses)
+						};
 						generator(value.Seed);
 					}
 					if constexpr (std::is_same_v<T, imagegraph::Voronoi>) {

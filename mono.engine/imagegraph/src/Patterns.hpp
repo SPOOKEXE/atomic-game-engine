@@ -59,6 +59,56 @@ namespace engine::imagegraph::detail {
 		return norm > 0 ? sum / norm : 0;
 	}
 
+	// Sparse-convolution Gabor noise: every cell scatters weighted sinusoids sharing one
+	// direction, each faded out within one cell. Mapped so 0.5 is neutral and three
+	// standard deviations span [0, 1].
+	inline double Gabor(const Noise &noise, double x, double y, uint32_t seed) {
+		const double radians = std::remainder(noise.Degrees, 360.0) * std::numbers::pi / 180.0;
+		const double cosine = std::cos(radians), sine = std::sin(radians);
+		const double fx = std::floor(x), fy = std::floor(y);
+		const auto cx = static_cast<int64_t>(fx), cy = static_cast<int64_t>(fy);
+		const double falloff = std::numbers::pi * noise.Bandwidth * noise.Bandwidth;
+		double sum = 0;
+		for (int64_t j = -1; j <= 1; ++j)
+			for (int64_t i = -1; i <= 1; ++i) {
+				uint32_t hash = Lattice(cx + i, cy + j, seed);
+				for (uint32_t impulse = 0; impulse < noise.Impulses; ++impulse) {
+					hash = Mix(hash + 0x9e3779b9u);
+					const double dx = x - fx - i - Unit(hash);
+					hash = Mix(hash);
+					const double dy = y - fy - j - Unit(hash);
+					hash = Mix(hash);
+					const double weight = Unit(hash) * 2 - 1;
+					hash = Mix(hash);
+					const double phase = Unit(hash);
+					const double r2 = dx * dx + dy * dy;
+					if (r2 >= 1) continue;
+					const double window = (1 - r2) * (1 - r2) * std::exp(-falloff * r2);
+					sum += weight * window *
+						   std::cos(
+							   2 * std::numbers::pi * (noise.Frequency * (dx * cosine + dy * sine) + phase)
+						   );
+				}
+			}
+		// Variance: impulses per cell, a third for the weight, a half for the phase, and
+		// about 1 / (2 b^2 + 1.6) for the squared window's area.
+		const double deviation =
+			std::sqrt(noise.Impulses / 6.0 / (2 * noise.Bandwidth * noise.Bandwidth + 1.6));
+		return 0.5 + sum / (6 * deviation);
+	}
+	inline double NoiseAt(const Noise &noise, double x, double y) {
+		if (noise.Type != NoiseType::Gabor)
+			return Fractal(noise.Type, x, y, noise.Octaves, noise.Lacunarity, noise.Gain, noise.Seed);
+		double sum = 0, amplitude = 1, norm = 0, frequency = 1;
+		for (uint32_t octave = 0; octave < noise.Octaves; ++octave) {
+			sum += amplitude * Gabor(noise, x * frequency, y * frequency, noise.Seed + octave * 0x9e3779b9u);
+			norm += amplitude;
+			amplitude *= noise.Gain;
+			frequency *= noise.Lacunarity;
+		}
+		return sum / norm;
+	}
+
 	struct CellDistances {
 		double F1 = 0, F2 = 0, Edge = 0, Cell = 0;
 	};

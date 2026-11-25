@@ -137,10 +137,44 @@ float LatticeNoise(uint type, vec2 position, uint seed) {
 	float value = mix(mix(corners[0], corners[1], fade.x), mix(corners[2], corners[3], fade.x), fade.y);
 	return type == 0u ? value : 0.5 + value * 0.70710678;
 }
+// Values[1]: direction in radians, cycles per cell, bandwidth, impulses per cell.
+// Mirrors detail::Gabor in imagegraph/src/Patterns.hpp.
+float GaborNoise(vec2 position, uint seed) {
+	vec4 options = node.Values[1];
+	vec2 along = vec2(cos(options.x), sin(options.x));
+	vec2 floored = floor(position);
+	ivec2 cell = ivec2(floored);
+	vec2 offset = position - floored;
+	uint impulses = uint(options.w);
+	float falloff = PI * options.z * options.z;
+	float sum = 0.0;
+	for (int j = -1; j <= 1; j++)
+		for (int i = -1; i <= 1; i++) {
+			uint hash = Lattice(cell + ivec2(i, j), seed);
+			for (uint impulse = 0u; impulse < impulses; impulse++) {
+				hash = Mix(hash + 0x9e3779b9u);
+				float x = Unit(hash);
+				hash = Mix(hash);
+				vec2 delta = offset - vec2(i, j) - vec2(x, Unit(hash));
+				hash = Mix(hash);
+				float weight = Unit(hash) * 2.0 - 1.0;
+				hash = Mix(hash);
+				float phase = Unit(hash);
+				float r2 = dot(delta, delta);
+				if (r2 >= 1.0) continue;
+				float window = (1.0 - r2) * (1.0 - r2) * exp(-falloff * r2);
+				sum += weight * window * cos(2.0 * PI * (options.y * dot(delta, along) + phase));
+			}
+		}
+	float deviation = sqrt(options.w / 6.0 / (2.0 * options.z * options.z + 1.6));
+	return 0.5 + sum / (6.0 * deviation);
+}
 float Fractal(uint type, vec2 position, uint octaves, float lacunarity, float gain, uint seed) {
 	float sum = 0.0, amplitude = 1.0, norm = 0.0, frequency = 1.0;
 	for (uint octave = 0u; octave < octaves; octave++) {
-		sum += amplitude * LatticeNoise(type, position * frequency, seed + octave * 0x9e3779b9u);
+		uint octaveSeed = seed + octave * 0x9e3779b9u;
+		sum += amplitude * (type == 2u ? GaborNoise(position * frequency, octaveSeed)
+									   : LatticeNoise(type, position * frequency, octaveSeed));
 		norm += amplitude;
 		amplitude *= gain;
 		frequency *= lacunarity;

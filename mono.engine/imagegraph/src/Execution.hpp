@@ -21,7 +21,9 @@ namespace engine::imagegraph::detail {
 				if constexpr (std::is_same_v<T, Resize> || std::is_same_v<T, Transform> ||
 							  std::is_same_v<T, Warp> || std::is_same_v<T, Lookup>)
 					return value.Filter == Sampling::Bilinear ? 4 : 1;
-				if constexpr (std::is_same_v<T, Noise>) return uint64_t(value.Octaves) * 4;
+				if constexpr (std::is_same_v<T, Noise>)
+					return uint64_t(value.Octaves) *
+						   (value.Type == NoiseType::Gabor ? 9 * uint64_t(value.Impulses) : 4);
 				if constexpr (std::is_same_v<T, Voronoi>)
 					return value.Feature == VoronoiFeature::Edge ? 34 : 9;
 				if constexpr (std::is_same_v<T, Wave>)

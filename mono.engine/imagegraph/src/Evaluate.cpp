@@ -299,17 +299,7 @@ namespace engine::imagegraph {
 								);
 							} else if constexpr (std::is_same_v<T, Noise>) {
 								const auto [u, v] = Position(output, input, x, y);
-								pixel = Grey(
-									detail::Fractal(
-										value.Type,
-										u * value.Scale,
-										v * value.Scale,
-										value.Octaves,
-										value.Lacunarity,
-										value.Gain,
-										value.Seed
-									)
-								);
+								pixel = Grey(detail::NoiseAt(value, u * value.Scale, v * value.Scale));
 							} else if constexpr (std::is_same_v<T, Voronoi>) {
 								const auto [u, v] = Position(output, input, x, y);
 								const auto cells = detail::Cells(
