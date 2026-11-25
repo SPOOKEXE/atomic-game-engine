@@ -271,28 +271,34 @@ namespace engine::graph {
 		size_t view,
 		size_t world,
 		bool shared,
-		bool frame
+		bool frame,
+		EngineObserver *observer
 	) {
 		if (frame && !shared) return false;
 		ScopeRunner setup(graph, projection, runner, RunContext::WHOLE_FRAME, world, frame);
-		if (shared && !ExecuteEngineGraph(projection.Graph, projection.Blocks[0], setup)) return false;
+		if (shared && !ExecuteEngineGraph(projection.Graph, projection.Blocks[0], setup, observer))
+			return false;
 		if (view == RunContext::WHOLE_FRAME) return true;
 		ScopeRunner perView(graph, projection, runner, view, world, true);
-		return ExecuteEngineGraph(projection.Graph, projection.Blocks[1], perView);
+		return ExecuteEngineGraph(projection.Graph, projection.Blocks[1], perView, observer);
 	}
 
 	bool ExecuteRenderFinal(
-		const RenderGraph &graph, const RenderStageProjection &projection, NodeRunner &runner
+		const RenderGraph &graph,
+		const RenderStageProjection &projection,
+		NodeRunner &runner,
+		EngineObserver *observer
 	) {
 		ScopeRunner final(graph, projection, runner, RunContext::WHOLE_FRAME, RunContext::WHOLE_FRAME, true);
-		return ExecuteEngineGraph(projection.Graph, projection.Blocks[2], final);
+		return ExecuteEngineGraph(projection.Graph, projection.Blocks[2], final, observer);
 	}
 
 	bool ExecuteRenderStage(
 		const RenderGraph &graph,
 		const RenderStageProjection &projection,
 		NodeRunner &runner,
-		std::span<const uint64_t> worlds
+		std::span<const uint64_t> worlds,
+		EngineObserver *observer
 	) {
 		std::vector<uint64_t> distinct;
 		for (const auto world : worlds)
@@ -302,22 +308,29 @@ namespace engine::graph {
 			bool shared = true;
 			for (size_t view = 0; view < worlds.size(); view++) {
 				if (worlds[view] != distinct[world]) continue;
-				if (!ExecuteRenderView(graph, projection, runner, view, world, shared, shared && world == 0))
+				if (!ExecuteRenderView(
+						graph, projection, runner, view, world, shared, shared && world == 0, observer
+					))
 					return false;
 				shared = false;
 			}
-			if (shared && !ExecuteRenderView(
-							  graph, projection, runner, RunContext::WHOLE_FRAME, world, true, world == 0
-						  ))
+			if (shared &&
+				!ExecuteRenderView(
+					graph, projection, runner, RunContext::WHOLE_FRAME, world, true, world == 0, observer
+				))
 				return false;
 		}
-		return ExecuteRenderFinal(graph, projection, runner);
+		return ExecuteRenderFinal(graph, projection, runner, observer);
 	}
 
 	bool ExecuteRenderStage(
-		const RenderGraph &graph, const RenderStageProjection &projection, NodeRunner &runner, size_t views
+		const RenderGraph &graph,
+		const RenderStageProjection &projection,
+		NodeRunner &runner,
+		size_t views,
+		EngineObserver *observer
 	) {
 		const std::vector<uint64_t> worlds(views, 0);
-		return ExecuteRenderStage(graph, projection, runner, worlds);
+		return ExecuteRenderStage(graph, projection, runner, worlds, observer);
 	}
 }

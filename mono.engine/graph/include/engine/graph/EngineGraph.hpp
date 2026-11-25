@@ -12,12 +12,12 @@
 //
 // @tier L9 · shared
 
+#include <engine/ang/Runner.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/graph/Schedule.hpp>
 
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -180,23 +180,6 @@ namespace engine::graph {
 		//@}
 	};
 
-	struct EngineProgram;
-
-	// A schedule's lowered program. A copied schedule starts without one, so two
-	// copies can run on different threads without sharing a runner.
-	struct EngineProgramCache {
-		std::shared_ptr<EngineProgram> Held;
-
-		EngineProgramCache() = default;
-		EngineProgramCache(const EngineProgramCache &) {}
-		EngineProgramCache(EngineProgramCache &&) noexcept = default;
-		EngineProgramCache &operator=(const EngineProgramCache &) {
-			Held.reset();
-			return *this;
-		}
-		EngineProgramCache &operator=(EngineProgramCache &&) noexcept = default;
-	};
-
 	// Complete compiled orchestration plan.
 	struct EngineSchedule {
 		// Execution waves, handovers, and resource live intervals.
@@ -206,17 +189,11 @@ namespace engine::graph {
 		std::vector<EngineResourcePlan> Resources;
 		//@}
 
-		// The waves lowered to an ang Tick plan and its runner, built by the
-		// first ExecuteEngineGraph and rebuilt when the waves change. One thread
-		// runs one schedule at a time.
-		mutable EngineProgramCache Program;
-
 		// Removes every compiled row so the schedule can be reused.
 		void Clear() {
 			Waves.clear();
 			Barriers.clear();
 			Resources.clear();
-			Program.Held.reset();
 		}
 	};
 
@@ -280,11 +257,28 @@ namespace engine::graph {
 		virtual bool EndWave(uint32_t wave) = 0;
 	};
 
-	// Executes one schedule without allowing work to escape its tick. The waves
-	// run as an ang Tick graph: an `engine.wave` boundary node per wave opens it
-	// (after closing the previous one) and each scheduled node is a node of its
-	// stage's definition (`engine.stage.world` and so on), all Sync, in wave
-	// order. The first refusal from the adapter ends the run and returns false.
-	bool
-	ExecuteEngineGraph(const EngineGraph &graph, const EngineSchedule &schedule, EngineNodeRunner &runner);
+	// Hooks, timeline and report for ExecuteEngineGraph, in ang's types, so a
+	// view or profiler reads an engine run like any other graph run. NodeInfo
+	// carries the node's name, its stage's definition id (`engine.stage.world`),
+	// its position in schedule order and its wave. Every node is Sync, so hooks
+	// fire on the calling thread. PostCompute may set a status other than Ran to
+	// fail the node. The bool-returning adapter stays the authority otherwise.
+	struct EngineObserver {
+		ang::Hooks Hooks;
+		ang::RunTimeline Timeline{8};
+		// The last finished run. Nodes after a refusal report Skipped.
+		ang::RunReport Report;
+	};
+
+	// Executes one schedule without allowing work to escape its tick. The first
+	// refusal from the adapter ends the run and returns false. What the adapter
+	// throws reaches the caller, and that run publishes no report or timeline.
+	//
+	// @param observer Hooks and timing for this run, or null for none.
+	bool ExecuteEngineGraph(
+		const EngineGraph &graph,
+		const EngineSchedule &schedule,
+		EngineNodeRunner &runner,
+		EngineObserver *observer = nullptr
+	);
 }

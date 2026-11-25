@@ -458,8 +458,6 @@ namespace engine::ang {
 			}
 		}
 		std::vector<Pending> parallelBatch;
-		// Set by the first failure when RunnerOptions::StopOnFailure is on.
-		bool stopped = false;
 		for (const std::vector<uint32_t> &wave : Compiled.Waves) {
 			parallelBatch.clear();
 			for (const uint32_t node : wave) {
@@ -489,7 +487,6 @@ namespace engine::ang {
 					if (!note.empty()) {
 						entry.Note = std::move(note);
 					}
-					stopped = stopped || (status == NodeStatus::Failed && Options.StopOnFailure);
 					if (status != NodeStatus::Cached && status != NodeStatus::Waiting) {
 						if (status != NodeStatus::Ran && status != NodeStatus::Bypassed) {
 							Release(slot);
@@ -503,10 +500,6 @@ namespace engine::ang {
 					}
 				};
 				slot.LastUsed = ++TouchCounter;
-				if (stopped) {
-					finish(NodeStatus::Skipped, "run stopped after a failure");
-					continue;
-				}
 
 				// Gather inputs and the run hash that keys the cache.
 				bool waiting = false;
@@ -738,8 +731,6 @@ namespace engine::ang {
 				sample(
 					pending.Node, pending.BeginNanoseconds, pending.EndNanoseconds, pending.Thread, status
 				);
-				stopped = stopped ||
-						  (report.Nodes[pending.Node].Status == NodeStatus::Failed && Options.StopOnFailure);
 			}
 		}
 

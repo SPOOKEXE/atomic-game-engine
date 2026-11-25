@@ -554,7 +554,7 @@ namespace {
 	};
 }
 
-TEST_CASE("an edited schedule is lowered again and copies share no runner", "[graph][engine]") {
+TEST_CASE("an edited schedule runs with its edited barriers", "[graph][engine]") {
 	const EngineGraph graph = AcceptedGraph();
 	EngineSchedule schedule;
 	Name offender;
@@ -562,10 +562,6 @@ TEST_CASE("an edited schedule is lowered again and copies share no runner", "[gr
 	BarrierCounter first;
 	REQUIRE(ExecuteEngineGraph(graph, schedule, first));
 	REQUIRE_FALSE(first.Seen.empty());
-
-	const EngineSchedule copy = schedule;
-	CHECK(copy.Program.Held == nullptr);
-	CHECK(schedule.Program.Held != nullptr);
 
 	// Same barrier count, different handover.
 	schedule.Barriers.front().Resource = Name("edited-handover");
@@ -585,4 +581,66 @@ TEST_CASE("what an adapter throws reaches the caller and the next run works", "[
 	CHECK_THROWS_AS(ExecuteEngineGraph(graph, schedule, runner), std::runtime_error);
 	runner.Throws = false;
 	CHECK(ExecuteEngineGraph(graph, schedule, runner));
+}
+
+TEST_CASE("an observer sees every hook, the timeline and a refusal", "[graph][engine]") {
+	const EngineGraph graph = AcceptedGraph();
+	EngineSchedule schedule;
+	Name offender;
+	REQUIRE(CompileEngineGraph(graph, schedule, offender) == EngineGraphStatus::Ok);
+	BarrierCounter runner;
+	EngineObserver observer;
+	std::vector<std::string> events;
+	observer.Hooks.PreRun = [&](const auto &info) {
+		events.push_back("run+" + std::to_string(info.NodeCount));
+	};
+	observer.Hooks.PostRun = [&](const auto &info) {
+		REQUIRE(info.Report != nullptr);
+		events.push_back("run-");
+	};
+	observer.Hooks.PreNode = [&](const auto &info) { events.push_back("node+" + std::string(info.Id)); };
+	observer.Hooks.PostNode = [&](const auto &info, auto) {
+		events.push_back("node-" + std::string(info.Def));
+	};
+	observer.Hooks.PreCompute = [&](const auto &) { events.push_back("work+"); };
+	observer.Hooks.PostCompute = [&](const auto &, auto &) { events.push_back("work-"); };
+	REQUIRE(ExecuteEngineGraph(graph, schedule, runner, &observer));
+	CHECK(
+		events == std::vector<std::string>{
+					  "run+3",
+					  "node+accepted-input",
+					  "work+",
+					  "work-",
+					  "node-engine.stage.input",
+					  "node+accepted-compute",
+					  "work+",
+					  "work-",
+					  "node-engine.stage.animation",
+					  "node+accepted-render",
+					  "work+",
+					  "work-",
+					  "node-engine.stage.render",
+					  "run-"
+				  }
+	);
+	CHECK(observer.Report.Ran == 3);
+	REQUIRE(observer.Timeline.Latest() != nullptr);
+	CHECK(observer.Timeline.Latest()->Samples.size() == 3);
+
+	// A hook can fail a node; what follows is Skipped and the run is refused.
+	observer.Hooks = {};
+	observer.Hooks.PostCompute = [](const auto &info, auto &result) {
+		if (info.Id == "accepted-compute") result.Status = engine::ang::NodeStatus::Failed;
+	};
+	CHECK_FALSE(ExecuteEngineGraph(graph, schedule, runner, &observer));
+	CHECK(observer.Report.RunNumber == 2);
+	CHECK(observer.Report.Ran == 1);
+	CHECK(observer.Report.Failed == 1);
+	CHECK(observer.Report.Skipped == 1);
+
+	// A throw publishes nothing.
+	runner.Throws = true;
+	CHECK_THROWS(ExecuteEngineGraph(graph, schedule, runner, &observer));
+	CHECK(observer.Report.RunNumber == 2);
+	CHECK(observer.Timeline.Runs().size() == 2);
 }

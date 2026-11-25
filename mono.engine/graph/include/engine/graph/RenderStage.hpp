@@ -48,6 +48,9 @@ namespace engine::graph {
 		std::string_view prefix = "render."
 	);
 
+	// Every executor below takes an optional observer; each block it runs (shared
+	// setup, one view, final work) is one observed run.
+	//
 	// Invokes one view through the engine executor. Frame setup requires shared;
 	// frame-scoped setup is skipped for later worlds while world setup still runs.
 	bool ExecuteRenderView(
@@ -57,21 +60,31 @@ namespace engine::graph {
 		size_t view,
 		size_t world,
 		bool shared,
-		bool frame
+		bool frame,
+		EngineObserver *observer = nullptr
 	);
 	// Invokes final work once, with no world or view identity.
-	bool
-	ExecuteRenderFinal(const RenderGraph &graph, const RenderStageProjection &projection, NodeRunner &runner);
+	bool ExecuteRenderFinal(
+		const RenderGraph &graph,
+		const RenderStageProjection &projection,
+		NodeRunner &runner,
+		EngineObserver *observer = nullptr
+	);
 	// Groups worlds in first-appearance order and executes each world's views
 	// adjacently, then final work. Empty frames still execute shared setup once.
 	bool ExecuteRenderStage(
 		const RenderGraph &graph,
 		const RenderStageProjection &projection,
 		NodeRunner &runner,
-		std::span<const uint64_t> worlds
+		std::span<const uint64_t> worlds,
+		EngineObserver *observer = nullptr
 	);
 	// Executes a view count belonging to one world through the same executor.
 	bool ExecuteRenderStage(
-		const RenderGraph &graph, const RenderStageProjection &projection, NodeRunner &runner, size_t views
+		const RenderGraph &graph,
+		const RenderStageProjection &projection,
+		NodeRunner &runner,
+		size_t views,
+		EngineObserver *observer = nullptr
 	);
 }

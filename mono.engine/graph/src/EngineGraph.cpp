@@ -5,11 +5,12 @@
 
 #include <algorithm>
 #include <charconv>
-#include <exception>
+#include <chrono>
 #include <limits>
 #include <new>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -480,52 +481,7 @@ namespace engine::graph {
 		return EngineGraphStatus::AllocationFailed;
 	}
 
-	// One schedule's waves as an ang Tick plan, with the adapter of the call
-	// running it. Boundary and stage nodes read the call state through `Self`.
-	struct EngineProgram {
-		// Wave sizes then node handles, to notice a schedule edited after lowering.
-		std::vector<uint32_t> Signature;
-		// Handovers each wave opens with.
-		std::vector<std::vector<EngineBarrier>> Barriers;
-		std::vector<bool> Concurrent;
-		// Scheduled handle of each stage node, by its ang node index.
-		std::vector<EngineNodeId> Work;
-		std::vector<uint32_t> WaveOf;
-		std::unique_ptr<ang::Runner> Runner;
-
-		// Set for the duration of one ExecuteEngineGraph.
-		const EngineGraph *Graph = nullptr;
-		EngineNodeRunner *Adapter = nullptr;
-		// What an adapter threw, rethrown to the caller after the run stops.
-		std::exception_ptr Thrown;
-	};
-
 	namespace {
-		std::vector<uint32_t> SignatureOf(const EngineSchedule &schedule) {
-			std::vector<uint32_t> signature;
-			signature.push_back(static_cast<uint32_t>(schedule.Waves.size()));
-			for (const EngineWave &wave : schedule.Waves) {
-				signature.push_back(
-					static_cast<uint32_t>(wave.Nodes.size()) | (wave.Concurrent ? 1u << 31 : 0u)
-				);
-			}
-			for (const EngineWave &wave : schedule.Waves) {
-				for (const EngineScheduledNode &entry : wave.Nodes) {
-					signature.push_back(entry.Node.Value);
-				}
-			}
-			signature.push_back(static_cast<uint32_t>(schedule.Barriers.size()));
-			for (const EngineBarrier &barrier : schedule.Barriers) {
-				signature.push_back(barrier.Resource.Id());
-				signature.push_back(
-					static_cast<uint32_t>(barrier.From) << 8 | static_cast<uint32_t>(barrier.To)
-				);
-				signature.push_back(barrier.ProducerWave);
-				signature.push_back(barrier.ConsumerWave);
-			}
-			return signature;
-		}
-
 		const char *StageDef(EngineStage stage) {
 			switch (stage) {
 			case EngineStage::Input:
@@ -546,200 +502,171 @@ namespace engine::graph {
 			return "engine.stage.unknown";
 		}
 
-		// Lowers `schedule` into `program`. Node order is J0, wave 0, J1, wave 1,
-		// ..., Jn, chained by order links, so ang's waves are exactly the
-		// schedule's waves with a boundary node between each pair.
-		bool Lower(const EngineGraph &graph, const EngineSchedule &schedule, EngineProgram &program) {
-			ang::Registry registry;
-			registry.DefineType({.Id = std::string(ORDER_TYPE), .Label = "Order"});
-			const ang::PortDef after{.Name = "after", .Type = std::string(ORDER_TYPE), .MaximumLinks = 0};
-			const ang::PortDef done{
-				.Name = "done", .Type = std::string(ORDER_TYPE), .Dir = ang::Direction::Output
-			};
-			EngineProgram *self = &program;
-			const auto mark = [](ang::EvalContext &context) {
-				context.SetOutput("done", ang::Value(true).WithType(std::string(ORDER_TYPE)));
-				return ang::NodeResult::Success();
-			};
-			// ang turns a throw into a failed node; keep it so the caller still sees it.
-			const auto guarded = [self](auto call) {
-				return [self, call](ang::EvalContext &context) {
-					try {
-						return call(context);
-					} catch (...) {
-						self->Thrown = std::current_exception();
-						return ang::NodeResult::Failure("adapter threw");
-					}
-				};
-			};
-			// Closes the wave before it and opens its own; the last one only closes.
-			const auto boundary = guarded([self, mark](ang::EvalContext &context) {
-				const auto wave = static_cast<uint32_t>(context.Param("wave").AsNumber());
-				if (wave > 0 && !self->Adapter->EndWave(wave - 1)) {
-					return ang::NodeResult::Failure("EndWave refused");
+		int64_t NowNanoseconds() {
+			return std::chrono::duration_cast<std::chrono::nanoseconds>(
+					   std::chrono::steady_clock::now().time_since_epoch()
+			)
+				.count();
+		}
+
+		// Records one observed run. Built only when a caller passed an observer.
+		class Observation {
+		  public:
+			Observation(EngineObserver &observer, const EngineSchedule &schedule)
+				: Observer(observer), Start(NowNanoseconds()) {
+				size_t nodes = 0;
+				for (const EngineWave &wave : schedule.Waves) {
+					nodes += wave.Nodes.size();
 				}
-				if (wave < self->Barriers.size() &&
-					!self->Adapter->BeginWave(wave, self->Concurrent[wave], self->Barriers[wave])) {
-					return ang::NodeResult::Failure("BeginWave refused");
+				Report.RunNumber = observer.Report.RunNumber + 1;
+				Report.Nodes.resize(nodes);
+				Run.RunNumber = Report.RunNumber;
+				Run.Samples.reserve(nodes);
+				if (Observer.Hooks.PreRun) {
+					Observer.Hooks.PreRun(Info());
 				}
-				return mark(context);
-			});
-			const auto stage = guarded([self, mark](ang::EvalContext &context) {
-				const auto slot = static_cast<size_t>(context.Param("slot").AsNumber());
-				const EngineNodeId id = self->Work[slot];
-				const EngineNode *node = self->Graph->Find(id);
-				const uint32_t wave = self->WaveOf[slot];
-				if (node == nullptr || !self->Adapter->Run({*node, wave, self->Barriers[wave], id})) {
-					return ang::NodeResult::Failure("Run refused");
-				}
-				return mark(context);
-			});
-			if (!registry
-					 .DefineNode(
-						 {.Id = "engine.begin",
-						  .Outputs = {done},
-						  .Pure = ang::Purity::Impure,
-						  .Evaluate = boundary}
-					 )
-					 .Ok ||
-				!registry
-					 .DefineNode(
-						 {.Id = "engine.wave",
-						  .Inputs = {after},
-						  .Outputs = {done},
-						  .Pure = ang::Purity::Impure,
-						  .Evaluate = boundary}
-					 )
-					 .Ok) {
-				return false;
 			}
-			for (uint8_t index = 0; index < static_cast<uint8_t>(EngineStage::Count); ++index) {
-				if (!registry
-						 .DefineNode(
-							 {.Id = StageDef(static_cast<EngineStage>(index)),
-							  .Inputs = {after},
-							  .Outputs = {done},
-							  .Pure = ang::Purity::Impure,
-							  .Evaluate = stage}
-						 )
-						 .Ok) {
+
+			bool Node(
+				const EngineNode &node,
+				uint32_t wave,
+				EngineNodeRunner &runner,
+				const EngineRunContext &context
+			) {
+				const ang::NodeInfo info{
+					.Id = node.Name.Text(),
+					.Def = StageDef(node.Stage),
+					.Index = Next,
+					.Wave = wave,
+					.Mode = ang::ExecMode::Sync,
+					.RunNumber = Report.RunNumber,
+				};
+				const int64_t begin = NowNanoseconds();
+				if (Observer.Hooks.PreNode) {
+					Observer.Hooks.PreNode(info);
+				}
+				if (Observer.Hooks.PreCompute) {
+					Observer.Hooks.PreCompute(info);
+				}
+				ang::ComputeResult result;
+				if (!runner.Run(context)) {
+					result.Status = ang::NodeStatus::Failed;
+					result.Note = "the adapter refused the node";
+				}
+				if (Observer.Hooks.PostCompute) {
+					Observer.Hooks.PostCompute(info, result);
+				}
+				const int64_t end = NowNanoseconds();
+				ang::NodeReport &entry = Report.Nodes[Next++];
+				entry.Status = result.Status;
+				entry.Note = std::move(result.Note);
+				entry.Milliseconds = static_cast<double>(end - begin) / 1.0e6;
+				const bool accepted = entry.Status == ang::NodeStatus::Ran;
+				++(accepted ? Report.Ran : Report.Failed);
+				Run.Samples.push_back(
+					{.Node = info.Index,
+					 .BeginNanoseconds = begin - Start,
+					 .EndNanoseconds = end - Start,
+					 .Thread = std::hash<std::thread::id>{}(std::this_thread::get_id()),
+					 .Outcome = entry.Status}
+				);
+				if (Observer.Hooks.PostNode) {
+					Observer.Hooks.PostNode(info, entry.Status);
+				}
+				return accepted;
+			}
+
+			// Publishes the run, marking what a refusal left unvisited.
+			void Finish() {
+				for (size_t index = Next; index < Report.Nodes.size(); ++index) {
+					Report.Nodes[index].Status = ang::NodeStatus::Skipped;
+					++Report.Skipped;
+				}
+				Report.Milliseconds = static_cast<double>(NowNanoseconds() - Start) / 1.0e6;
+				Run.Milliseconds = Report.Milliseconds;
+				Observer.Timeline.Push(std::move(Run));
+				Observer.Report = std::move(Report);
+				if (Observer.Hooks.PostRun) {
+					ang::RunInfo info{
+						.RunNumber = Observer.Report.RunNumber,
+						.Runs = ang::Domain::Tick,
+						.NodeCount = Observer.Report.Nodes.size(),
+						.Report = &Observer.Report,
+					};
+					Observer.Hooks.PostRun(info);
+				}
+			}
+
+		  private:
+			ang::RunInfo Info() const {
+				return {
+					.RunNumber = Report.RunNumber, .Runs = ang::Domain::Tick, .NodeCount = Report.Nodes.size()
+				};
+			}
+
+			EngineObserver &Observer;
+			int64_t Start;
+			uint32_t Next = 0;
+			ang::RunReport Report;
+			ang::TimelineRun Run;
+		};
+
+		bool ExecuteWaves(
+			const EngineGraph &graph,
+			const EngineSchedule &schedule,
+			EngineNodeRunner &runner,
+			Observation *observation
+		) {
+			// Keep capacity until this call returns to avoid rebuilding wave storage.
+			std::vector<EngineBarrier> barriers;
+			for (uint32_t wave = 0; wave < schedule.Waves.size(); wave++) {
+				barriers.clear();
+				for (const EngineBarrier &barrier : schedule.Barriers) {
+					if (barrier.ConsumerWave == wave) {
+						barriers.push_back(barrier);
+					}
+				}
+				const EngineWave &scheduled = schedule.Waves[wave];
+				if (!runner.BeginWave(wave, scheduled.Concurrent, barriers)) {
+					return false;
+				}
+				for (const EngineScheduledNode &entry : scheduled.Nodes) {
+					const EngineNode *node = graph.Find(entry.Node);
+					if (node == nullptr) {
+						return false;
+					}
+					const EngineRunContext context{*node, wave, barriers, entry.Node};
+					const bool accepted = observation == nullptr
+											  ? runner.Run(context)
+											  : observation->Node(*node, wave, runner, context);
+					if (!accepted) {
+						return false;
+					}
+				}
+				if (!runner.EndWave(wave)) {
 					return false;
 				}
 			}
-			if (!registry
-					 .DefineNode(
-						 {.Id = StageDef(EngineStage::Count),
-						  .Inputs = {after},
-						  .Outputs = {done},
-						  .Pure = ang::Purity::Impure,
-						  .Evaluate = stage}
-					 )
-					 .Ok) {
-				return false;
-			}
-
-			program.Barriers.assign(schedule.Waves.size(), {});
-			for (const EngineBarrier &barrier : schedule.Barriers) {
-				if (barrier.ConsumerWave < program.Barriers.size()) {
-					program.Barriers[barrier.ConsumerWave].push_back(barrier);
-				}
-			}
-			program.Concurrent.clear();
-			program.Work.clear();
-			program.WaveOf.clear();
-			std::vector<ang::Edit> edits;
-			std::vector<std::string> previous;
-			const auto boundaryNode = [&](uint32_t wave) {
-				const std::string id = "wave." + std::to_string(wave);
-				edits.push_back(
-					ang::edit::AddNode{
-						{.Id = id,
-						 .Def = wave == 0 ? "engine.begin" : "engine.wave",
-						 .Params = {{"wave", ang::Value(int64_t{wave})}}}
-					}
-				);
-				for (const std::string &from : previous) {
-					edits.push_back(ang::edit::AddLink{{from, "done", id, "after"}});
-				}
-				previous.assign(1, id);
-			};
-			for (uint32_t wave = 0; wave < schedule.Waves.size(); ++wave) {
-				boundaryNode(wave);
-				program.Concurrent.push_back(schedule.Waves[wave].Concurrent);
-				std::vector<std::string> members;
-				for (const EngineScheduledNode &entry : schedule.Waves[wave].Nodes) {
-					const size_t slot = program.Work.size();
-					const EngineNode *node = graph.Find(entry.Node);
-					const std::string id = "node." + std::to_string(slot);
-					edits.push_back(
-						ang::edit::AddNode{
-							{.Id = id,
-							 .Def = StageDef(node == nullptr ? EngineStage::Count : node->Stage),
-							 .Params = {{"slot", ang::Value(static_cast<int64_t>(slot))}}}
-						}
-					);
-					edits.push_back(ang::edit::AddLink{{previous.front(), "done", id, "after"}});
-					program.Work.push_back(entry.Node);
-					program.WaveOf.push_back(wave);
-					members.push_back(id);
-				}
-				if (!members.empty()) {
-					previous = std::move(members);
-				}
-			}
-			boundaryNode(static_cast<uint32_t>(schedule.Waves.size()));
-
-			ang::Graph lowered;
-			if (!lowered.Apply(edits).Ok) {
-				return false;
-			}
-			ang::Plan plan;
-			const size_t nodes = program.Work.size() + schedule.Waves.size() + 1;
-			const ang::CompileOptions options{
-				.Runs = ang::Domain::Tick,
-				.MaximumNodes = nodes,
-				.MaximumLinks = edits.size(),
-				.MaximumPorts = nodes * 2,
-				.MaximumIdentityBytes = 64u * 1024u * 1024u,
-				.Order = graphcore::OrderPolicy::LowestReady,
-			};
-			if (!ang::Compile(lowered, registry, options, plan).Ok) {
-				return false;
-			}
-			program.Runner = std::make_unique<ang::Runner>(
-				std::move(plan), ang::RunnerOptions{.TimelineRuns = 1, .StopOnFailure = true}
-			);
-			program.Signature = SignatureOf(schedule);
 			return true;
 		}
 	}
 
-	// No hooks are set on this path. `just enginegraph-bench` (bench preset,
-	// unity off, 2026-11-25), prepared 64-node schedules: 9.6 us independent and
-	// 18.3 us chained through ang, 0.16 us and 1.3 us for a plain wave loop. The
-	// cost is per executed node; lowering happens once per compiled schedule.
-	bool
-	ExecuteEngineGraph(const EngineGraph &graph, const EngineSchedule &schedule, EngineNodeRunner &runner) {
-		if (schedule.Program.Held == nullptr) {
-			schedule.Program.Held = std::make_shared<EngineProgram>();
+	// A plain loop, not an ang Runner: this runs per view per frame and needs none
+	// of the runner's caching. `just enginegraph-bench` (bench preset, unity off,
+	// 2026-11-25), prepared 64-node schedules with no observer: 0.19 us independent
+	// and 1.4 us chained, against 9.6 us and 18.3 us through a Runner.
+	bool ExecuteEngineGraph(
+		const EngineGraph &graph,
+		const EngineSchedule &schedule,
+		EngineNodeRunner &runner,
+		EngineObserver *observer
+	) {
+		if (observer == nullptr) {
+			return ExecuteWaves(graph, schedule, runner, nullptr);
 		}
-		// Held here so an adapter that clears the schedule cannot free a live run.
-		const std::shared_ptr<EngineProgram> held = schedule.Program.Held;
-		EngineProgram &program = *held;
-		if (program.Runner == nullptr || program.Signature != SignatureOf(schedule)) {
-			program.Runner.reset();
-			if (!Lower(graph, schedule, program)) {
-				return false;
-			}
-		}
-		program.Graph = &graph;
-		program.Adapter = &runner;
-		const ang::RunReport report = program.Runner->Run();
-		program.Graph = nullptr;
-		program.Adapter = nullptr;
-		if (program.Thrown != nullptr) {
-			std::rethrow_exception(std::exchange(program.Thrown, nullptr));
-		}
-		return report.Failed == 0 && report.Skipped == 0;
+		Observation observation(*observer, schedule);
+		const bool completed = ExecuteWaves(graph, schedule, runner, &observation);
+		observation.Finish();
+		return completed;
 	}
 }

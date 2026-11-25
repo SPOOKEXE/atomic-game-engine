@@ -153,22 +153,6 @@ TEST_CASE("failures, unknown types and bypass report their own status", "[ang][r
 	CHECK(report.Bypassed == 1);
 }
 
-TEST_CASE("stop on failure skips every later visit, independent ones included", "[ang][runner]") {
-	const Registry registry = tests::MakeRegistry();
-	Graph graph;
-	tests::Add(graph, tests::Node("before", "test.const", {{"value", Value(1.0)}}));
-	tests::Add(graph, tests::Node("fail", "test.fail"));
-	tests::Add(graph, tests::Node("independent", "test.const", {{"value", Value(2.0)}}));
-	Runner runner(tests::MustCompile(graph, registry), {.StopOnFailure = true});
-	const RunReport report = runner.Run();
-	const Plan &plan = runner.CurrentPlan();
-	CHECK(report.Nodes[static_cast<size_t>(plan.Find("before"))].Status == NodeStatus::Ran);
-	CHECK(report.Nodes[static_cast<size_t>(plan.Find("fail"))].Status == NodeStatus::Failed);
-	CHECK(report.Nodes[static_cast<size_t>(plan.Find("independent"))].Status == NodeStatus::Skipped);
-	CHECK(report.Nodes[static_cast<size_t>(plan.Find("independent"))].Note == "run stopped after a failure");
-	CHECK(runner.Output("independent", "value") == nullptr);
-}
-
 TEST_CASE("impure nodes rerun every time and dirty what reads them", "[ang][runner]") {
 	const Registry registry = tests::MakeRegistry();
 	Graph graph;
