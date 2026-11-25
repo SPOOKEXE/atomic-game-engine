@@ -1109,12 +1109,22 @@ namespace engine::render {
 		//         The error is logged with the shader's name.
 		// @since v0.15
 		// Identical owner, name and words reuse the pipeline without a frame wait or invalidation.
-		bool AddShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner = {});
+		// @param gbuffer The same surface for the G-buffer pass, or empty.
+		bool AddShader(
+			const core::Name &name,
+			std::span<const uint32_t> spirv,
+			core::Name owner = {},
+			std::span<const uint32_t> gbuffer = {}
+		);
 
 		// Reflects and admits a material fragment against the renderer's named
 		// sampler slots, then installs it through the normal replacement path.
-		bool
-		AddMaterialShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner = {});
+		bool AddMaterialShader(
+			const core::Name &name,
+			std::span<const uint32_t> spirv,
+			core::Name owner = {},
+			std::span<const uint32_t> gbuffer = {}
+		);
 
 		// Forgets a registered shader and frees its pipelines.
 		//

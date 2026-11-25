@@ -78,6 +78,10 @@ namespace engine::render {
 		// whether an accepted module exists; AttemptError describes the last edit.
 		std::vector<uint32_t> SpirV;
 
+		// The same surface written for the G-buffer pass, or empty for a whole
+		// program, which is drawn lit before that pass.
+		std::vector<uint32_t> GBufferSpirV;
+
 		// Identity of accepted words, independent of source identity and revision.
 		// Zero when no program is accepted; failed edits preserve this with SpirV.
 		assets::ContentHash CodeHash;
@@ -103,6 +107,9 @@ namespace engine::render {
 		// result, so a different store holding the same source (a Play replica
 		// of the authority) reuses the attempt instead of compiling again.
 		assets::ContentHash AttemptCodeHash;
+
+		// `scene::ShaderModuleStamp` at the last attempt.
+		uint64_t AttemptModuleStamp = 0;
 
 		// The `ShaderSource::Revision` these words were built from.
 		//

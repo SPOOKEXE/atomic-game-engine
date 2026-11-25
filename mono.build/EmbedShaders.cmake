@@ -1,0 +1,35 @@
+# Writes shader text into a C++ source as string constants, with quoted includes
+# expanded. Run as a script:
+#   cmake -DSOURCE_DIR=... -DOUTPUT=... -DENTRIES="NAME=file,NAME=file" -P EmbedShaders.cmake
+
+function(expand_shader file out)
+	file(READ "${SOURCE_DIR}/${file}" text)
+	string(REGEX MATCHALL "#include \"[^\"]+\"" includes "${text}")
+	list(REMOVE_DUPLICATES includes)
+	foreach(include IN LISTS includes)
+		string(REGEX REPLACE "#include \"([^\"]+)\"" "\\1" name "${include}")
+		expand_shader("${name}" body)
+		string(REPLACE "${include}" "${body}" text "${text}")
+	endforeach()
+	set(${out} "${text}" PARENT_SCOPE)
+endfunction()
+
+set(generated "#include \"resources/EngineShaderSources.hpp\"\n\nnamespace engine::render {\n")
+string(REPLACE "," ";" entries "${ENTRIES}")
+foreach(entry IN LISTS entries)
+	string(REGEX MATCH "^([^=]+)=(.+)$" matched "${entry}")
+	set(symbol "${CMAKE_MATCH_1}")
+	expand_shader("${CMAKE_MATCH_2}" body)
+	# A compiler may refuse a literal over 16 KB, so the text is several adjacent ones.
+	string(LENGTH "${body}" length)
+	string(APPEND generated "\tconst std::string_view ${symbol} =\n")
+	set(at 0)
+	while(at LESS length)
+		string(SUBSTRING "${body}" ${at} 8000 part)
+		string(APPEND generated "R\"~glsl~(${part})~glsl~\"\n")
+		math(EXPR at "${at} + 8000")
+	endwhile()
+	string(APPEND generated ";\n")
+endforeach()
+string(APPEND generated "}\n")
+file(WRITE "${OUTPUT}" "${generated}")

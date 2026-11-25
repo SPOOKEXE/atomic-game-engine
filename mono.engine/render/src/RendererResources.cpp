@@ -518,7 +518,12 @@ namespace engine::render {
 		return true;
 	}
 
-	bool Renderer::AddShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner) {
+	bool Renderer::AddShader(
+		const core::Name &name,
+		std::span<const uint32_t> spirv,
+		core::Name owner,
+		std::span<const uint32_t> gbuffer
+	) {
 		if (State == nullptr || State->Device == nullptr || !name.IsValid() || spirv.empty()) {
 			return false;
 		}
@@ -540,18 +545,25 @@ namespace engine::render {
 		if (State->ShaderVariants.contains(Impl::ShaderVariantKey(name, owner))) {
 			(void)WaitForFrame();
 		}
-		if (!State->AddShaderVariant(name, spirv, owner)) return false;
+		if (!State->AddShaderVariant(name, spirv, owner, gbuffer)) return false;
 		++State->ResourceEpoch;
 		return true;
 	}
 
-	bool
-	Renderer::AddMaterialShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner) {
-		if (const auto failure = AdmitMaterialSamplers(spirv)) {
-			ENGINE_ERROR("material shader '{}': {}", name.Text(), *failure);
-			return false;
+	bool Renderer::AddMaterialShader(
+		const core::Name &name,
+		std::span<const uint32_t> spirv,
+		core::Name owner,
+		std::span<const uint32_t> gbuffer
+	) {
+		for (const auto words : {spirv, gbuffer}) {
+			if (words.empty() && !spirv.empty()) continue;
+			if (const auto failure = AdmitMaterialSamplers(words)) {
+				ENGINE_ERROR("material shader '{}': {}", name.Text(), *failure);
+				return false;
+			}
 		}
-		return AddShader(name, spirv, owner);
+		return AddShader(name, spirv, owner, gbuffer);
 	}
 
 	bool Renderer::DropShader(const core::Name &name, core::Name owner) {
@@ -927,9 +939,10 @@ namespace engine::render {
 				}
 				const auto refused = refusals.find(key);
 				if (refused != refusals.end() && refused->second == module->CodeHash) continue;
-				const bool installed = family == 0	 ? AddMaterialShader(name, module->SpirV, owner)
-									   : family == 1 ? AddLensShader(name, module->SpirV, owner)
-													 : SetPostProcessShader(name, module->SpirV, owner);
+				const bool installed =
+					family == 0	  ? AddMaterialShader(name, module->SpirV, owner, module->GBufferSpirV)
+					: family == 1 ? AddLensShader(name, module->SpirV, owner)
+								  : SetPostProcessShader(name, module->SpirV, owner);
 				if (installed)
 					refusals.erase(key);
 				else

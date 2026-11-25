@@ -9,6 +9,7 @@
 #include <engine/assets/Texture.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/render/resources/ShaderAssembly.hpp>
 #include <engine/render/resources/ShaderCompiler.hpp>
 #include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/scene/content/TileSets.hpp>
@@ -1906,6 +1907,60 @@ TEST_CASE("a clear coat adds a sharp highlight over skin", "[render][gpu][skin][
 	plane.Surface.Clearcoat = 0.0f;
 	plane.Surface.ClearcoatRoughness = 0.35f;
 	CHECK(plane.Capture(true).Bytes == bare.Bytes);
+}
+
+TEST_CASE(
+	"authored surfaces draw in the G-buffer with their own normals and light", "[render][gpu][skin][.]"
+) {
+	SkinScene plane(core::Name("fixture.white"));
+	scene::WorldLighting sun;
+	sun.Direction = core::Vector3{0.0f, 0.0f, -1.0f};
+	sun.Direct = {0.5f, 0.5f, 0.5f};
+	sun.Ambient = {0, 0, 0};
+	sun.OutdoorAmbient = {0, 0, 0};
+	plane.Fixture.Render.SetLighting(sun);
+	plane.View.Lighting = sun;
+	const auto install = [&](const char *name, std::string source) {
+		const auto assembled = render::AssembleShader(name, source, {});
+		REQUIRE(assembled.Error.empty());
+		render::ShaderCompiler compiler;
+		compiler.SetOptimise(true);
+		const auto forward = compiler.Compile(assembled.Forward, render::ShaderStage::Fragment, name);
+		const auto gbuffer = compiler.Compile(assembled.GBuffer, render::ShaderStage::Fragment, name);
+		INFO(forward.Error << gbuffer.Error);
+		REQUIRE_FALSE(forward.Failed);
+		REQUIRE_FALSE(gbuffer.Failed);
+		REQUIRE(plane.Fixture.Render.AddMaterialShader(core::Name(name), forward.SpirV, {}, gbuffer.SpirV));
+	};
+	install(
+		"surface.red", "void Surface(SurfaceInput i, inout SurfaceOutput o) { o.Albedo = vec3(1, 0, 0); }"
+	);
+	install(
+		"surface.flat",
+		"void Surface(SurfaceInput i, inout SurfaceOutput o) { o.Albedo = vec3(0, 0, 1);"
+		" o.Normal = normalize(vec3(1, 0, 1)); o.User = 0.5; }\n"
+		"vec3 Light(SurfaceOutput s, LightSample l) { return vec3(0, l.IsSun ? 1.0 : 0.0, 0) * l.Colour; }"
+	);
+	const uint32_t x = plane.Target.Width / 2, y = plane.Target.Height / 2;
+	const auto plain = plane.At(plane.Capture(false), x, y);
+	CHECK(plain[0] == plain[1]);
+
+	// Surface only: the engine lights it.
+	plane.Surface.Shader = core::Name("surface.red");
+	const auto red = plane.At(plane.Capture(false), x, y);
+	CHECK(red[0] > 60);
+	CHECK(red[1] < red[0] / 3);
+
+	// Surface and Light: the author lights it, and the G-buffer keeps the surface.
+	plane.Surface.Shader = core::Name("surface.flat");
+	const auto lit = plane.At(plane.Capture(false), x, y);
+	CHECK(lit[1] > 60);
+	CHECK(lit[0] < 10);
+	CHECK(lit[2] < 10);
+	const auto normal = CapturePresentationResource(
+		plane.Fixture.Render, core::Name("normal"), plane.View.Slot, plane.Target.Width, plane.Target.Height
+	);
+	REQUIRE_FALSE(normal.Bytes.empty());
 }
 
 TEST_CASE("a UDIM tile whose graph output is not ready draws the default", "[render][gpu][udim][.]") {

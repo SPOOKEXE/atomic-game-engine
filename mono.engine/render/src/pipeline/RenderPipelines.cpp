@@ -535,6 +535,7 @@ namespace engine::render {
 		gbufferTargets[6].format = SDL_GPU_TEXTUREFORMAT_R32_UINT;
 		gbufferTargets[7].format = SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT;
 
+		std::copy(std::begin(gbufferTargets), std::end(gbufferTargets), VariantGBufferTargets.begin());
 		SDL_GPUGraphicsPipelineCreateInfo gbuffer = opaque;
 		gbuffer.fragment_shader = gbufferFragment;
 		gbuffer.target_info.color_target_descriptions = gbufferTargets;
@@ -1802,7 +1803,10 @@ namespace engine::render {
 	}
 
 	bool Renderer::Impl::AddShaderVariant(
-		const core::Name &name, std::span<const uint32_t> spirv, core::Name owner
+		const core::Name &name,
+		std::span<const uint32_t> spirv,
+		core::Name owner,
+		std::span<const uint32_t> gbufferWords
 	) {
 		if (!name.IsValid() || spirv.empty() || !VariantsReady || OpaqueVertexShader == nullptr ||
 			PackedOpaqueVertexShader == nullptr) {
@@ -1827,34 +1831,34 @@ namespace engine::render {
 		// the reason `ShaderLibrary` gives about a compile failure: the part
 		// keeps the engine's own shader and the world keeps running.
 		const bool toMsl = Binary.Form == resources::ShaderForm::Msl;
-
-		std::string translated;
-		if (toMsl) {
-			msl::Translation result = msl::Translate(spirv);
-			if (result.Failed) {
-				ENGINE_ERROR("shader '{}' cannot be translated to MSL: {}", name.Text(), result.Error);
-				return false;
+		const auto create = [&](std::span<const uint32_t> words) -> SDL_GPUShader * {
+			std::string translated;
+			if (toMsl) {
+				msl::Translation result = msl::Translate(words);
+				if (result.Failed) {
+					ENGINE_ERROR("shader '{}' cannot be translated to MSL: {}", name.Text(), result.Error);
+					return nullptr;
+				}
+				translated = std::move(result.Source);
 			}
-			translated = std::move(result.Source);
-		}
 
-		SDL_GPUShaderCreateInfo info{};
-		// Metal's backend reads the source with `initWithBytes:length:`, so the
-		// length is the text and not the text plus its terminator.
-		info.code = toMsl ? reinterpret_cast<const Uint8 *>(translated.data())
-						  : reinterpret_cast<const Uint8 *>(spirv.data());
-		info.code_size = toMsl ? translated.size() : spirv.size() * sizeof(uint32_t);
-		info.entrypoint = Binary.EntryPoint;
-		info.format = Binary.Format;
-		info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-		info.num_samplers = SURFACE_FRAGMENT_SAMPLERS;
-		info.num_uniform_buffers = 3;
-
-		SDL_GPUShader *fragment = SDL_CreateGPUShader(Device, &info);
-		if (fragment == nullptr) {
-			ENGINE_ERROR("shader '{}': {}", name.Text(), SDL_GetError());
-			return false;
-		}
+			SDL_GPUShaderCreateInfo info{};
+			// Metal's backend reads the source with `initWithBytes:length:`, so the
+			// length is the text and not the text plus its terminator.
+			info.code = toMsl ? reinterpret_cast<const Uint8 *>(translated.data())
+							  : reinterpret_cast<const Uint8 *>(words.data());
+			info.code_size = toMsl ? translated.size() : words.size() * sizeof(uint32_t);
+			info.entrypoint = Binary.EntryPoint;
+			info.format = Binary.Format;
+			info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+			info.num_samplers = SURFACE_FRAGMENT_SAMPLERS;
+			info.num_uniform_buffers = 3;
+			SDL_GPUShader *shader = SDL_CreateGPUShader(Device, &info);
+			if (shader == nullptr) ENGINE_ERROR("shader '{}': {}", name.Text(), SDL_GetError());
+			return shader;
+		};
+		SDL_GPUShader *fragment = create(spirv);
+		if (fragment == nullptr) return false;
 
 		SDL_GPUGraphicsPipelineCreateInfo opaque = VariantOpaqueInfo;
 		opaque.vertex_shader = OpaqueVertexShader;
@@ -1891,10 +1895,27 @@ namespace engine::render {
 			variant.PackedHdrTransparent = SDL_CreateGPUGraphicsPipeline(Device, &packedBlended);
 		}
 
+		if (!gbufferWords.empty() && GBufferPipeline != nullptr) {
+			variant.GBufferFragment = create(gbufferWords);
+			if (variant.GBufferFragment != nullptr) {
+				SDL_GPUGraphicsPipelineCreateInfo info = VariantOpaqueInfo;
+				info.vertex_shader = OpaqueVertexShader;
+				info.fragment_shader = variant.GBufferFragment;
+				info.target_info.color_target_descriptions = VariantGBufferTargets.data();
+				info.target_info.num_color_targets = static_cast<Uint32>(VariantGBufferTargets.size());
+				variant.GBuffer = SDL_CreateGPUGraphicsPipeline(Device, &info);
+				info.vertex_shader = PackedOpaqueVertexShader;
+				info.vertex_input_state = SDL_GPUVertexInputState{};
+				variant.PackedGBuffer = SDL_CreateGPUGraphicsPipeline(Device, &info);
+			}
+		}
+		const bool gbufferRefused = !gbufferWords.empty() && GBufferPipeline != nullptr &&
+									(variant.GBuffer == nullptr || variant.PackedGBuffer == nullptr);
+
 		// All supported families or none: a partial variant would change the
 		// material when it becomes transparent or appears through a portal.
 		if (variant.Opaque == nullptr || variant.Transparent == nullptr || variant.PackedOpaque == nullptr ||
-			variant.PackedTransparent == nullptr ||
+			variant.PackedTransparent == nullptr || gbufferRefused ||
 			(HdrOpaquePipeline != nullptr &&
 			 (variant.HdrOpaque == nullptr || variant.HdrTransparent == nullptr ||
 			  variant.PackedHdrOpaque == nullptr || variant.PackedHdrTransparent == nullptr))) {
@@ -1915,8 +1936,11 @@ namespace engine::render {
 				 {variant.PackedOpaque,
 				  variant.PackedTransparent,
 				  variant.PackedHdrOpaque,
-				  variant.PackedHdrTransparent})
+				  variant.PackedHdrTransparent,
+				  variant.GBuffer,
+				  variant.PackedGBuffer})
 				if (pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+			if (variant.GBufferFragment != nullptr) SDL_ReleaseGPUShader(Device, variant.GBufferFragment);
 			SDL_ReleaseGPUShader(Device, fragment);
 			return false;
 		}
@@ -1954,6 +1978,11 @@ namespace engine::render {
 			SDL_ReleaseGPUGraphicsPipeline(Device, found->second.PackedHdrOpaque);
 		if (found->second.PackedHdrTransparent != nullptr)
 			SDL_ReleaseGPUGraphicsPipeline(Device, found->second.PackedHdrTransparent);
+		if (found->second.GBuffer != nullptr) SDL_ReleaseGPUGraphicsPipeline(Device, found->second.GBuffer);
+		if (found->second.PackedGBuffer != nullptr)
+			SDL_ReleaseGPUGraphicsPipeline(Device, found->second.PackedGBuffer);
+		if (found->second.GBufferFragment != nullptr)
+			SDL_ReleaseGPUShader(Device, found->second.GBufferFragment);
 		SDL_ReleaseGPUShader(Device, found->second.Fragment);
 		ShaderVariants.erase(found);
 	}
@@ -1974,6 +2003,11 @@ namespace engine::render {
 				SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.PackedHdrOpaque);
 			if (entry.second.PackedHdrTransparent != nullptr)
 				SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.PackedHdrTransparent);
+			if (entry.second.GBuffer != nullptr) SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.GBuffer);
+			if (entry.second.PackedGBuffer != nullptr)
+				SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.PackedGBuffer);
+			if (entry.second.GBufferFragment != nullptr)
+				SDL_ReleaseGPUShader(Device, entry.second.GBufferFragment);
 			SDL_ReleaseGPUShader(Device, entry.second.Fragment);
 		}
 		ShaderVariants.clear();
@@ -2008,8 +2042,9 @@ namespace engine::render {
 			return found->second.HdrOpaque;
 		case PipelineFamily::HdrTransparent:
 			return found->second.HdrTransparent;
-		case PipelineFamily::Other:
 		case PipelineFamily::GBuffer:
+			return found->second.GBuffer;
+		case PipelineFamily::Other:
 		case PipelineFamily::DepthPeel:
 			break;
 		}
@@ -2030,8 +2065,9 @@ namespace engine::render {
 			return found->second.PackedHdrOpaque;
 		case PipelineFamily::HdrTransparent:
 			return found->second.PackedHdrTransparent;
-		case PipelineFamily::Other:
 		case PipelineFamily::GBuffer:
+			return found->second.PackedGBuffer;
+		case PipelineFamily::Other:
 		case PipelineFamily::DepthPeel:
 			return nullptr;
 		}

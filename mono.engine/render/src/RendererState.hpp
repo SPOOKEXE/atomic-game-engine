@@ -1230,6 +1230,15 @@ namespace engine::render {
 			SDL_GPUGraphicsPipeline *PackedTransparent = nullptr;
 			SDL_GPUGraphicsPipeline *PackedHdrOpaque = nullptr;
 			SDL_GPUGraphicsPipeline *PackedHdrTransparent = nullptr;
+			// A surface's own G-buffer draw; null for a whole program, which is
+			// drawn lit ahead of the pass.
+			SDL_GPUShader *GBufferFragment = nullptr;
+			SDL_GPUGraphicsPipeline *GBuffer = nullptr;
+			SDL_GPUGraphicsPipeline *PackedGBuffer = nullptr;
+			// Drawn ahead of the G-buffer rather than in it.
+			bool DrawnAhead() const {
+				return HdrOpaque != nullptr && GBuffer == nullptr;
+			}
 		};
 
 		// A material name resolves within its residency owner.
@@ -1281,6 +1290,7 @@ namespace engine::render {
 		SDL_GPUVertexAttribute VariantAttributes[5]{};
 		SDL_GPUColorTargetDescription VariantOpaqueTarget{};
 		SDL_GPUColorTargetDescription VariantBlendedTarget{};
+		std::array<SDL_GPUColorTargetDescription, 8> VariantGBufferTargets{};
 		SDL_GPUGraphicsPipelineCreateInfo VariantOpaqueInfo{};
 		SDL_GPUGraphicsPipelineCreateInfo VariantBlendedInfo{};
 		bool VariantsReady = false;
@@ -3450,7 +3460,12 @@ namespace engine::render {
 		// @param spirv The module. Must declare the sampler and uniform slots
 		//              `opaque.frag` does - see `Renderer::AddShader`.
 		// @return `false` when the shader or either pipeline could not be built.
-		bool AddShaderVariant(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner);
+		bool AddShaderVariant(
+			const core::Name &name,
+			std::span<const uint32_t> spirv,
+			core::Name owner,
+			std::span<const uint32_t> gbuffer = {}
+		);
 
 		// Releases one variant's shader and pipelines.
 		void DropShaderVariant(const core::Name &name, core::Name owner);

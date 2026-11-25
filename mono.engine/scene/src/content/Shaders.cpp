@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <string>
+#include <unordered_map>
 
 namespace engine::scene {
 
@@ -81,6 +82,22 @@ namespace engine::scene {
 			return property;
 		}
 
+		ecs::PropertyDescriptor CompileErrorProperty() {
+			ecs::PropertyDescriptor property;
+			property.Name = core::Name("CompileError");
+			property.Type = ecs::PropertyType::String;
+			property.Size = sizeof(std::string);
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<ShaderSource>()});
+			property.Writable = false;
+			property.Writes = &ecs::ComponentSet::Intern({});
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				if (store.Get<ShaderSource>(instance) == nullptr) return false;
+				*static_cast<std::string *>(out) = ShaderErrorOf(store, instance);
+				return true;
+			};
+			return property;
+		}
+
 		// The class, built once for the process.
 		//
 		// A function-local static in `ShaderScriptClass`, so the class exists
@@ -104,9 +121,23 @@ namespace engine::scene {
 
 			ecs::Classes::Computed(script, SourceProperty());
 			ecs::Classes::Computed(script, RevisionProperty());
+			ecs::Classes::Computed(script, CompileErrorProperty());
+			(void)ecs::Classes::SetPropertiesTag(script, "CompileError", core::Name("Data"));
 			(void)ecs::Classes::SetPropertiesTag(script, "Source", core::Name("Rendering"));
 			(void)ecs::Classes::SetPropertiesTag(script, "Revision", core::Name("Data"));
 			return script;
+		}
+
+		ecs::ClassId RegisterShaderModuleClass() {
+			EnsureClassTree();
+			const ecs::ClassId instance = ecs::Classes::Find(core::Name("Instance"));
+			const std::array source{ecs::Components::Of<ShaderSource>()};
+			const ecs::ClassId module = ecs::Classes::Register("ShaderModule", instance, source);
+			ecs::Classes::Computed(module, SourceProperty());
+			ecs::Classes::Computed(module, RevisionProperty());
+			(void)ecs::Classes::SetPropertiesTag(module, "Source", core::Name("Rendering"));
+			(void)ecs::Classes::SetPropertiesTag(module, "Revision", core::Name("Data"));
+			return module;
 		}
 
 		ecs::ClassId RegisterLensShaderClass() {
@@ -129,6 +160,64 @@ namespace engine::scene {
 	ecs::ClassId ShaderScriptClass() {
 		static const ecs::ClassId script = RegisterShaderScriptClass();
 		return script;
+	}
+
+	ecs::ClassId ShaderModuleClass() {
+		static const ecs::ClassId module = RegisterShaderModuleClass();
+		return module;
+	}
+
+	ShaderText ShaderModuleTextOf(ecs::Store &store, const core::Name &name) {
+		if (!name.IsValid()) return {};
+		const ecs::ClassId moduleClass = ShaderModuleClass();
+		ecs::Entity found = ecs::NULL_ENTITY;
+		store.Each<const ShaderSource>([&](ecs::Entity entity, const ShaderSource &) {
+			if (!store.IsA(entity, moduleClass) || store.InstanceNameOf(entity) != name) return;
+			if (found == ecs::NULL_ENTITY || entity.Id < found.Id) found = entity;
+		});
+		const ShaderSource *held = found == ecs::NULL_ENTITY ? nullptr : store.Get<ShaderSource>(found);
+		if (held == nullptr) return {};
+		return ShaderText{
+			.Code = held->Code,
+			.StoreIdentity = store.Identity(),
+			.Source = found,
+			.Revision = held->Revision,
+			.Found = true
+		};
+	}
+
+	uint64_t ShaderModuleStamp(ecs::Store &store) {
+		const ecs::ClassId moduleClass = ShaderModuleClass();
+		// A sum, so archetype order does not matter.
+		uint64_t stamp = 0;
+		store.Each<const ShaderSource>([&](ecs::Entity entity, const ShaderSource &source) {
+			if (!store.IsA(entity, moduleClass)) return;
+			uint64_t row = entity.Id * 0x9E3779B97F4A7C15ull;
+			row ^= (uint64_t(store.InstanceNameOf(entity).Id()) << 32) | source.Revision;
+			row *= 0xBF58476D1CE4E5B9ull;
+			stamp += row ^ (row >> 29);
+		});
+		return stamp;
+	}
+
+	void SetShaderError(ecs::Store &store, ecs::Entity script, std::string_view error) {
+		ShaderDiagnostics *held = store.ResourceMutable<ShaderDiagnostics>();
+		if (held == nullptr) {
+			if (error.empty()) return;
+			store.SetResource(ShaderDiagnostics{});
+			held = store.ResourceMutable<ShaderDiagnostics>();
+		}
+		if (error.empty())
+			held->Errors.erase(script.Id);
+		else
+			held->Errors[script.Id] = std::string(error);
+	}
+
+	std::string ShaderErrorOf(const ecs::Store &store, ecs::Entity script) {
+		const ShaderDiagnostics *held = store.Resource<ShaderDiagnostics>();
+		if (held == nullptr) return {};
+		const auto found = held->Errors.find(script.Id);
+		return found == held->Errors.end() ? std::string{} : found->second;
 	}
 
 	ecs::ClassId LensShaderClass() {

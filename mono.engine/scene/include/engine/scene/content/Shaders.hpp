@@ -54,6 +54,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace engine::ecs {
@@ -107,6 +108,32 @@ namespace engine::scene {
 	//
 	// @return The class id.
 	ecs::ClassId LensShaderClass();
+
+	// The `ShaderModule` class id: GLSL a shader `#include`s by instance name.
+	//
+	// @return The class id.
+	ecs::ClassId ShaderModuleClass();
+
+	// The text of the module with that instance name, found as `ShaderScriptNamed`
+	// finds a script.
+	ShaderText ShaderModuleTextOf(ecs::Store &store, const core::Name &name);
+
+	// A value that changes when any module is added, removed, renamed or edited,
+	// so a library knows to assemble again.
+	uint64_t ShaderModuleStamp(ecs::Store &store);
+
+	// Why each script's latest text did not compile, by entity id. Derived and
+	// process-local, so its saved form is empty.
+	struct ShaderDiagnostics {
+		std::unordered_map<uint64_t, std::string> Errors;
+	};
+
+	// Records why a script's latest text did not compile, or clears it. Local to
+	// this process: it is never saved or replicated.
+	void SetShaderError(ecs::Store &store, ecs::Entity script, std::string_view error);
+
+	// The recorded reason, or empty.
+	std::string ShaderErrorOf(const ecs::Store &store, ecs::Entity script);
 
 	// The shader script in this world with that instance name.
 	//

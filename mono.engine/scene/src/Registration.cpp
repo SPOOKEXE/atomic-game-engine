@@ -1136,6 +1136,15 @@ namespace engine::scene {
 		// the texture names came from whatever registered the materials this run,
 		// and a save file carrying last run's would be names that resolve to
 		// nothing on a machine with different content.
+		// Derived by the shader library, so a save holds none of it.
+		void WriteShaderDiagnostics(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadShaderDiagnostics(core::ByteReader &, void *destination, size_t count) {
+			auto *diagnostics = static_cast<ShaderDiagnostics *>(destination);
+			for (size_t index = 0; index < count; index++)
+				diagnostics[index].Errors.clear();
+		}
+
 		void WriteMaterialCatalogues(core::ByteWriter &, const void *, size_t) {}
 
 		void ReadMaterialCatalogues(core::ByteReader &, void *destination, size_t count) {
@@ -2095,6 +2104,9 @@ namespace engine::scene {
 		// than derived, so it is saved rather than reset.** A game that
 		// picked a look for its screen expects a reopened place to still
 		// have it.
+		ecs::Components::Register<ShaderDiagnostics>(
+			"scene.ShaderDiagnostics", WriteShaderDiagnostics, ReadShaderDiagnostics
+		);
 		ecs::Components::Register<PostProcessing>(
 			"scene.PostProcessing", WritePostProcessing, ReadPostProcessing
 		);
@@ -2513,6 +2525,7 @@ namespace engine::scene {
 		// built by walking everything registered under `Instance`, so a class
 		// nothing registered is a class nobody can create.
 		(void)ShaderScriptClass();
+		(void)ShaderModuleClass();
 		(void)LensShaderClass();
 		(void)EditableMeshClass();
 		(void)EditableImageClass();

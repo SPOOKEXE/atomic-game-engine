@@ -785,8 +785,7 @@ namespace engine::render {
 				if (!baseMesh->Packed && ActiveFamily == PipelineFamily::GBuffer && shader.IsValid()) {
 					const auto authored =
 						ShaderVariants.find(ShaderVariantKey(shader, SlotShaderOwner[slot]));
-					resolvedBeforeGBuffer =
-						authored != ShaderVariants.end() && authored->second.HdrOpaque != nullptr;
+					resolvedBeforeGBuffer = authored != ShaderVariants.end() && authored->second.DrawnAhead();
 				}
 				if (resolvedBeforeGBuffer) {
 					slot++;
@@ -901,8 +900,7 @@ namespace engine::render {
 			bool resolvedBeforeGBuffer = false;
 			if (!mesh->Packed && ActiveFamily == PipelineFamily::GBuffer && shader.IsValid()) {
 				const auto authored = ShaderVariants.find(ShaderVariantKey(shader, SlotShaderOwner[slot]));
-				resolvedBeforeGBuffer =
-					authored != ShaderVariants.end() && authored->second.HdrOpaque != nullptr;
+				resolvedBeforeGBuffer = authored != ShaderVariants.end() && authored->second.DrawnAhead();
 			}
 			if (resolvedBeforeGBuffer || (indirect != nullptr && phaseInstances == 0)) {
 				argument += DrawArgumentCount(*mesh);

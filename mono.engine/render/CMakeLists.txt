@@ -82,6 +82,25 @@ mono_add_library(render
 		${CMAKE_SOURCE_DIR}/mono.vendor/sdl/src/video/khronos
 )
 
+# The text an authored surface is wrapped in, from the files the build compiles.
+set(embedded_shader_dir "${CMAKE_SOURCE_DIR}/mono.engine/resources/shaders")
+set(embedded_shaders "${CMAKE_CURRENT_BINARY_DIR}/EngineShaderSources.cpp")
+file(GLOB embedded_shader_inputs CONFIGURE_DEPENDS "${embedded_shader_dir}/*.glsl")
+add_custom_command(
+	OUTPUT "${embedded_shaders}"
+	COMMAND "${CMAKE_COMMAND}"
+		"-DSOURCE_DIR=${embedded_shader_dir}"
+		"-DOUTPUT=${embedded_shaders}"
+		"-DENTRIES=SURFACE_SHADING_GLSL=surface-shading.glsl,ENGINE_BRDF_GLSL=engine-brdf.glsl,ENGINE_SURFACE_GLSL=engine-surface.glsl,ENGINE_SURFACE_MAIN_GLSL=engine-surface-main.glsl"
+		-P "${CMAKE_SOURCE_DIR}/mono.build/EmbedShaders.cmake"
+	DEPENDS ${embedded_shader_inputs} "${CMAKE_SOURCE_DIR}/mono.build/EmbedShaders.cmake"
+	COMMENT "Embedding authored surface GLSL"
+	VERBATIM
+)
+if(TARGET engine_render)
+	target_sources(engine_render PRIVATE "${embedded_shaders}")
+endif()
+
 foreach(queue_target engine_render test_render bench_render)
 	if(TARGET ${queue_target})
 		target_include_directories(${queue_target} PRIVATE

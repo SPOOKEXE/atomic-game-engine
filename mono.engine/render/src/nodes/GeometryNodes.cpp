@@ -596,6 +596,9 @@ namespace engine::render {
 			SDL_SetGPUViewport(pass, &sceneViewport);
 			SDL_SetGPUScissor(pass, &sceneScissor);
 			SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
+			// Authored surfaces light themselves in this pass.
+			SDL_PushGPUFragmentUniformData(command, 1, &recording.SceneLights, sizeof(recording.SceneLights));
+			SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
 			return pass;
 		};
 		const auto drawOpaque =
@@ -628,14 +631,26 @@ namespace engine::render {
 			const auto found = State->ShaderVariants.find(
 				Impl::ShaderVariantKey(State->SlotShader[slot], State->SlotShaderOwner[slot])
 			);
-			return found != State->ShaderVariants.end() && found->second.HdrOpaque != nullptr;
+			return found != State->ShaderVariants.end() && found->second.DrawnAhead();
 		};
 		bool customOpaque = false;
 		if (haveInstances && !State->ShaderVariants.empty()) {
 			for (uint32_t slot = sceneCount; slot < sceneCount + plainOpaque; ++slot)
 				customOpaque = authored(slot) || customOpaque;
 		}
-		if (!occluded && !customOpaque && haveInstances && plainOpaque > 0 &&
+		// A queued packet carries no fragment uniforms for a surface to light with.
+		const auto litSurface = [&](uint32_t slot) {
+			const auto found = State->ShaderVariants.find(
+				Impl::ShaderVariantKey(State->SlotShader[slot], State->SlotShaderOwner[slot])
+			);
+			return found != State->ShaderVariants.end() && found->second.GBuffer != nullptr;
+		};
+		bool surfaces = false;
+		if (haveInstances && !State->ShaderVariants.empty()) {
+			for (uint32_t slot = sceneCount; slot < sceneCount + plainOpaque && !surfaces; ++slot)
+				surfaces = litSurface(slot);
+		}
+		if (!occluded && !customOpaque && !surfaces && haveInstances && plainOpaque > 0 &&
 			State->GpuQueues.HasCapacity(2)) {
 			try {
 				// Select and clear owner-owned generations before freezing their bindings.

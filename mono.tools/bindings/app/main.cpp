@@ -5837,6 +5837,7 @@ int main(int argc, char **argv) {
 	// at runtime, and an author reached for `.VertexCount` with no
 	// completion and no type error to say the property was real.
 	(void)engine::scene::ShaderScriptClass();
+	(void)engine::scene::ShaderModuleClass();
 	(void)engine::scene::LensShaderClass();
 	(void)engine::scene::EditableMeshClass();
 	(void)engine::scene::EditableImageClass();

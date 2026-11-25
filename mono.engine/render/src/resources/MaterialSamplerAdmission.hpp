@@ -9,11 +9,11 @@
 #include <string_view>
 
 namespace engine::render {
-	// Authored material fragments share the first ten texture slots with the
+	// Authored material fragments share these texture slots with the
 	// renderer's material draw. Reflection must identify the same named input
 	// the draw binds at each declared slot.
 	inline std::optional<std::string> AdmitMaterialSamplers(const ShaderCapabilities &capabilities) {
-		constexpr std::array<std::string_view, 10> names{
+		constexpr std::array<std::string_view, 16> names{
 			"shadowMap",
 			"surfaceMap",
 			"colourMap",
@@ -23,7 +23,14 @@ namespace engine::render {
 			"occlusionMap",
 			"emissiveMap",
 			"heightMap",
-			"metalnessMap"
+			"metalnessMap",
+			"packedPbrMap",
+			// Owned by the pass, not the material: refraction and transparent layers.
+			"",
+			"",
+			"",
+			"",
+			"weatherShadowImage"
 		};
 		std::array<bool, names.size()> occupied{};
 		for (const ShaderResourceEstimate &resource : capabilities.Resources) {
@@ -36,7 +43,7 @@ namespace engine::render {
 										 std::to_string(resource.Binding);
 			if (resource.Kind != ShaderResourceKind::SampledTexture)
 				return location + " must be a combined sampled image";
-			if (resource.Set != 2 || resource.Binding >= names.size())
+			if (resource.Set != 2 || resource.Binding >= names.size() || names[resource.Binding].empty())
 				return location + " is outside the material sampler contract";
 			if (occupied[resource.Binding]) return location + " duplicates a material sampler slot";
 			if (resource.Name != names[resource.Binding])

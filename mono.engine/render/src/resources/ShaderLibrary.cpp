@@ -7,6 +7,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Compile.hpp>
+#include <engine/render/resources/ShaderAssembly.hpp>
 #include <engine/render/resources/ShaderCompiler.hpp>
 #include <engine/render/resources/ShaderLibrary.hpp>
 #include <engine/resources/Shaders.hpp>
@@ -59,6 +60,7 @@ namespace engine::render {
 			module.Revision = text.Revision;
 			module.BuiltIn = false;
 			module.SpirV = std::move(result.SpirV);
+			module.GBufferSpirV.clear();
 			module.CodeHash = assets::Hasher::Of(std::as_bytes(std::span(module.SpirV)));
 			module.Capabilities = std::move(result.Capabilities);
 			module.Optimizations = std::move(result.Optimizations);
@@ -248,6 +250,12 @@ namespace engine::render {
 			entry = State->Modules.erase(entry);
 		}
 
+		const uint64_t moduleStamp = scene::ShaderModuleStamp(store);
+		const ShaderModuleResolver modules = [&store](std::string_view module) -> std::optional<std::string> {
+			scene::ShaderText held = scene::ShaderModuleTextOf(store, core::Name(module));
+			if (!held.Found) return std::nullopt;
+			return std::move(held.Code);
+		};
 		for (const core::Name &name : State->Demanded) {
 			const scene::ShaderText text = scene::ShaderTextOf(store, name);
 			const auto found = State->Modules.find(ModuleKey(name, owner));
@@ -258,10 +266,22 @@ namespace engine::render {
 				// does not trigger another compile until the selected source changes.
 				if (held && found->second.Authored && found->second.StoreIdentity == text.StoreIdentity &&
 					found->second.AttemptSource == text.Source &&
-					found->second.AttemptRevision == text.Revision) {
+					found->second.AttemptRevision == text.Revision &&
+					found->second.AttemptModuleStamp == moduleStamp) {
 					continue;
 				}
-				const assets::ContentHash codeHash = assets::Hasher::Of(std::as_bytes(std::span(text.Code)));
+				// The text compiled is the script with its modules in it, so editing a
+				// module recompiles the scripts that include it and no others.
+				ShaderAssembly assembled = AssembleShader(name.Text(), text.Code, modules);
+				const std::string &identity = assembled.Error.empty() ? assembled.Forward : assembled.Error;
+				const assets::ContentHash codeHash = assets::Hasher::Of(std::as_bytes(std::span(identity)));
+				if (held && found->second.Authored && found->second.StoreIdentity == text.StoreIdentity &&
+					found->second.AttemptSource == text.Source &&
+					found->second.AttemptRevision == text.Revision &&
+					found->second.AttemptCodeHash == codeHash) {
+					found->second.AttemptModuleStamp = moduleStamp;
+					continue;
+				}
 				if (held && found->second.Authored && found->second.StoreIdentity != text.StoreIdentity &&
 					found->second.AttemptCodeHash == codeHash) {
 					// The same text in another store, such as a Play replica. A new
@@ -269,15 +289,33 @@ namespace engine::render {
 					found->second.StoreIdentity = text.StoreIdentity;
 					found->second.AttemptSource = text.Source;
 					found->second.AttemptRevision = text.Revision;
+					found->second.AttemptModuleStamp = moduleStamp;
+					scene::SetShaderError(store, text.Source, found->second.AttemptError);
 					continue;
 				}
 
-				ShaderCompilation result =
-					State->Compiler.Compile(text.Code, ShaderStage::Fragment, name.Text());
+				ShaderCompilation result, gbuffer;
+				if (!assembled.Error.empty()) {
+					result.Failed = true;
+					result.Error = std::move(assembled.Error);
+				} else {
+					result = State->Compiler.Compile(assembled.Forward, ShaderStage::Fragment, name.Text());
+					if (!result.Failed && assembled.Surface) {
+						gbuffer =
+							State->Compiler.Compile(assembled.GBuffer, ShaderStage::Fragment, name.Text());
+						if (gbuffer.Failed) {
+							result.Failed = true;
+							result.Error = std::move(gbuffer.Error);
+						}
+					}
+				}
 
 				ShaderModule &module = State->Modules[ModuleKey(name, owner)];
 				const bool changed = ApplySourceCompilation(module, std::move(result), text, name);
 				module.AttemptCodeHash = codeHash;
+				module.AttemptModuleStamp = moduleStamp;
+				if (changed && module.Error.empty()) module.GBufferSpirV = std::move(gbuffer.SpirV);
+				scene::SetShaderError(store, text.Source, module.AttemptError);
 				if (changed) State->Changed.push_back(name);
 				continue;
 			}

@@ -2175,6 +2175,12 @@ declare interface StarsEffect extends Instance {
 }
 
 declare interface ShaderScript extends Instance {
+	readonly CompileError: string;
+	readonly Revision: number;
+	Source: string;
+}
+
+declare interface ShaderModule extends Instance {
 	readonly Revision: number;
 	Source: string;
 }
@@ -4027,6 +4033,7 @@ declare const Instance: {
 		(className: "WeatherCompute", parent?: Instance): WeatherCompute;
 		(className: "StarsEffect", parent?: Instance): StarsEffect;
 		(className: "ShaderScript", parent?: Instance): ShaderScript;
+		(className: "ShaderModule", parent?: Instance): ShaderModule;
 		(className: "LensShader", parent?: Instance): LensShader;
 		(className: "EditableMesh", parent?: Instance): EditableMesh;
 		(className: "EditableImage", parent?: Instance): EditableImage;

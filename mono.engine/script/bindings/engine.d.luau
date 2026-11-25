@@ -2448,6 +2448,12 @@ declare extern type StarsEffect extends Instance with
 end
 
 declare extern type ShaderScript extends Instance with
+	read CompileError: string
+	read Revision: number
+	Source: string
+end
+
+declare extern type ShaderModule extends Instance with
 	read Revision: number
 	Source: string
 end
@@ -4491,6 +4497,7 @@ type CreatableInstances = {
 	WeatherCompute: WeatherCompute,
 	StarsEffect: StarsEffect,
 	ShaderScript: ShaderScript,
+	ShaderModule: ShaderModule,
 	LensShader: LensShader,
 	EditableMesh: EditableMesh,
 	EditableImage: EditableImage,

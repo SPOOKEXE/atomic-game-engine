@@ -12,7 +12,11 @@ layout(location = 7) flat in vec3 inSurfaceColour;
 layout(location = 8) flat in vec4 inEmission;
 layout(location = 9) flat in uvec2 inFeaturePolicy;
 
+// AUTHORED_SURFACE: a script's Surface function replaces shadeSurface, so the
+// outputs and the refraction and layer samplers are left to the generated main.
+#ifndef AUTHORED_SURFACE
 layout(location = 0) out vec4 outColour;
+#endif
 
 // Fragment samplers are set 2 for SPIR-V; uniform buffers are set 3.
 layout(set = 2, binding = 0) uniform sampler2D shadowMap;
@@ -35,6 +39,7 @@ layout(set = 2, binding = 7) uniform sampler2D emissiveMap;
 layout(set = 2, binding = 8) uniform sampler2D heightMap;
 layout(set = 2, binding = 9) uniform sampler2D metalnessMap;
 layout(set = 2, binding = 10) uniform sampler2D packedPbrMap;
+#ifndef AUTHORED_SURFACE
 // The transparent node binds its completed opaque source here. It is a
 // different texture from the active colour target, so transmission never reads
 // and writes the same image in one render pass.
@@ -46,6 +51,7 @@ layout(set = 2, binding = 12) uniform sampler2D refractionGuardImage;
 #ifndef WEATHER_LAYER_BOUNDS
 layout(set = 2, binding = 13) uniform sampler2D reservedLayerOpaque;
 layout(set = 2, binding = 14) uniform sampler2D reservedLayerPrevious;
+#endif
 #endif
 
 struct WeatherShadowState {
@@ -495,6 +501,7 @@ vec3 FresnelSchlick(float cosine, vec3 base) {
 	return base + (1.0 - base) * pow(clamp(1.0 - cosine, 0.0, 1.0), 5.0);
 }
 
+#ifndef AUTHORED_SURFACE
 void shadeSurface() {
 	const uint features = ResolvedSurfaceFeatures();
 	vec3 normal = normalize(inNormal);
@@ -766,3 +773,4 @@ void shadeSurface() {
 	// twice and make a 0.2 glass surface nearly disappear.
 	outColour = vec4(Encode(transmitted), 1.0);
 }
+#endif
