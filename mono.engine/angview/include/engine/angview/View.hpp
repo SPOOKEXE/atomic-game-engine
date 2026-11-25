@@ -13,7 +13,7 @@
 // dropping on a compatible port links, dropping on empty space opens the
 // palette filtered by type, left-drag on empty space box-selects, middle-drag
 // or Alt+left or Space+left pans, the wheel zooms about the cursor, F frames
-// the selection, Delete removes it, Ctrl+D duplicates it, Ctrl+A selects
+// the selection, H collapses it, Delete removes it, Ctrl+D duplicates it, Ctrl+A selects
 // all, Escape cancels.
 // Touch: one finger acts as left, two fingers pan and pinch-zoom.
 // @tier L4 · shared
@@ -43,6 +43,7 @@ namespace engine::angview {
 		Space,
 		Tab,
 		D,
+		H,
 	};
 
 	struct Modifiers {
@@ -252,6 +253,7 @@ namespace engine::angview {
 		void ZoomAbout(float factor, core::Vector2 view);
 		void DeleteSelection();
 		void DuplicateSelection();
+		void ToggleCollapsed();
 		void PaintInto(DrawList &list);
 		void PaintTimeline(DrawList &list);
 		Rgba WireColour(const ang::TypeId &type) const;

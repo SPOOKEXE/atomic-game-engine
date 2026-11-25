@@ -599,3 +599,28 @@ TEST_CASE("a host can tint node headers", "[angview][view]") {
 	}
 	CHECK(tinted == 1);
 }
+
+TEST_CASE("H collapses the selection to headers and keeps its wires", "[angview][view]") {
+	Scene scene;
+	REQUIRE(scene.Document.Apply(edit::AddLink{{"one", "value", "add", "a"}}).Ok);
+	View &view = *scene.Canvas;
+	view.GraphChanged();
+	CHECK(!view.KeyDown(Key::H));
+	view.Select({"add"});
+	REQUIRE(view.KeyDown(Key::H));
+	CHECK(scene.Document.FindNode("add")->Collapsed);
+	const NodeLayout *add = view.Geometry().Find("add");
+	CHECK(add->Bounds.Max.Y - add->Bounds.Min.Y == Theme::Dark().HeaderHeight);
+	CHECK(add->Inputs[0].Centre.Y == add->Inputs[1].Centre.Y);
+	CHECK(!tests::HasText(view.Paint(), "sum"));
+	CHECK(scene.Document.Links().size() == 1);
+	view.Select({"one", "add"});
+	// Mixed: collapse the rest first, then open them all.
+	view.KeyDown(Key::H);
+	CHECK(scene.Document.FindNode("one")->Collapsed);
+	view.KeyDown(Key::H);
+	CHECK(!scene.Document.FindNode("one")->Collapsed);
+	CHECK(!scene.Document.FindNode("add")->Collapsed);
+	scene.Undo();
+	CHECK(!scene.Document.FindNode("add")->Collapsed);
+}

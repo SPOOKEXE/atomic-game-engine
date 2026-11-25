@@ -35,6 +35,8 @@ namespace engine::ang {
 		core::Vector2 Position{};
 		std::string Group{};
 		bool Bypassed = false;
+		// Drawn as its header alone. A view state: no hash or run depends on it.
+		bool Collapsed = false;
 	};
 
 	// One directed link from an output to an input.
@@ -76,6 +78,10 @@ namespace engine::ang {
 			std::string Node{};
 			bool Bypassed = false;
 		};
+		struct SetCollapsed {
+			std::string Node{};
+			bool Collapsed = false;
+		};
 		struct SetNodeGroup {
 			std::string Node{};
 			std::string Group{};
@@ -109,6 +115,7 @@ namespace engine::ang {
 		edit::MoveNode,
 		edit::SetParam,
 		edit::SetBypass,
+		edit::SetCollapsed,
 		edit::SetNodeGroup,
 		edit::AddLink,
 		edit::RemoveLink,

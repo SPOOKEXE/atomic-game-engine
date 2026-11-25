@@ -39,6 +39,7 @@ TEST_CASE("every edit kind inverts", "[ang][graph]") {
 		edit::MoveNode{"a", {10.0f, 20.0f}},
 		edit::SetParam{"a", "value", Value(5.0)},
 		edit::SetBypass{"a", true},
+		edit::SetCollapsed{"a", true},
 		edit::SetNodeGroup{"a", "g"},
 		edit::SetGroupFrame{"g", {1.0f, 2.0f}, {300.0f, 200.0f}},
 		edit::SetGroupLabel{"g", "Renamed"},
@@ -49,6 +50,7 @@ TEST_CASE("every edit kind inverts", "[ang][graph]") {
 	CHECK(node->Position.X == 10.0f);
 	CHECK(node->Params.at("value") == Value(5.0));
 	CHECK(node->Bypassed);
+	CHECK(node->Collapsed);
 	CHECK(node->Group == "g");
 	CHECK(graph.FindGroup("g")->Size.X == 300.0f);
 	CHECK(graph.FindGroup("g")->Label == "Renamed");
@@ -59,6 +61,7 @@ TEST_CASE("every edit kind inverts", "[ang][graph]") {
 	CHECK(node->Position.X == 0.0f);
 	CHECK(node->Params.at("value") == Value(1.0));
 	CHECK(!node->Bypassed);
+	CHECK(!node->Collapsed);
 	CHECK(node->Group.empty());
 
 	// Removing a group clears membership; undo restores it.

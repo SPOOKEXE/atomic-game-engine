@@ -204,6 +204,15 @@ namespace engine::ang {
 					found->Bypassed = set.Bypassed;
 					return Done(change, {edit::SetBypass{set.Node, previous}});
 				},
+				[&](const edit::SetCollapsed &set) -> EditResult {
+					auto found = FindById(NodeList, set.Node);
+					if (found == NodeList.end()) {
+						return Refuse("node '" + set.Node + "' does not exist");
+					}
+					const bool previous = found->Collapsed;
+					found->Collapsed = set.Collapsed;
+					return Done(change, {edit::SetCollapsed{set.Node, previous}});
+				},
 				[&](const edit::SetNodeGroup &set) -> EditResult {
 					auto found = FindById(NodeList, set.Node);
 					if (found == NodeList.end()) {

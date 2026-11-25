@@ -98,6 +98,7 @@ namespace engine::angview {
 		for (const ang::NodeInstance &node : graph.Nodes()) {
 			NodeLayout layout;
 			layout.Id = node.Id;
+			layout.Collapsed = node.Collapsed;
 			const auto def = registry.FindNode(node.Def);
 			const ang::SubgraphDef *subgraph = registry.FindSubgraph(node.Def);
 			layout.Known = def != nullptr || subgraph != nullptr;
@@ -116,7 +117,10 @@ namespace engine::angview {
 			const size_t rows = std::max<size_t>(1, std::max(inputs.size(), outputs.size()));
 			float height =
 				theme.HeaderHeight + theme.NodePadding * 2.0f + theme.RowHeight * static_cast<float>(rows);
-			if (hooks.Image) {
+			if (node.Collapsed) {
+				height = theme.HeaderHeight;
+			}
+			if (hooks.Image && !node.Collapsed) {
 				const NodeImage image = hooks.Image(node);
 				if (image.Handle != 0) {
 					// Full inner width; very wide or tall pictures are clamped so a node stays usable.
@@ -129,13 +133,16 @@ namespace engine::angview {
 				}
 			}
 			layout.Bounds = {origin, {origin.X + theme.NodeWidth, origin.Y + height}};
-			const float firstRow = origin.Y + theme.HeaderHeight + theme.NodePadding + theme.RowHeight * 0.5f;
+			const float firstRow =
+				node.Collapsed ? origin.Y + theme.HeaderHeight * 0.5f
+							   : origin.Y + theme.HeaderHeight + theme.NodePadding + theme.RowHeight * 0.5f;
+			const float rowStep = node.Collapsed ? 0.0f : theme.RowHeight;
 			for (size_t index = 0; index < inputs.size(); ++index) {
 				layout.Inputs.push_back(
 					{inputs[index].Name,
 					 inputs[index].Type,
 					 ang::Direction::Input,
-					 {origin.X, firstRow + theme.RowHeight * static_cast<float>(index)}}
+					 {origin.X, firstRow + rowStep * static_cast<float>(index)}}
 				);
 			}
 			for (size_t index = 0; index < outputs.size(); ++index) {
@@ -143,7 +150,7 @@ namespace engine::angview {
 					{outputs[index].Name,
 					 outputs[index].Type,
 					 ang::Direction::Output,
-					 {origin.X + theme.NodeWidth, firstRow + theme.RowHeight * static_cast<float>(index)}}
+					 {origin.X + theme.NodeWidth, firstRow + rowStep * static_cast<float>(index)}}
 				);
 			}
 			Add(std::move(layout));

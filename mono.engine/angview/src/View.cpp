@@ -615,6 +615,12 @@ namespace engine::angview {
 			}
 			Dirty();
 			return true;
+		case Key::H:
+			if (Selected.empty() || Drag != DragKind::None) {
+				return false;
+			}
+			ToggleCollapsed();
+			return true;
 		case Key::D:
 			if (!modifiers.Control || Selected.empty() || Drag != DragKind::None) {
 				return false;
@@ -657,6 +663,22 @@ namespace engine::angview {
 			}
 		}
 		Selected.clear();
+		Apply(edits);
+	}
+
+	// Collapses the selection, or opens it when all of it is collapsed already.
+	void View::ToggleCollapsed() {
+		const bool collapse = std::any_of(Selected.begin(), Selected.end(), [this](const std::string &id) {
+			const ang::NodeInstance *node = Document.FindNode(id);
+			return node != nullptr && !node->Collapsed;
+		});
+		std::vector<ang::Edit> edits;
+		for (const std::string &id : Selected) {
+			const ang::NodeInstance *node = Document.FindNode(id);
+			if (node != nullptr && node->Collapsed != collapse) {
+				edits.push_back(ang::edit::SetCollapsed{id, collapse});
+			}
+		}
 		Apply(edits);
 	}
 
@@ -1252,6 +1274,9 @@ namespace engine::angview {
 							 .Fill = fill,
 							 .Radius = portRadius}
 						);
+					}
+					if (node.Collapsed) {
+						continue;
 					}
 					const bool input = port.Dir == ang::Direction::Input;
 					const float labelX = input ? centre.X + portRadius + 4.0f * zoom

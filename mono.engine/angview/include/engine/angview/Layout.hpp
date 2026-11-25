@@ -50,6 +50,8 @@ namespace engine::angview {
 		std::vector<PortLayout> Inputs{};
 		std::vector<PortLayout> Outputs{};
 		bool Known = true;
+		// Only the header shows; ports sit on its edges and keep their wires.
+		bool Collapsed = false;
 		// Host picture under the ports; zero handle means none.
 		uint64_t Image = 0;
 		Rect ImageBounds{};
