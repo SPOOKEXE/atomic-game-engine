@@ -6800,6 +6800,7 @@ namespace studio {
 
 		engine::script::RuntimeLimits limits;
 		limits.Compute = Renderer.ComputeForWorld(std::string(Universe->NameOf(world).Text()));
+		limits.NodeGraphs = client::PipelineGraphHost(RenderingProfiles);
 		limits.Role.Server = true;
 		limits.Role.Client = mode == RunMode::Play;
 

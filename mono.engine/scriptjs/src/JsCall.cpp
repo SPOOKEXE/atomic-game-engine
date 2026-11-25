@@ -234,9 +234,9 @@ namespace engine::script {
 				JsContext &bound = JsOf(Context);
 				if (bound.NodeGraphs == nullptr) {
 					JSContext *context = Context;
-					bound.NodeGraphs = std::make_unique<NodeGraphLibrary>([context](CallbackRef callback) {
-						Release(context, callback);
-					});
+					bound.NodeGraphs = std::make_unique<NodeGraphLibrary>(
+						[context](CallbackRef callback) { Release(context, callback); }, bound.NodeGraphSource
+					);
 				}
 				return *bound.NodeGraphs;
 			}

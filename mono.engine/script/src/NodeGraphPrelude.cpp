@@ -76,14 +76,108 @@ end
 local Graph = {}
 Graph.__index = Graph
 
+local ATTRIBUTE = "NodeGraphDocument"
+
+-- Writes the document to the instance it is published on, when it changed.
+local function publish(graph)
+	local target = graph._published
+	if target ~= nil then
+		local text = Service:Save(graph._handle)
+		if text ~= graph._text then
+			graph._text = text
+			target:SetAttribute(ATTRIBUTE, text)
+		end
+	end
+end
+
 local function changed(graph)
 	for view in graph._views do
 		view:Refresh()
 	end
+	publish(graph)
+end
+
+local function wrap(handle, registry)
+	return setmetatable({ _handle = handle, Registry = registry, _views = {} }, Graph)
+end
+
+local function opened(handles)
+	return wrap(handles.Graph, setmetatable({ _handle = handles.Registry }, Registry))
 end
 
 function Graph.new(registry)
-	return setmetatable({ _handle = Service:CreateGraph(registry._handle), Registry = registry, _views = {} }, Graph)
+	return wrap(Service:CreateGraph(registry._handle), registry)
+end
+
+function Graph.load(registry, text)
+	local graph = Graph.new(registry)
+	graph:Load(text)
+	return graph
+end
+
+-- The engine's own graphs. An image graph can be edited and committed; the
+-- others are read-only.
+function Graph.fromImageGraph(instance)
+	local graph = opened(Service:OpenImageGraph(instance:GetGraphDocument()))
+	graph._image = instance
+	return graph
+end
+
+function Graph.fromProcedural()
+	return opened(Service:OpenProcedural())
+end
+
+function Graph.hostNames()
+	return Service:HostGraphNames()
+end
+
+function Graph.fromHost(name)
+	return opened(Service:OpenHostGraph(name))
+end
+
+-- A graph that follows the document published on an instance, such as one a
+-- server published and this client received.
+function Graph.subscribe(registry, instance)
+	local graph = Graph.new(registry)
+	local function reload()
+		local text = instance:GetAttribute(ATTRIBUTE)
+		if text ~= nil then
+			local ok, message = pcall(graph.Load, graph, text)
+			if not ok then
+				warn("NodeGraph: published graph refused: " .. tostring(message))
+			end
+		end
+	end
+	reload()
+	graph._connection = instance:GetAttributeChangedSignal(ATTRIBUTE):Connect(reload)
+	return graph
+end
+
+function Graph:PublishTo(instance)
+	self._published = instance
+	self._text = nil
+	publish(self)
+end
+
+function Graph:Save()
+	return Service:Save(self._handle)
+end
+
+function Graph:Load(text)
+	Service:Load(self._handle, text)
+	-- Views drop what they last drew, so a canvas does not write it back.
+	for view in self._views do
+		Service:ResetView(view._handle)
+	end
+	changed(self)
+end
+
+function Graph:Commit()
+	for view in self._views do
+		Service:SyncView(view._handle)
+	end
+	local document = Service:WriteImageGraph(self._handle)
+	self._image:SetGraphDocument(document)
 end
 
 function Graph:AddNode(def, params, position, id)
@@ -128,6 +222,11 @@ function Graph:SetBypass(node, bypassed)
 	changed(self)
 end
 
+function Graph:SetCollapsed(node, collapsed)
+	Service:SetCollapsed(self._handle, node, collapsed)
+	changed(self)
+end
+
 function Graph:GetNodes()
 	return Service:GetNodes(self._handle)
 end
@@ -141,6 +240,11 @@ function Graph:Validate(domain)
 end
 
 function Graph:Destroy()
+	if self._connection ~= nil then
+		self._connection:Disconnect()
+		self._connection = nil
+	end
+	self._published = nil
 	Service:Destroy(self._handle)
 end
 
@@ -150,7 +254,11 @@ local Runner = {}
 Runner.__index = Runner
 
 function Runner.new(graph, domain)
-	local runner = setmetatable({ _handle = Service:CreateRunner(graph._handle, domain), Graph = graph }, Runner)
+	local runner = setmetatable({
+		_handle = Service:CreateRunner(graph._handle, domain),
+		Graph = graph,
+		Domain = domain or "Tool",
+	}, Runner)
 	for _, name in HOOKS do
 		runner[name] = makeSignal(runner, name)
 	end
@@ -167,13 +275,22 @@ function Runner:Run(inputs)
 		Service:SetViewRun(view._handle, self._handle)
 		view:Refresh()
 	end
+	publish(graph)
 	return report
 end
 
--- Script nodes are Sync in every domain, so nothing a script can define
--- waits across calls and this answers at once.
+-- Runs until no node waits on async work, yielding a tick between passes.
+-- Impure nodes run again on each pass.
 function Runner:RunAsync(inputs)
-	return self:Run(inputs)
+	if self.Domain == "Tick" then
+		error("RunAsync is for Frame and Tool graphs", 2)
+	end
+	local report = self:Run(inputs)
+	while not report.Complete do
+		task.wait()
+		report = self:Run(inputs)
+	end
+	return report
 end
 
 function Runner:Output(node, port)
@@ -293,9 +410,11 @@ return table.freeze({
 		});
 	}
 
+	const ATTRIBUTE = "NodeGraphDocument";
+
 	class Registry {
-		constructor() {
-			this._handle = Service.CreateRegistry();
+		constructor(handle) {
+			this._handle = handle === undefined ? Service.CreateRegistry() : handle;
 		}
 		DefineType(id, spec) {
 			Service.DefineType(this._handle, id, spec);
@@ -312,13 +431,86 @@ return table.freeze({
 	}
 
 	class Graph {
-		constructor(registry) {
-			this._handle = Service.CreateGraph(registry._handle);
+		constructor(registry, handle) {
+			this._handle = handle === undefined ? Service.CreateGraph(registry._handle) : handle;
 			this.Registry = registry;
 			this._views = new Set();
 		}
+		static _opened(handles) {
+			return new Graph(new Registry(handles.Registry), handles.Graph);
+		}
+		static load(registry, text) {
+			const graph = new Graph(registry);
+			graph.Load(text);
+			return graph;
+		}
+		// The engine's own graphs. An image graph can be edited and committed;
+		// the others are read-only.
+		static fromImageGraph(instance) {
+			const graph = Graph._opened(Service.OpenImageGraph(instance.GetGraphDocument()));
+			graph._image = instance;
+			return graph;
+		}
+		static fromProcedural() {
+			return Graph._opened(Service.OpenProcedural());
+		}
+		static hostNames() {
+			return Service.HostGraphNames();
+		}
+		static fromHost(name) {
+			return Graph._opened(Service.OpenHostGraph(name));
+		}
+		// A graph that follows the document published on an instance, such as
+		// one a server published and this client received.
+		static subscribe(registry, instance) {
+			const graph = new Graph(registry);
+			const reload = () => {
+				const text = instance.GetAttribute(ATTRIBUTE);
+				if (text === undefined || text === null) return;
+				try {
+					graph.Load(text);
+				} catch (error) {
+					console.warn("NodeGraph: published graph refused: " + error);
+				}
+			};
+			reload();
+			graph._connection = instance.GetAttributeChangedSignal(ATTRIBUTE).Connect(reload);
+			return graph;
+		}
+		// Writes the document to the instance it is published on, when it changed.
+		_publish() {
+			if (!this._published) return;
+			const text = Service.Save(this._handle);
+			if (text !== this._text) {
+				this._text = text;
+				this._published.SetAttribute(ATTRIBUTE, text);
+			}
+		}
 		_changed() {
 			for (const view of this._views) view.Refresh();
+			this._publish();
+		}
+		PublishTo(instance) {
+			this._published = instance;
+			this._text = undefined;
+			this._publish();
+		}
+		Save() {
+			return Service.Save(this._handle);
+		}
+		Load(text) {
+			Service.Load(this._handle, text);
+			// Views drop what they last drew, so a canvas does not write it back.
+			for (const view of this._views) Service.ResetView(view._handle);
+			this._changed();
+		}
+		Commit() {
+			for (const view of this._views) Service.SyncView(view._handle);
+			this._image.SetGraphDocument(Service.WriteImageGraph(this._handle));
+		}
+		SetCollapsed(node, collapsed) {
+			Service.SetCollapsed(this._handle, node, collapsed);
+			this._changed();
 		}
 		AddNode(def, params, position, id) {
 			const made = Service.AddNode(this._handle, def, params, position ? position.X : undefined, position ? position.Y : undefined, id);
@@ -361,6 +553,9 @@ return table.freeze({
 			return Service.Validate(this._handle, domain);
 		}
 		Destroy() {
+			if (this._connection) this._connection.Disconnect();
+			this._connection = undefined;
+			this._published = undefined;
 			Service.Destroy(this._handle);
 		}
 	}
@@ -371,6 +566,7 @@ return table.freeze({
 		constructor(graph, domain) {
 			this._handle = Service.CreateRunner(graph._handle, domain);
 			this.Graph = graph;
+			this.Domain = domain === undefined ? "Tool" : domain;
 			for (const name of HOOKS) this[name] = makeSignal(this, name);
 		}
 		Run(inputs) {
@@ -380,15 +576,19 @@ return table.freeze({
 				Service.SetViewRun(view._handle, this._handle);
 				view.Refresh();
 			}
+			this.Graph._publish();
 			return report;
 		}
-		// Script nodes are Sync in every domain, so this settles at once.
-		RunAsync(inputs) {
-			try {
-				return Promise.resolve(this.Run(inputs));
-			} catch (error) {
-				return Promise.reject(error);
+		// Runs until no node waits on async work, a tick between passes. Impure
+		// nodes run again on each pass.
+		async RunAsync(inputs) {
+			if (this.Domain === "Tick") throw new Error("RunAsync is for Frame and Tool graphs");
+			let report = this.Run(inputs);
+			while (!report.Complete) {
+				await task.wait(0);
+				report = this.Run(inputs);
 			}
+			return report;
 		}
 		Output(node, port) {
 			return Service.Output(this._handle, node, port);

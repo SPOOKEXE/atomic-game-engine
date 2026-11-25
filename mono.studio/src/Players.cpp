@@ -30,6 +30,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <algorithm>
+#include <client/Scene.hpp>
 #include <imgui.h>
 #include <string>
 #include <studio/Editor.hpp>
@@ -240,6 +241,7 @@ namespace studio {
 		link->SetComputeHost([this](std::string worldName) {
 			return Renderer.ComputeForWorld(std::move(worldName));
 		});
+		link->SetNodeGraphHost(client::PipelineGraphHost(RenderingProfiles));
 
 		// Numbered by how many there already are, so the world's name stays the
 		// identity it has to be - rule 4. Two clients that took one name would

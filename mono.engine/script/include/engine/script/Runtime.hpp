@@ -233,6 +233,8 @@ namespace engine::script {
 		std::function<std::string(ecs::Entity module)> ChunkName;
 	};
 
+	struct NodeGraphHost;
+
 	// What bounds a script, and what a host may change about it.
 	//
 	// Both limits are refusals rather than throttles: past either one the script
@@ -250,6 +252,8 @@ namespace engine::script {
 		std::shared_ptr<DataCaptureBridge> DataCapture{};
 		// Host-owned lifecycle adapter for copied package and world state.
 		std::shared_ptr<DataLifecycleBridge> DataLifecycle{};
+		// Engine graphs `NodeGraph` can open here. Empty on hosts that show none.
+		std::shared_ptr<const NodeGraphHost> NodeGraphs{};
 		// Host-bound typed GPU work. Empty on hosts without a renderer.
 		ComputeBridgeFactory Compute{};
 		// The client host supplies the reliable, ordered user lane. It receives a

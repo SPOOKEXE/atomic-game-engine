@@ -1117,6 +1117,7 @@ namespace client {
 		// a game's `Script` and its `LocalScript` both run here.
 		engine::script::RuntimeLimits limits;
 		limits.Role = engine::script::HostRole::OfBoth();
+		limits.NodeGraphs = PipelineGraphHost(RenderingProfiles);
 		limits.DataCapture = DataCapture;
 		limits.DataLifecycle = DataLifecycle;
 
@@ -1184,6 +1185,7 @@ namespace client {
 		const uint32_t worlds = std::max(1u, Settings.Worlds);
 		engine::script::RuntimeLimits limits;
 		limits.Role = engine::script::HostRole::OfBoth();
+		limits.NodeGraphs = PipelineGraphHost(RenderingProfiles);
 		limits.DataCapture = DataCapture;
 		limits.DataLifecycle = DataLifecycle;
 		for (uint32_t index = 0; index < worlds; index++) {
@@ -2100,6 +2102,7 @@ namespace client {
 				engine::replication::InterpolationSettings interpolation;
 				interpolation.TickRate = Settings.TickRate;
 				engine::script::RuntimeLimits limits;
+				limits.NodeGraphs = PipelineGraphHost(RenderingProfiles);
 				limits.Compute = compute;
 				limits.RemoteEventSender = [this](std::span<const std::byte> payload) {
 					return Connection != nullptr &&

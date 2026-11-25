@@ -43,6 +43,7 @@
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
+#include <client/Scene.hpp>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <string>
@@ -89,6 +90,7 @@ namespace studio {
 
 		engine::script::RuntimeLimits limits;
 		limits.Compute = Renderer.ComputeForWorld(std::string(store.Name()));
+		limits.NodeGraphs = client::PipelineGraphHost(RenderingProfiles);
 		limits.Role.Server = false;
 		limits.Role.Client = false;
 		limits.Role.Studio = true;

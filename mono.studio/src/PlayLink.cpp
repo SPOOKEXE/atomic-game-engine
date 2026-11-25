@@ -125,6 +125,7 @@ namespace studio {
 		});
 		limits.Compute = ComputeHost ? ComputeHost(std::string(settings.Name.Text()))
 									 : engine::script::ComputeBridgeFactory{};
+		limits.NodeGraphs = NodeGraphs;
 		limits.RemoteEventSender = [this](std::span<const std::byte> message) {
 			constexpr size_t maximumMessages = 64;
 			constexpr size_t maximumBytes =

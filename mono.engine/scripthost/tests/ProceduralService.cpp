@@ -80,6 +80,9 @@ namespace {
 		}
 		const char *useBaked = language == script::Language::Luau
 								   ? "local p=game:GetService('ProceduralService');"
+									 "local recipe=NodeGraph.Graph.fromProcedural();"
+									 "assert(#recipe:GetNodes()>1 and #recipe:GetLinks()>0);"
+									 "assert(not pcall(function() recipe:RemoveNode('recipe') end));"
 									 "assert(p:UseBaked({X=0,Z=0,Cells=16},"
 									 "workspace:FindFirstChild('GeneratedRegion1'),"
 									 "workspace:FindFirstChild('GeneratedRegionView1'),'town/region.aproc'));"

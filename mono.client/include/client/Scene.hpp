@@ -26,6 +26,7 @@
 #include <vector>
 
 namespace engine::script {
+	struct NodeGraphHost;
 	struct RuntimeLimits;
 }
 
@@ -267,6 +268,11 @@ namespace client {
 	// and consume no runtime renderer resources.
 	// An invalid return selects the renderer's standard frame.
 	//
+	// The render pipelines of a set, as graphs `NodeGraph` can open read-only.
+	// Borrows the set, which outlives every runtime given the host.
+	std::shared_ptr<const engine::script::NodeGraphHost>
+	PipelineGraphHost(const engine::graph::PipelineSet &profiles);
+
 	// @param profiles The universe's authored documents.
 	// @param renderer The runtime cache to update.
 	// @param world    The stable world number used to qualify keys.

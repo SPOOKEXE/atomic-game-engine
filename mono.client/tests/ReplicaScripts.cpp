@@ -510,3 +510,62 @@ TEST_CASE("tearing a replica down leaves no runtime alive", "[client][replicatio
 	// use-after-free on the next beat.
 	CHECK(watched.expired());
 }
+
+TEST_CASE("a client follows a published node graph on its own canvas", "[client][replication][scripting]") {
+	Replica replica;
+	replica.Arrive();
+	const Entity carrier = replica.World.CreateInstance(engine::ecs::Classes::Find(Name("Folder")), "Graph");
+	REQUIRE(replica.World.SetParent(carrier, engine::scene::WorkspaceOf(replica.World)));
+	const auto publish = [&](const char *text) {
+		engine::ecs::AttributeValue value;
+		value.Type = engine::ecs::PropertyType::String;
+		value.String = text;
+		REQUIRE(engine::ecs::SetAttribute(replica.World, carrier, Name("NodeGraphDocument"), value));
+	};
+	publish("ang 1\nnode \"one\" \"value\" 0 0 0 \"\" no no\n");
+	replica.Program(
+		"Follow",
+		replica.ContainerOf(replica.Local, engine::scene::PLAYER_SCRIPTS_NAME),
+		true,
+		std::string(NOTE) + R"(
+local registry = NodeGraph.Registry.new()
+registry:DefineNode({
+	Id = "value",
+	Inputs = { { Name = "in", Type = "number", Default = 1 } },
+	Outputs = { { Name = "out", Type = "number" } },
+	Evaluate = function(_, i) return { out = i["in"] + 1 } end,
+})
+local graph = NodeGraph.Graph.subscribe(registry, workspace:WaitForChild("Graph"))
+local canvas = Instance.new("NodeCanvas")
+canvas.Name = "Canvas"
+canvas.Parent = workspace
+local view = NodeGraph.View.new(graph)
+view.Parent = canvas
+note(#graph:GetNodes() .. " ")
+workspace:WaitForChild("Graph"):GetAttributeChangedSignal("NodeGraphDocument"):Connect(function()
+	local runner = NodeGraph.Runner.new(graph)
+	runner:Run()
+	note("out " .. tostring(runner:Output("two", "out")))
+end)
+)"
+	);
+	replica.Adopt();
+	replica.Tick();
+	CHECK(replica.Log() == "1 ");
+	publish(
+		"ang 1\nnode \"one\" \"value\" 0 0 0 \"\" no no\nnode \"two\" \"value\" 0 300 0 \"\" no no\n"
+		"link \"one\" \"out\" \"two\" \"in\"\n"
+	);
+	for (int tick = 0; tick < 4; tick++) {
+		replica.Tick();
+	}
+	CHECK(replica.Log() == "1 out 3");
+	const Entity canvas = replica.World.FindFirstChild(engine::scene::WorkspaceOf(replica.World), "Canvas");
+	REQUIRE(canvas != NULL_ENTITY);
+	size_t drawn = 0;
+	replica.World.EachChild(canvas, [&](Entity child) {
+		CHECK(Store::IsPredicted(child));
+		drawn++;
+	});
+	CHECK(drawn == 3);
+}

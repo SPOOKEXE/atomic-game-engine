@@ -174,6 +174,8 @@ namespace engine::script {
 
 		// The `NodeGraph` objects this VM built, made on first use. Reset before
 		// the state closes, because dropping one releases its callbacks.
+		// Engine graphs the host shows; handed to the library when it is made.
+		std::shared_ptr<const NodeGraphHost> NodeGraphSource;
 		std::unique_ptr<NodeGraphLibrary> NodeGraphs;
 
 		// Where execution should be reported from, owned by the `Runtime`.

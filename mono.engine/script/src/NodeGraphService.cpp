@@ -1,9 +1,14 @@
+#include <engine/ang/Document.hpp>
 #include <engine/core/types/UDim.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/NodeCanvas.hpp>
+#include <engine/imagegraph/AngGraph.hpp>
+#include <engine/procedural/AngGraph.hpp>
 #include <engine/script/NodeGraphService.hpp>
+#include <engine/script/ProceduralJobs.hpp>
 #include <engine/script/ScriptCall.hpp>
 #include <engine/script/ServiceSurface.hpp>
 
@@ -11,6 +16,7 @@
 #include <bit>
 #include <cmath>
 #include <map>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <variant>
@@ -178,6 +184,15 @@ namespace engine::script {
 		case ValueTag::Array:
 		case ValueTag::Map:
 		case ValueTag::CFrame: {
+			if (value.Tag == ValueTag::Map && (type == "vector2" || type == "vector4")) {
+				const auto part = [&](std::string_view key) {
+					return static_cast<float>(FieldNumber(value, key, 0.0));
+				};
+				if (type == "vector2") {
+					return ang::Value(core::Vector2{part("X"), part("Y")});
+				}
+				return ang::Value(ang::Vector4{part("X"), part("Y"), part("Z"), part("W")});
+			}
 			auto copy = std::make_shared<ScriptValue>(value);
 			const uint64_t identity = HashScript(ang::HASH_SEED, value) | 1u;
 			return ang::Value::FromBlob(
@@ -251,11 +266,28 @@ namespace engine::script {
 		struct RegistryObject {
 			ang::Registry Types = ang::Registry::WithScalars();
 			std::shared_ptr<Callbacks> Retained = std::make_shared<Callbacks>();
+			// The engine's own node types, which scripts read and do not extend.
+			bool Locked = false;
 		};
 
 		struct GraphObject {
 			std::shared_ptr<RegistryObject> Types;
 			ang::Graph Document;
+			bool ReadOnly = false;
+			// The image graph this was opened from: its outputs, inputs and bindings.
+			std::optional<imagegraph::Document> Image;
+		};
+
+		struct HookEvent {
+			std::string Name;
+			ScriptValue Info;
+		};
+
+		// Filled by the runner's hooks, some on worker threads that may outlive
+		// the runner.
+		struct HookQueue {
+			std::mutex Lock;
+			std::vector<HookEvent> Events;
 		};
 
 		struct RunnerObject {
@@ -265,6 +297,7 @@ namespace engine::script {
 			uint64_t CompiledRevision = 0;
 			std::map<std::string, CallbackRef> Hooks;
 			std::shared_ptr<Callbacks> Retained = std::make_shared<Callbacks>();
+			std::shared_ptr<HookQueue> Queue = std::make_shared<HookQueue>();
 			bool Running = false;
 		};
 
@@ -283,10 +316,16 @@ namespace engine::script {
 			std::shared_ptr<RunnerObject>,
 			std::shared_ptr<ViewObject>>;
 
-		struct HookEvent {
-			CallbackRef Callback = 0;
-			ScriptValue Info;
+		// A host value a script holds a handle to. The runner owns the value.
+		struct BlobHandle {
+			std::string Type;
+			std::weak_ptr<const void> Data;
+			size_t Bytes = 0;
+			uint64_t Identity = 0;
 		};
+
+		constexpr size_t MAXIMUM_BLOB_HANDLES = 4096;
+		constexpr std::string_view BLOB_FIELD = "NodeGraphBlob";
 	}
 
 	struct NodeGraphLibrary::State {
@@ -296,12 +335,19 @@ namespace engine::script {
 		uint32_t NextHandle = 0;
 		// The call running a graph, so script Evaluate functions can reach their VM.
 		ScriptCall *ActiveCall = nullptr;
-		std::vector<node_graph_detail::HookEvent> Queued;
+		std::shared_ptr<const NodeGraphHost> Host;
+		std::map<uint64_t, node_graph_detail::BlobHandle> Blobs;
+		uint64_t NextBlob = 0;
 	};
 
-	NodeGraphLibrary::NodeGraphLibrary(std::function<void(CallbackRef)> release, NodeGraphLimits limits)
+	NodeGraphLibrary::NodeGraphLibrary(
+		std::function<void(CallbackRef)> release,
+		std::shared_ptr<const NodeGraphHost> host,
+		NodeGraphLimits limits
+	)
 		: Owned(std::make_unique<State>()) {
 		Owned->Release = std::move(release);
+		Owned->Host = std::move(host);
 		Owned->Bounds = limits;
 	}
 
@@ -356,6 +402,69 @@ namespace engine::script {
 				call.Raise("NodeGraph: value has no script form");
 			}
 			return value;
+		}
+
+		// The script form of a value; a host blob becomes a handle of this VM.
+		ScriptValue ToScript(NodeGraphLibrary::State &state, const ang::Value &value) {
+			const ang::Blob *blob = value.Get<ang::Blob>();
+			if (blob == nullptr || value.TypeName() == "table" || blob->Data == nullptr) {
+				return ToScriptValue(value);
+			}
+			uint64_t handle = 0;
+			for (const auto &[id, held] : state.Blobs) {
+				if (held.Data.lock() == blob->Data && held.Identity == blob->Identity &&
+					held.Type == value.TypeName()) {
+					handle = id;
+				}
+			}
+			if (handle == 0) {
+				if (state.Blobs.size() >= MAXIMUM_BLOB_HANDLES) {
+					std::erase_if(state.Blobs, [](const auto &entry) { return entry.second.Data.expired(); });
+				}
+				if (state.Blobs.size() >= MAXIMUM_BLOB_HANDLES) {
+					state.Blobs.erase(state.Blobs.begin());
+				}
+				handle = ++state.NextBlob;
+				state.Blobs[handle] = {value.TypeName(), blob->Data, blob->Bytes, blob->Identity};
+			}
+			return MapOf({
+				{"Bytes", Number(static_cast<double>(blob->Bytes))},
+				{std::string(BLOB_FIELD), Number(static_cast<double>(handle))},
+				{"Type", Text(value.TypeName())},
+			});
+		}
+
+		// The value a script value stands for. False when it is a handle to a
+		// host value nothing holds any more.
+		bool FromScript(
+			NodeGraphLibrary::State &state, const ScriptValue &value, std::string_view type, ang::Value &out
+		) {
+			const ScriptValue *field = value.Tag == ValueTag::Map ? Field(value, BLOB_FIELD) : nullptr;
+			if (field == nullptr || field->Tag != ValueTag::Number) {
+				out = ToGraphValue(value, type);
+				return true;
+			}
+			const auto found = field->Number >= 1.0 && field->Number <= 9007199254740992.0
+								   ? state.Blobs.find(static_cast<uint64_t>(field->Number))
+								   : state.Blobs.end();
+			std::shared_ptr<const void> data =
+				found != state.Blobs.end() ? found->second.Data.lock() : nullptr;
+			if (data == nullptr) {
+				return false;
+			}
+			const BlobHandle &held = found->second;
+			out = ang::Value::FromBlob(
+				held.Type, {.Data = std::move(data), .Bytes = held.Bytes, .Identity = held.Identity}
+			);
+			return true;
+		}
+
+		ang::Value FromScript(ScriptCall &call, const ScriptValue &value, std::string_view type) {
+			ang::Value out;
+			if (!FromScript(StateOf(call), value, type, out)) {
+				call.Raise("NodeGraph: the host value behind this handle is gone");
+			}
+			return out;
 		}
 
 		ang::PortDef ReadPort(ScriptCall &call, const ScriptValue &spec, ang::Direction direction) {
@@ -446,10 +555,29 @@ namespace engine::script {
 		}
 
 		void Edit(ScriptCall &call, GraphObject &graph, const ang::Edit &change) {
+			if (graph.ReadOnly) {
+				call.Raise("NodeGraph: this graph is read-only");
+			}
 			const ang::EditResult result = graph.Document.Apply(change);
 			if (!result.Ok) {
 				call.Raise(("NodeGraph: " + result.Error).c_str());
 			}
+		}
+
+		// Whether a removal applied; a read-only graph raises.
+		bool Remove(ScriptCall &call, GraphObject &graph, const ang::Edit &change) {
+			if (graph.ReadOnly) {
+				call.Raise("NodeGraph: this graph is read-only");
+			}
+			return graph.Document.Apply(change).Ok;
+		}
+
+		std::shared_ptr<RegistryObject> FindOwnRegistry(ScriptCall &call) {
+			auto registry = Find<RegistryObject>(call, 0, "registry");
+			if (registry->Locked) {
+				call.Raise("NodeGraph: the engine's node types cannot be changed");
+			}
+			return registry;
 		}
 
 		// --- registry ---------------------------------------------------------------------------
@@ -462,7 +590,7 @@ namespace engine::script {
 		}
 
 		void DefineType(ScriptCall &call) {
-			auto registry = Find<RegistryObject>(call, 0, "registry");
+			auto registry = FindOwnRegistry(call);
 			const std::string id = call.AsBoundedString(1, 128);
 			const ScriptValue spec = Read(call, 2);
 			ang::DataType type{
@@ -479,7 +607,7 @@ namespace engine::script {
 		}
 
 		void DefineNode(ScriptCall &call) {
-			auto registry = Find<RegistryObject>(call, 0, "registry");
+			auto registry = FindOwnRegistry(call);
 			const ScriptValue spec = Read(call, 1);
 			if (!IsRecord(spec)) {
 				call.Raise("NodeGraph: DefineNode takes a table");
@@ -541,7 +669,7 @@ namespace engine::script {
 					}
 					ScriptValue given(ValueTag::Map);
 					for (const std::string &input : inputs) {
-						given.Entries.emplace_back(input, ToScriptValue(context.Input(input)));
+						given.Entries.emplace_back(input, ToScript(*state, context.Input(input)));
 					}
 					ScriptValue info = MapOf({{"Node", Text(context.NodeId())}});
 					const std::array arguments{std::move(info), std::move(given)};
@@ -558,7 +686,11 @@ namespace engine::script {
 					}
 					for (size_t index = 0; index < outputs.size(); ++index) {
 						if (const ScriptValue *value = Field(result, outputs[index])) {
-							context.SetOutput(outputs[index], ToGraphValue(*value, outputTypes[index]));
+							ang::Value output;
+							if (!FromScript(*state, *value, outputTypes[index], output)) {
+								return ang::NodeResult::Failure("the host value behind a handle is gone");
+							}
+							context.SetOutput(outputs[index], std::move(output));
 						}
 					}
 					return ang::NodeResult::Success();
@@ -574,7 +706,7 @@ namespace engine::script {
 
 		void CreateGraph(ScriptCall &call) {
 			auto registry = Find<RegistryObject>(call, 0, "registry");
-			call.ReturnNumber(Store(call, std::make_shared<GraphObject>(GraphObject{registry, {}})));
+			call.ReturnNumber(Store(call, std::make_shared<GraphObject>(GraphObject{.Types = registry})));
 		}
 
 		void AddNode(ScriptCall &call) {
@@ -599,7 +731,7 @@ namespace engine::script {
 					const ang::ParamDef *declared =
 						definition != nullptr ? definition->FindParam(name) : nullptr;
 					node.Params[name] =
-						ToGraphValue(value, declared != nullptr ? declared->Type : std::string_view{});
+						FromScript(call, value, declared != nullptr ? declared->Type : std::string_view{});
 				}
 			}
 			const std::string id = node.Id;
@@ -609,7 +741,7 @@ namespace engine::script {
 
 		void RemoveNode(ScriptCall &call) {
 			auto graph = Find<GraphObject>(call, 0, "graph");
-			call.ReturnBoolean(graph->Document.Apply(ang::edit::RemoveNode{call.AsBoundedString(1, 128)}).Ok);
+			call.ReturnBoolean(Remove(call, *graph, ang::edit::RemoveNode{call.AsBoundedString(1, 128)}));
 		}
 
 		ang::Link ReadLink(ScriptCall &call) {
@@ -636,7 +768,7 @@ namespace engine::script {
 
 		void Unlink(ScriptCall &call) {
 			auto graph = Find<GraphObject>(call, 0, "graph");
-			call.ReturnBoolean(graph->Document.Apply(ang::edit::RemoveLink{ReadLink(call)}).Ok);
+			call.ReturnBoolean(Remove(call, *graph, ang::edit::RemoveLink{ReadLink(call)}));
 		}
 
 		void SetParam(ScriptCall &call) {
@@ -653,7 +785,7 @@ namespace engine::script {
 				ang::edit::SetParam{
 					node,
 					name,
-					ToGraphValue(Read(call, 3), declared != nullptr ? declared->Type : std::string_view{})
+					FromScript(call, Read(call, 3), declared != nullptr ? declared->Type : std::string_view{})
 				}
 			);
 		}
@@ -679,16 +811,26 @@ namespace engine::script {
 			);
 		}
 
+		void SetCollapsed(ScriptCall &call) {
+			auto graph = Find<GraphObject>(call, 0, "graph");
+			Edit(
+				call,
+				*graph,
+				ang::edit::SetCollapsed{call.AsBoundedString(1, 128), call.OptionalBoolean(2, true)}
+			);
+		}
+
 		void GetNodes(ScriptCall &call) {
 			auto graph = Find<GraphObject>(call, 0, "graph");
 			ScriptValue nodes(ValueTag::Array);
 			for (const ang::NodeInstance &node : graph->Document.Nodes()) {
 				ScriptValue params(ValueTag::Map);
 				for (const auto &[name, value] : node.Params) {
-					params.Entries.emplace_back(name, ToScriptValue(value));
+					params.Entries.emplace_back(name, ToScript(StateOf(call), value));
 				}
 				nodes.Items.push_back(MapOf({
 					{"Bypassed", Boolean(node.Bypassed)},
+					{"Collapsed", Boolean(node.Collapsed)},
 					{"Def", Text(node.Def)},
 					{"Id", Text(node.Id)},
 					{"Params", std::move(params)},
@@ -711,6 +853,139 @@ namespace engine::script {
 				}));
 			}
 			call.ReturnValue(links);
+		}
+
+		// --- documents ----------------------------------------------------------------------------
+
+		void Save(ScriptCall &call) {
+			auto graph = Find<GraphObject>(call, 0, "graph");
+			std::string text, error;
+			if (!ang::WriteGraph(graph->Document, text, error)) {
+				call.Raise(("NodeGraph: " + error).c_str());
+			}
+			call.ReturnString(text);
+		}
+
+		void Load(ScriptCall &call) {
+			auto graph = Find<GraphObject>(call, 0, "graph");
+			if (graph->ReadOnly) {
+				call.Raise("NodeGraph: this graph is read-only");
+			}
+			const NodeGraphLimits &limits = StateOf(call).Bounds;
+			const std::string text = call.AsString(1);
+			std::string error;
+			if (!ang::ReadGraph(
+					text,
+					graph->Document,
+					error,
+					{.MaximumBytes = limits.MaximumValueBytes,
+					 .MaximumNodes = limits.MaximumNodes,
+					 .MaximumLinks = limits.MaximumLinks}
+				)) {
+				call.Raise(("NodeGraph: " + error).c_str());
+			}
+		}
+
+		// Hands an opened engine graph to the prelude as its two handles.
+		void ReturnOpened(ScriptCall &call, ang::Registry types, GraphObject graph) {
+			auto registry = std::make_shared<RegistryObject>();
+			registry->Types = std::move(types);
+			registry->Locked = true;
+			graph.Types = registry;
+			const uint32_t registryHandle = Store(call, registry);
+			const uint32_t graphHandle = Store(call, std::make_shared<GraphObject>(std::move(graph)));
+			call.ReturnValue(MapOf({{"Graph", Number(graphHandle)}, {"Registry", Number(registryHandle)}}));
+		}
+
+		void OpenImageGraph(ScriptCall &call) {
+			const std::string encoded = call.AsString(0);
+			imagegraph::Document document;
+			imagegraph::Diagnostic diagnostic;
+			GraphObject graph;
+			if (encoded.empty()) {
+				call.Raise("NodeGraph: the image graph has no runtime document");
+			}
+			if (!imagegraph::Read(encoded, document, diagnostic) ||
+				!imagegraph::ToAngGraph(document, graph.Document, diagnostic)) {
+				call.Raise(
+					("NodeGraph: image graph refused: " + diagnostic.Node + " " + diagnostic.Message).c_str()
+				);
+			}
+			graph.Image = std::move(document);
+			ReturnOpened(call, imagegraph::GraphTypes(), std::move(graph));
+		}
+
+		// The image graph document the edited graph describes. Bindings to
+		// removed nodes go with them; an output of one is refused.
+		void WriteImageGraph(ScriptCall &call) {
+			auto graph = Find<GraphObject>(call, 0, "graph");
+			if (!graph->Image) {
+				call.Raise("NodeGraph: only a graph opened from an ImageGraph can be committed");
+			}
+			imagegraph::Document document;
+			imagegraph::Diagnostic diagnostic;
+			std::string encoded;
+			if (!imagegraph::FromAngGraph(graph->Document, graph->Image->Outputs, document, diagnostic)) {
+				call.Raise(
+					("NodeGraph: image graph refused: " + diagnostic.Node + " " + diagnostic.Message).c_str()
+				);
+			}
+			document.Parameters = graph->Image->Parameters;
+			document.Storage = graph->Image->Storage;
+			for (const imagegraph::Binding &binding : graph->Image->Bindings) {
+				if (graph->Document.FindNode(binding.Node) != nullptr) {
+					document.Bindings.push_back(binding);
+				}
+			}
+			if (!imagegraph::Write(document, encoded, diagnostic)) {
+				call.Raise(
+					("NodeGraph: image graph refused: " + diagnostic.Node + " " + diagnostic.Message).c_str()
+				);
+			}
+			call.ReturnString(encoded);
+		}
+
+		void OpenProcedural(ScriptCall &call) {
+			const ecs::Store &store = call.World();
+			const auto *authority = ecs::Components::Assigned<ProceduralAuthority>().IsValid()
+										? store.Resource<ProceduralAuthority>()
+										: nullptr;
+			procedural::Recipe recipe;
+			procedural::Diagnostic diagnostic;
+			GraphObject graph{.ReadOnly = true};
+			if (authority == nullptr || authority->RecipeBytes.empty() ||
+				procedural::DecodeRecipe(authority->RecipeBytes, recipe, diagnostic) !=
+					procedural::Status::Ok ||
+				!procedural::ToAngGraph(recipe, graph.Document)) {
+				call.Raise("NodeGraph: this world has no procedural recipe");
+			}
+			ReturnOpened(call, procedural::RecipeGraphTypes(), std::move(graph));
+		}
+
+		void HostGraphNames(ScriptCall &call) {
+			const auto &host = StateOf(call).Host;
+			ScriptValue names(ValueTag::Array);
+			if (host != nullptr && host->Names) {
+				for (const std::string &name : host->Names()) {
+					names.Items.push_back(Text(name));
+				}
+			}
+			call.ReturnValue(names);
+		}
+
+		void OpenHostGraph(ScriptCall &call) {
+			const auto &host = StateOf(call).Host;
+			const std::string name = call.AsBoundedString(0, 256);
+			if (host == nullptr || !host->Open) {
+				call.Raise("NodeGraph: this host shows no graphs");
+			}
+			ang::Registry types;
+			GraphObject graph{.ReadOnly = true};
+			std::string error;
+			if (!host->Open(name, types, graph.Document, error)) {
+				call.Raise(("NodeGraph: " + error).c_str());
+			}
+			ReturnOpened(call, std::move(types), std::move(graph));
 		}
 
 		ang::Domain ReadDomain(ScriptCall &call, size_t index) {
@@ -783,26 +1058,26 @@ namespace engine::script {
 			}
 		}
 
-		// Installs ang hooks that queue events for the hooks a script set.
-		void ArmHooks(NodeGraphLibrary::State &state, RunnerObject &runner) {
+		// Installs ang hooks that queue events for the hooks a script set. Each
+		// names its hook rather than the function, so one a script has replaced
+		// since is never called.
+		void ArmHooks(RunnerObject &runner) {
 			ang::Hooks &hooks = runner.Run->Callbacks();
 			hooks = {};
-			const auto queue = [&state](CallbackRef callback, ScriptValue info) {
-				state.Queued.push_back({callback, std::move(info)});
+			const auto queue = [queue = runner.Queue](const char *name, ScriptValue info) {
+				const std::lock_guard lock(queue->Lock);
+				queue->Events.push_back({name, std::move(info)});
 			};
-			const auto hook = [&](std::string_view name) -> std::optional<CallbackRef> {
-				const auto found = runner.Hooks.find(std::string(name));
-				return found == runner.Hooks.end() ? std::nullopt : std::optional{found->second};
-			};
-			if (auto callback = hook("PreRun")) {
-				hooks.PreRun = [queue, ref = *callback](const ang::RunInfo &info) {
-					queue(ref, MapOf({{"RunNumber", Number(static_cast<double>(info.RunNumber))}}));
+			const auto hook = [&](const char *name) { return runner.Hooks.contains(name); };
+			if (hook("PreRun")) {
+				hooks.PreRun = [queue](const ang::RunInfo &info) {
+					queue("PreRun", MapOf({{"RunNumber", Number(static_cast<double>(info.RunNumber))}}));
 				};
 			}
-			if (auto callback = hook("PostRun")) {
-				hooks.PostRun = [queue, ref = *callback](const ang::RunInfo &info) {
+			if (hook("PostRun")) {
+				hooks.PostRun = [queue](const ang::RunInfo &info) {
 					queue(
-						ref,
+						"PostRun",
 						MapOf(
 							{{"Milliseconds", Number(info.Report->Milliseconds)},
 							 {"RunNumber", Number(static_cast<double>(info.RunNumber))}}
@@ -810,29 +1085,26 @@ namespace engine::script {
 					);
 				};
 			}
-			if (auto callback = hook("PreNode")) {
-				hooks.PreNode = [queue, ref = *callback](const ang::NodeInfo &info) {
-					queue(ref, NodeInfo(info));
-				};
+			if (hook("PreNode")) {
+				hooks.PreNode = [queue](const ang::NodeInfo &info) { queue("PreNode", NodeInfo(info)); };
 			}
-			if (auto callback = hook("PostNode")) {
-				hooks.PostNode = [queue, ref = *callback](const ang::NodeInfo &info, ang::NodeStatus status) {
+			if (hook("PostNode")) {
+				hooks.PostNode = [queue](const ang::NodeInfo &info, ang::NodeStatus status) {
 					ScriptValue entry = NodeInfo(info);
 					entry.Entries.emplace_back("Status", Text(ang::Describe(status)));
-					queue(ref, std::move(entry));
+					queue("PostNode", std::move(entry));
 				};
 			}
-			if (auto callback = hook("PreCompute")) {
-				hooks.PreCompute = [queue, ref = *callback](const ang::NodeInfo &info) {
-					queue(ref, NodeInfo(info));
+			if (hook("PreCompute")) {
+				hooks.PreCompute = [queue](const ang::NodeInfo &info) {
+					queue("PreCompute", NodeInfo(info));
 				};
 			}
-			if (auto callback = hook("PostCompute")) {
-				hooks.PostCompute = [queue,
-									 ref = *callback](const ang::NodeInfo &info, ang::ComputeResult &result) {
+			if (hook("PostCompute")) {
+				hooks.PostCompute = [queue](const ang::NodeInfo &info, ang::ComputeResult &result) {
 					ScriptValue entry = NodeInfo(info);
 					entry.Entries.emplace_back("Status", Text(ang::Describe(result.Status)));
-					queue(ref, std::move(entry));
+					queue("PostCompute", std::move(entry));
 				};
 			}
 		}
@@ -879,27 +1151,31 @@ namespace engine::script {
 								type = input.Type;
 							}
 						}
-						inputs[node][port] = ToGraphValue(value, type);
+						inputs[node][port] = FromScript(call, value, type);
 					}
 				}
 			}
-			ArmHooks(state, *runner);
-			const size_t firstEvent = state.Queued.size();
+			ArmHooks(*runner);
 			ang::RunReport report;
 			{
 				const ActiveScope scope(state, call, *runner);
 				report = runner->Run->Run(inputs);
 			}
-			// Deliver this run's hook events on the script thread, in firing order.
-			std::vector<HookEvent> events(
-				state.Queued.begin() + static_cast<std::ptrdiff_t>(firstEvent), state.Queued.end()
-			);
-			state.Queued.resize(firstEvent);
+			// Deliver the hook events on the script thread, in firing order.
+			std::vector<HookEvent> events;
+			{
+				const std::lock_guard lock(runner->Queue->Lock);
+				events.swap(runner->Queue->Events);
+			}
 			for (const HookEvent &event : events) {
+				const auto hook = runner->Hooks.find(event.Name);
+				if (hook == runner->Hooks.end()) {
+					continue;
+				}
 				ScriptValue ignored;
 				std::string error;
 				const std::array arguments{event.Info};
-				if (!call.InvokeCallback(event.Callback, arguments, ignored, error, false)) {
+				if (!call.InvokeCallback(hook->second, arguments, ignored, error, false)) {
 					call.Raise(("NodeGraph: hook failed: " + error).c_str());
 				}
 			}
@@ -919,7 +1195,7 @@ namespace engine::script {
 				call.ReturnNil();
 				return;
 			}
-			call.ReturnValue(ToScriptValue(*value));
+			call.ReturnValue(ToScript(StateOf(call), *value));
 		}
 
 		// --- view -------------------------------------------------------------------------------
@@ -1051,6 +1327,21 @@ namespace engine::script {
 
 		// --- view on a NodeCanvas -----------------------------------------------------------------
 
+		// A new child of the canvas. One under a client's own canvas belongs to
+		// that client, so it never takes a row the authority may assign.
+		ecs::Entity
+		MakeChild(ecs::Store &store, ecs::Entity parent, std::string_view klass, std::string_view name) {
+			const ecs::ClassId id = ecs::Classes::Find(core::Name(klass));
+			const bool local = ecs::IsClientLocalInstance(store, parent);
+			const ecs::Entity made =
+				local ? store.CreatePredictedInstance(id, name) : store.CreateInstance(id, name);
+			if (local) {
+				store.Set(made, ecs::ClientLocal{});
+			}
+			store.SetParent(made, parent);
+			return made;
+		}
+
 		ecs::Entity
 		ChildNamed(ecs::Store &store, ecs::Entity parent, std::string_view name, std::string_view klass) {
 			ecs::Entity found = ecs::NULL_ENTITY;
@@ -1064,9 +1355,7 @@ namespace engine::script {
 			if (found != ecs::NULL_ENTITY) {
 				return found;
 			}
-			found = store.CreateInstance(ecs::Classes::Find(core::Name(klass)), name);
-			store.SetParent(found, parent);
-			return found;
+			return MakeChild(store, parent, klass, name);
 		}
 
 		void Box(ecs::Store &store, ecs::Entity entity, core::Vector2 position, core::Vector2 size) {
@@ -1098,7 +1387,7 @@ namespace engine::script {
 		// Takes the canvas edits made since the last render into the graph:
 		// moved nodes, wires a player made and wires a player removed.
 		void Pull(ViewObject &view, ecs::Store &store) {
-			if (view.Canvas == ecs::NULL_ENTITY || !store.Alive(view.Canvas)) {
+			if (view.Source->ReadOnly || view.Canvas == ecs::NULL_ENTITY || !store.Alive(view.Canvas)) {
 				return;
 			}
 			ang::Graph &document = view.Source->Document;
@@ -1250,9 +1539,7 @@ namespace engine::script {
 			}
 			view.RenderedLinks.clear();
 			for (const ang::Link &wire : view.Source->Document.Links()) {
-				const ecs::Entity link =
-					store.CreateInstance(ecs::Classes::Find(core::Name("NodeCanvasLink")), "Link");
-				store.SetParent(link, view.Canvas);
+				const ecs::Entity link = MakeChild(store, view.Canvas, "NodeCanvasLink", "Link");
 				gui::NodeCanvasLink state;
 				state.FromNode = core::Name(wire.FromNode);
 				state.FromPort = core::Name(wire.FromPort);
@@ -1283,12 +1570,21 @@ namespace engine::script {
 			if (store.Get<gui::NodeCanvas>(canvas) == nullptr) {
 				call.Raise("NodeGraph: a view is parented to a NodeCanvas");
 			}
+			const bool client = (call.Role().Client && !call.Role().Server) || store.AdoptOnly();
+			const bool local = ecs::IsClientLocalInstance(store, canvas);
+			if (client != local) {
+				call.Raise(
+					client ? "NodeGraph: client scripts may only draw on their own local canvas"
+						   : "NodeGraph: server scripts cannot draw on a client-local canvas"
+				);
+			}
 			if (view->Canvas != canvas) {
 				view->RenderedPositions.clear();
 				view->RenderedLinks.clear();
 				view->Canvas = canvas;
+			} else {
+				Pull(*view, store);
 			}
-			Pull(*view, store);
 			view->Interaction->GraphChanged();
 			Push(*view, store);
 		}
@@ -1296,6 +1592,12 @@ namespace engine::script {
 		void SyncView(ScriptCall &call) {
 			auto view = Find<ViewObject>(call, 0, "view");
 			Pull(*view, call.World());
+		}
+
+		// Forgets what the view last rendered, so the next render takes the graph
+		// over the canvas instead of reading the canvas as edits.
+		void ResetView(ScriptCall &call) {
+			Find<ViewObject>(call, 0, "view")->Canvas = ecs::NULL_ENTITY;
 		}
 
 		void Destroy(ScriptCall &call) {
@@ -1306,7 +1608,7 @@ namespace engine::script {
 			call.ReturnNumber(static_cast<double>(StateOf(call).Objects.size()));
 		}
 
-		constexpr std::array<ServiceMethod, 28> METHODS{{
+		constexpr std::array<ServiceMethod, 37> METHODS{{
 			{"CreateRegistry", CreateRegistry},
 			{"DefineType", DefineType},
 			{"DefineNode", DefineNode},
@@ -1318,6 +1620,14 @@ namespace engine::script {
 			{"SetParam", SetParam},
 			{"MoveNode", MoveNode},
 			{"SetBypass", SetBypass},
+			{"SetCollapsed", SetCollapsed},
+			{"Save", Save},
+			{"Load", Load},
+			{"OpenImageGraph", OpenImageGraph},
+			{"WriteImageGraph", WriteImageGraph},
+			{"OpenProcedural", OpenProcedural},
+			{"HostGraphNames", HostGraphNames},
+			{"OpenHostGraph", OpenHostGraph},
 			{"GetNodes", GetNodes},
 			{"GetLinks", GetLinks},
 			{"Validate", Validate},
@@ -1331,6 +1641,7 @@ namespace engine::script {
 			{"GetDrawCommands", GetDrawCommands},
 			{"RenderView", RenderView},
 			{"SyncView", SyncView},
+			{"ResetView", ResetView},
 			{"Destroy", Destroy},
 			{"ObjectCount", Count},
 			{"ThemeNames",

@@ -2,8 +2,7 @@
 
 ## Status
 
-Mostly implemented, 2026-11-25: phases 0 to 5 and migration rows 1 to 6 and 8 to
-11, except the items under "Not done".
+Implemented, 2026-11-25: phases 0 to 5 and migration rows 1 to 6 and 8 to 11.
 
 - Row 11: `CompileEngineGraph` orders stages through an ang Tick graph.
   Execution stays a plain loop with ang hooks, timeline and report through
@@ -12,15 +11,13 @@ Mostly implemented, 2026-11-25: phases 0 to 5 and migration rows 1 to 6 and 8 to
 - Row 7 (`render` GraphRunner) is not done, by decision: it would add a second
   per-node layer to the same frame path.
 
-Not done:
-
-- engine graphs (image graph, procedural recipe, render pipeline) are not
-  reachable from scripts as `NodeGraph` graphs;
-- `RunAsync` answers at once, because every node a script can define is Sync;
-- blobs read as nil in scripts instead of an opaque handle;
-- `imagegraph` keeps `Fingerprint` for its cache keys;
-- the NodeCanvas demo stays beside `NodeGraph.luau` instead of being replaced;
-- script graphs do not replicate as documents.
+- Scripts open engine graphs with `Graph.fromImageGraph` (editable, `Commit`
+  writes the instance's document), `fromProcedural` and `fromHost` (render
+  pipelines), the last two read-only. The opened graphs describe and draw; their
+  own evaluators still run them. Cooked image graphs have no runtime document
+  and are not opened.
+- Script graphs replicate as documents: `graph:PublishTo(instance)` on the
+  server, `Graph.subscribe(registry, instance)` on a client.
 
 This plan adds one general node graph library (ANG) and moves the
 engine's existing node systems onto it. The chain is:
@@ -477,8 +474,8 @@ Studio render pipeline (`mono.studio/src/RenderPipeline.cpp:68-71`,
    selection and view survive.
 
 GUI node canvas demo (`mono.engine/gui/src/Input.cpp`,
-`examples/assets/scripts/NodeCanvas.luau`,
-`DemoCameras/NodeCanvas.client.luau`):
+`examples/assets/scripts/NodeGraph.luau`,
+`DemoCameras/NodeGraph.client.luau`):
 
 1. In `Input.cpp`, route pointer down/move/up over a `NodeCanvas`: drag on a
    node moves `Position` (divided by zoom), drag on empty space changes

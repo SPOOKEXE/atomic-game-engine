@@ -316,6 +316,7 @@ namespace engine::script {
 		JsOf(Context).Procedural = ProceduralEndpointForWorld();
 		JsOf(Context).RuntimeIdentity = Identity();
 		JsOf(Context).DataCapture = limits.DataCapture;
+		JsOf(Context).NodeGraphSource = limits.NodeGraphs;
 		JsOf(Context).Compute = ComputeEndpoint();
 		JsOf(Context).DataLifecycle = limits.DataLifecycle;
 		JsOf(Context).RemoteEventSender = limits.RemoteEventSender;

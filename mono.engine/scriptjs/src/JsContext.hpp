@@ -182,6 +182,8 @@ namespace engine::script {
 
 		// The `NodeGraph` objects this context built, made on first use. Reset
 		// before the context is freed, because dropping one releases values.
+		// Engine graphs the host shows; handed to the library when it is made.
+		std::shared_ptr<const NodeGraphHost> NodeGraphSource;
 		std::unique_ptr<NodeGraphLibrary> NodeGraphs;
 
 		// Every neutral service property installed in this VM, flattened.

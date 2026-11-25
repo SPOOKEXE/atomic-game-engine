@@ -312,9 +312,10 @@ namespace engine::script {
 			NodeGraphLibrary &NodeGraphs() override {
 				if (Context.NodeGraphs == nullptr) {
 					lua_State *main = Context.State;
-					Context.NodeGraphs = std::make_unique<NodeGraphLibrary>([main](CallbackRef callback) {
-						ReleaseLuauValue(main, callback);
-					});
+					Context.NodeGraphs = std::make_unique<NodeGraphLibrary>(
+						[main](CallbackRef callback) { ReleaseLuauValue(main, callback); },
+						Context.NodeGraphSource
+					);
 				}
 				return *Context.NodeGraphs;
 			}

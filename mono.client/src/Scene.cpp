@@ -18,6 +18,7 @@
 #include <engine/game/PhysicalParticles.hpp>
 #include <engine/game/WeatherGround.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
+#include <engine/graph/PipelineGraph.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/physics/Characters.hpp>
@@ -49,6 +50,7 @@
 #include <engine/scene/environment/GpuParticleField.hpp>
 #include <engine/scene/environment/Gravity.hpp>
 #include <engine/scene/portals/CameraPortalView.hpp>
+#include <engine/script/NodeGraphService.hpp>
 #include <engine/script/PlayerGui.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/weather/Clock.hpp>
@@ -1234,6 +1236,20 @@ namespace client {
 		}
 		scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
 		return true;
+	}
+
+	std::shared_ptr<const engine::script::NodeGraphHost>
+	PipelineGraphHost(const engine::graph::PipelineSet &profiles) {
+		const engine::graph::PipelineSet *set = &profiles;
+		return std::make_shared<engine::script::NodeGraphHost>(engine::script::NodeGraphHost{
+			.Names = [set] { return engine::graph::PipelineGraphNames(*set); },
+			.Open = [set](
+						std::string_view name,
+						engine::ang::Registry &types,
+						engine::ang::Graph &graph,
+						std::string &error
+					) { return engine::graph::OpenPipelineGraph(*set, name, types, graph, error); },
+		});
 	}
 
 	engine::core::Name InstallRenderingProfiles(

@@ -3731,13 +3731,19 @@ export type NodeGraphGraph = {
 	SetParam: (self: NodeGraphGraph, node: string, name: string, value: any) -> (),
 	MoveNode: (self: NodeGraphGraph, node: string, position: Vector2) -> (),
 	SetBypass: (self: NodeGraphGraph, node: string, bypassed: boolean) -> (),
-	GetNodes: (self: NodeGraphGraph) -> { { Id: string, Def: string, X: number, Y: number, Bypassed: boolean, Params: { [string]: any } } },
+	SetCollapsed: (self: NodeGraphGraph, node: string, collapsed: boolean) -> (),
+	Save: (self: NodeGraphGraph) -> string,
+	Load: (self: NodeGraphGraph, text: string) -> (),
+	PublishTo: (self: NodeGraphGraph, instance: Instance) -> (),
+	Commit: (self: NodeGraphGraph) -> (),
+	GetNodes: (self: NodeGraphGraph) -> { { Id: string, Def: string, X: number, Y: number, Bypassed: boolean, Collapsed: boolean, Params: { [string]: any } } },
 	GetLinks: (self: NodeGraphGraph) -> { { From: string, FromPort: string, To: string, ToPort: string } },
 	Validate: (self: NodeGraphGraph, domain: string?) -> { { Code: string, Message: string, Node: string, Port: string } },
 	Destroy: (self: NodeGraphGraph) -> (),
 }
 export type NodeGraphRunner = {
 	Graph: NodeGraphGraph,
+	Domain: string,
 	PreRun: NodeGraphSignal, PostRun: NodeGraphSignal, PreNode: NodeGraphSignal, PostNode: NodeGraphSignal,
 	PreCompute: NodeGraphSignal, PostCompute: NodeGraphSignal,
 	Run: (self: NodeGraphRunner, inputs: { [string]: { [string]: any } }?) -> NodeGraphReport,
@@ -3760,7 +3766,15 @@ export type NodeGraphView = {
 }
 declare NodeGraph: {
 	Registry: { new: () -> NodeGraphRegistry },
-	Graph: { new: (registry: NodeGraphRegistry) -> NodeGraphGraph },
+	Graph: {
+		new: (registry: NodeGraphRegistry) -> NodeGraphGraph,
+		load: (registry: NodeGraphRegistry, text: string) -> NodeGraphGraph,
+		subscribe: (registry: NodeGraphRegistry, instance: Instance) -> NodeGraphGraph,
+		fromImageGraph: (instance: ImageGraph) -> NodeGraphGraph,
+		fromProcedural: () -> NodeGraphGraph,
+		hostNames: () -> { string },
+		fromHost: (name: string) -> NodeGraphGraph,
+	},
 	Runner: { new: (graph: NodeGraphGraph, domain: string?) -> NodeGraphRunner },
 	View: { new: (graph: NodeGraphGraph, options: { [string]: any }?) -> NodeGraphView },
 	Themes: { string },
@@ -3779,6 +3793,14 @@ declare extern type NodeGraphService with
 	function SetParam(self, graph: NodeGraphHandle, node: string, name: string, value: any): ()
 	function MoveNode(self, graph: NodeGraphHandle, node: string, x: number, y: number): ()
 	function SetBypass(self, graph: NodeGraphHandle, node: string, bypassed: boolean?): ()
+	function SetCollapsed(self, graph: NodeGraphHandle, node: string, collapsed: boolean?): ()
+	function Save(self, graph: NodeGraphHandle): string
+	function Load(self, graph: NodeGraphHandle, text: string): ()
+	function OpenImageGraph(self, document: string): { Graph: NodeGraphHandle, Registry: NodeGraphHandle }
+	function WriteImageGraph(self, graph: NodeGraphHandle): string
+	function OpenProcedural(self): { Graph: NodeGraphHandle, Registry: NodeGraphHandle }
+	function HostGraphNames(self): { string }
+	function OpenHostGraph(self, name: string): { Graph: NodeGraphHandle, Registry: NodeGraphHandle }
 	function GetNodes(self, graph: NodeGraphHandle): any
 	function GetLinks(self, graph: NodeGraphHandle): any
 	function Validate(self, graph: NodeGraphHandle, domain: string?): any
@@ -3792,6 +3814,7 @@ declare extern type NodeGraphService with
 	function GetDrawCommands(self, view: NodeGraphHandle, width: number, height: number): { NodeGraphDrawCommand }
 	function RenderView(self, view: NodeGraphHandle, canvas: Instance): ()
 	function SyncView(self, view: NodeGraphHandle): ()
+	function ResetView(self, view: NodeGraphHandle): ()
 	function Destroy(self, handle: NodeGraphHandle): ()
 	function ObjectCount(self): number
 	function ThemeNames(self): { string }

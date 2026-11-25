@@ -75,6 +75,7 @@ namespace engine::world {
 }
 
 namespace engine::script {
+	struct NodeGraphHost;
 	class Runtime;
 }
 
@@ -172,6 +173,11 @@ namespace studio {
 		// Binds renderer compute factories before starting a replica runtime.
 		void SetComputeHost(engine::script::ComputeWorldBridgeFactory factory) {
 			ComputeHost = std::move(factory);
+		}
+
+		// Engine graphs the replica's scripts can open.
+		void SetNodeGraphHost(std::shared_ptr<const engine::script::NodeGraphHost> host) {
+			NodeGraphs = std::move(host);
 		}
 
 		// Creates the replica world beside `authority` and admits a client.
@@ -343,6 +349,7 @@ namespace studio {
 
 	  private:
 		engine::script::ComputeWorldBridgeFactory ComputeHost{};
+		std::shared_ptr<const engine::script::NodeGraphHost> NodeGraphs{};
 		engine::world::WorldId Authority_;
 		engine::world::WorldId Replica_;
 		uint64_t ReplicaIdentity_ = 0;

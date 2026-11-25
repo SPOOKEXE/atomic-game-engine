@@ -726,6 +726,7 @@ namespace engine::script {
 		bounds->Context.Role = limits.Role;
 		bounds->Context.Access = limits.EffectiveCapabilities();
 		bounds->Context.DataCapture = limits.DataCapture;
+		bounds->Context.NodeGraphSource = limits.NodeGraphs;
 		bounds->Context.Compute = ComputeEndpoint();
 		bounds->Context.DataLifecycle = limits.DataLifecycle;
 		bounds->Context.RemoteEventSender = limits.RemoteEventSender;
