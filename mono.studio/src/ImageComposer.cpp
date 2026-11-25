@@ -6,15 +6,13 @@
 #include <engine/bake/ImageGraph.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ui/NodeGraphPainter.hpp>
 
 #include <algorithm>
 #include <assetc/ImageGraph.hpp>
 #include <cmath>
 #include <cstdio>
 #include <imgui.h>
-#include <nodegraph/Layout.hpp>
-#include <nodegraph/Registry.hpp>
-#include <nodegraph/Serialize.hpp>
 #include <system_error>
 #include <type_traits>
 
@@ -36,10 +34,25 @@ namespace studio {
 				state.Storage
 			};
 		}
+		bool SameGraph(const engine::ang::Graph &left, const engine::ang::Graph &right) {
+			const auto a = left.Nodes();
+			const auto b = right.Nodes();
+			if (a.size() != b.size() ||
+				!std::equal(
+					left.Links().begin(), left.Links().end(), right.Links().begin(), right.Links().end()
+				))
+				return false;
+			for (size_t i = 0; i < a.size(); ++i)
+				if (a[i].Id != b[i].Id || a[i].Def != b[i].Def || a[i].Params != b[i].Params ||
+					a[i].Position.X != b[i].Position.X || a[i].Position.Y != b[i].Position.Y ||
+					a[i].Bypassed != b[i].Bypassed || a[i].Group != b[i].Group)
+					return false;
+			return true;
+		}
 		bool Same(const ImageComposerSnapshot &left, const ImageComposerSnapshot &right) {
-			if (nodegraph::Save(left.Graph) != nodegraph::Save(right.Graph) ||
-				left.SelectedOutput != right.SelectedOutput || left.Outputs.size() != right.Outputs.size() ||
-				left.SourceRoot != right.SourceRoot || left.Parameters.size() != right.Parameters.size() ||
+			if (!SameGraph(left.Graph, right.Graph) || left.SelectedOutput != right.SelectedOutput ||
+				left.Outputs.size() != right.Outputs.size() || left.SourceRoot != right.SourceRoot ||
+				left.Parameters.size() != right.Parameters.size() ||
 				left.Bindings.size() != right.Bindings.size() || left.Storage != right.Storage)
 				return false;
 			for (size_t i = 0; i < left.Outputs.size(); ++i)
@@ -69,7 +82,8 @@ namespace studio {
 			state.SelectedOutput = saved.SelectedOutput;
 			if (state.SourceRoot != saved.SourceRoot) ReloadImageComposerSources(state);
 			state.SourceRoot = saved.SourceRoot;
-			state.Canvas.Select(nodegraph::NO_NODE);
+			ImageComposerCanvas(state).Select({});
+			ImageComposerCanvas(state).GraphChanged();
 			state.Attempt.clear();
 		}
 
@@ -108,32 +122,21 @@ namespace studio {
 			// once.
 			bits(state.Graph.Nodes().size());
 			for (const auto &node : state.Graph.Nodes()) {
-				bits(node.Id);
-				append(node.Type);
-				std::vector<std::string_view> controls;
-				controls.reserve(node.Widgets.size());
-				for (const auto &[name, value] : node.Widgets)
-					controls.push_back(name);
-				std::sort(controls.begin(), controls.end());
-				bits(controls.size());
-				for (const auto name : controls) {
+				append(node.Id);
+				append(node.Def);
+				// Params are a sorted map, so their order is already stable.
+				bits(node.Params.size());
+				for (const auto &[name, value] : node.Params) {
 					append(name);
-					const auto &value = node.Widgets.at(std::string(name));
-					bits(value.Kind);
-					bits(value.Number);
-					bits(value.Flag);
-					append(value.Text);
-					bits(value.Tint.R);
-					bits(value.Tint.G);
-					bits(value.Tint.B);
-					bits(value.Tint.A);
+					bits(value.Hash());
+					if (const auto *text = value.Get<std::string>()) append(*text);
 				}
 			}
 			bits(state.Graph.Links().size());
 			for (const auto &link : state.Graph.Links()) {
-				bits(link.From);
+				append(link.FromNode);
 				append(link.FromPort);
-				bits(link.To);
+				append(link.ToNode);
 				append(link.ToPort);
 			}
 			append(state.SelectedOutput);
@@ -166,78 +169,84 @@ namespace studio {
 		}
 
 		void Inspector(ImageComposerState &state) {
-			if (state.Canvas.Selection().empty()) return;
-			const auto id = state.Canvas.Selection().front();
-			const auto *node = state.Graph.Find(id);
+			engine::angview::View &canvas = ImageComposerCanvas(state);
+			if (canvas.Selection().empty()) return;
+			const std::string id = canvas.Selection().front();
+			const auto *node = state.Graph.FindNode(id);
 			if (node == nullptr) return;
-			const auto *type = nodegraph::NodeTypes::Find(node->Type);
-			if (type == nullptr) return;
+			const auto def = ImageComposerTypes().FindNode(node->Def);
+			if (def == nullptr) return;
 			ImGui::Separator();
-			ImGui::TextUnformatted(type->Title.c_str());
+			ImGui::TextUnformatted(def->Label.c_str());
 			bool immediate = false, finished = false;
-			for (const auto &spec : type->Widgets) {
-				const auto identity = node->Widgets.find("__composer.id");
+			for (const auto &param : def->Params) {
 				const auto binding =
 					std::find_if(state.Bindings.begin(), state.Bindings.end(), [&](const Binding &item) {
-						return identity != node->Widgets.end() && item.Node == identity->second.Text &&
-							   item.Property == spec.Key;
+						return item.Node == id && item.Property == param.Name;
 					});
 				if (binding != state.Bindings.end()) {
-					ImGui::Text("%s: %s", spec.Label.c_str(), binding->Input.c_str());
+					ImGui::Text("%s: %s", param.Label.c_str(), binding->Input.c_str());
 					continue;
 				}
-				auto value = nodegraph::ValueOf(state.Graph, id, spec);
+				engine::ang::Value value = ImageComposerParam(*node, param.Name);
 				bool changed = false;
-				ImGui::PushID(spec.Key.c_str());
+				ImGui::PushID(param.Name.c_str());
 				ImGui::SetNextItemWidth(std::max(80.f, ImGui::GetContentRegionAvail().x - 135.f));
-				switch (spec.Kind) {
-				case nodegraph::WidgetKind::Number:
-					changed = ImGui::InputDouble(spec.Label.c_str(), &value.Number, 1, 10, "%.3f");
-					break;
-				case nodegraph::WidgetKind::Slider: {
-					float number = static_cast<float>(value.Number);
-					changed = ImGui::SliderFloat(
-						spec.Label.c_str(),
-						&number,
-						static_cast<float>(spec.Minimum),
-						static_cast<float>(spec.Maximum)
-					);
-					value.Number = number;
-					break;
-				}
-				case nodegraph::WidgetKind::Text: {
-					std::array<char, 1024> text{};
-					std::snprintf(text.data(), text.size(), "%s", value.Text.c_str());
-					changed = ImGui::InputText(spec.Label.c_str(), text.data(), text.size());
-					if (changed) value.Text = text.data();
-					break;
-				}
-				case nodegraph::WidgetKind::Toggle:
-					changed = ImGui::Checkbox(spec.Label.c_str(), &value.Flag);
+				if (param.Widget == "number" || param.Widget == "slider") {
+					double number = value.AsNumber();
+					if (param.Widget == "slider") {
+						float slider = static_cast<float>(number);
+						changed = ImGui::SliderFloat(
+							param.Label.c_str(),
+							&slider,
+							static_cast<float>(param.Minimum),
+							static_cast<float>(param.Maximum)
+						);
+						number = slider;
+					} else {
+						changed = ImGui::InputDouble(param.Label.c_str(), &number, 1, 10, "%.3f");
+					}
+					if (changed) value = engine::ang::Value(number);
+				} else if (param.Widget == "toggle") {
+					bool flag = value.Get<bool>() != nullptr && *value.Get<bool>();
+					changed = ImGui::Checkbox(param.Label.c_str(), &flag);
 					immediate = changed || immediate;
-					break;
-				case nodegraph::WidgetKind::Select:
-					if (ImGui::BeginCombo(spec.Label.c_str(), value.Text.c_str())) {
-						for (size_t choice = 0; choice < spec.Options.size(); ++choice)
-							if (ImGui::Selectable(
-									spec.Options[choice].c_str(), value.Text == spec.Options[choice]
-								)) {
-								value.Text = spec.Options[choice];
-								value.Number = static_cast<double>(choice);
+					if (changed) value = engine::ang::Value(flag);
+				} else if (param.Widget == "select") {
+					const std::string current =
+						value.Get<std::string>() != nullptr ? *value.Get<std::string>() : "";
+					if (ImGui::BeginCombo(param.Label.c_str(), current.c_str())) {
+						for (const std::string &choice : param.Choices)
+							if (ImGui::Selectable(choice.c_str(), current == choice)) {
+								value = engine::ang::Value(choice);
 								changed = immediate = true;
 							}
 						ImGui::EndCombo();
 					}
-					break;
-				case nodegraph::WidgetKind::Colour: {
-					float rgba[4]{value.Tint.R, value.Tint.G, value.Tint.B, value.Tint.A};
-					changed = ImGui::ColorEdit4(spec.Label.c_str(), rgba, ImGuiColorEditFlags_NoInputs);
-					if (changed) value.Tint = {rgba[0], rgba[1], rgba[2], rgba[3]};
-					break;
-				}
+				} else if (param.Widget == "colour") {
+					const engine::ang::Vector4 tint = value.Get<engine::ang::Vector4>() != nullptr
+														  ? *value.Get<engine::ang::Vector4>()
+														  : engine::ang::Vector4{};
+					float rgba[4]{tint.X, tint.Y, tint.Z, tint.W};
+					changed = ImGui::ColorEdit4(param.Label.c_str(), rgba, ImGuiColorEditFlags_NoInputs);
+					if (changed)
+						value = engine::ang::Value(engine::ang::Vector4{rgba[0], rgba[1], rgba[2], rgba[3]});
+				} else {
+					std::array<char, 1024> text{};
+					std::snprintf(
+						text.data(),
+						text.size(),
+						"%s",
+						value.Get<std::string>() != nullptr ? value.Get<std::string>()->c_str() : ""
+					);
+					changed = ImGui::InputText(param.Label.c_str(), text.data(), text.size());
+					if (changed) value = engine::ang::Value(std::string(text.data()));
 				}
 				finished = ImGui::IsItemDeactivatedAfterEdit() || finished;
-				if (changed) nodegraph::SetValue(state.Graph, id, spec.Key, value);
+				if (changed) {
+					state.Graph.Apply(engine::ang::edit::SetParam{id, param.Name, value});
+					canvas.GraphChanged();
+				}
 				ImGui::PopID();
 			}
 			if (finished || immediate) CommitImageComposer(state);
@@ -246,10 +255,10 @@ namespace studio {
 				SetImageComposerOutput(state, state.OutputName.data(), id);
 			ImGui::InputText("Input name", state.InputName.data(), state.InputName.size());
 			if (ImGui::BeginCombo("Property", state.BindingProperty.c_str())) {
-				for (const auto &spec : type->Widgets) {
-					if (spec.Key == "interpretation") continue;
-					if (ImGui::Selectable(spec.Label.c_str(), state.BindingProperty == spec.Key))
-						state.BindingProperty = spec.Key;
+				for (const auto &param : def->Params) {
+					if (param.Name == "interpretation") continue;
+					if (ImGui::Selectable(param.Label.c_str(), state.BindingProperty == param.Name))
+						state.BindingProperty = param.Name;
 				}
 				ImGui::EndCombo();
 			}
@@ -263,17 +272,31 @@ namespace studio {
 		}
 	}
 
-	nodegraph::NodeId AddImageComposerNode(ImageComposerState &state, const std::string &type) {
+	std::string AddImageComposerNode(ImageComposerState &state, const std::string &type) {
+		engine::angview::View &canvas = ImageComposerCanvas(state);
 		float x = 40.0f;
-		for (const auto &node : state.Graph.Nodes()) {
-			if (node.Owner == nodegraph::NO_NODE) {
-				const auto layout = nodegraph::LayoutOf(node, state.Canvas.Look.Sizes);
-				x = std::max(x, node.X + layout.Width + 32.0f);
-			}
-		}
-		const auto id = state.Graph.Add(type, x, 40.0f);
-		state.Canvas.Select(id);
-		state.Canvas.Centre(state.Graph, id);
+		for (const auto &node : canvas.Geometry().Nodes())
+			x = std::max(x, node.Bounds.Max.X + 32.0f);
+		// A new id never reuses a name an output still holds, so a deleted node's
+		// output stays dangling rather than silently binding the newcomer.
+		std::string id = state.Graph.NewNodeId(type);
+		while (std::any_of(state.Outputs.begin(), state.Outputs.end(), [&](const auto &output) {
+			return output.Node == id;
+		}))
+			id += "-new";
+		const auto def = ImageComposerTypes().FindNode(type);
+		if (def == nullptr ||
+			!state.Graph
+				 .Apply(
+					 engine::ang::edit::AddNode{
+						 {.Id = id, .Def = type, .Version = def->Version, .Position = {x, 40.0f}}
+					 }
+				 )
+				 .Ok)
+			return {};
+		canvas.GraphChanged();
+		canvas.Select({id});
+		canvas.Frame();
 		CommitImageComposer(state);
 		return id;
 	}
@@ -302,7 +325,6 @@ namespace studio {
 
 	void InitialiseImageComposer(ImageComposerState &state) {
 		if (state.Initialized) return;
-		RegisterImageComposerNodeTypes();
 		Document document;
 		document.Nodes.push_back({"solid", Solid{256, 256, {255, 255, 255, 255}}, {}, {40, 40}});
 		document.Outputs.push_back({"image", "solid"});
@@ -317,33 +339,35 @@ namespace studio {
 		state.Last = Snapshot(state);
 	}
 	void ConfigureImageComposerCanvas(ImageComposerState &state) {
-		RegisterImageComposerNodeTypes();
-		state.Canvas.Signals.Changed = [&state] { CommitImageComposer(state); };
-		state.Canvas.Signals.Rerun = [&state](nodegraph::NodeId) { ReloadImageComposerSources(state); };
-		state.Canvas.AcceptsType = [](const nodegraph::NodeType &type) {
-			return type.Category == "Image Composer";
-		};
-		state.Canvas.Look.Background = state.Canvas.Look.NodeBody = 0xFF000000;
-		state.Canvas.Look.Text = 0xFFFFFFFF;
-		state.Canvas.Look.Muted = 0xFFBFBFBF;
-		state.Canvas.Look.NodeSelected = state.Canvas.Look.WidgetFill = state.Canvas.Look.Refused =
-			0xFFFFFFFF;
-		state.Canvas.Look.Widget = state.Canvas.Look.NodeBorder = 0xFF333333;
-		state.Canvas.Look.Marquee = 0x22FFFFFF;
+		// True black with white text is the Dark preset; the composer keeps it
+		// rather than following the editor palette so previews read the same.
+		state.Canvas = std::make_unique<engine::angview::View>(
+			state.Graph, ImageComposerTypes(), engine::angview::Theme::Dark()
+		);
+	}
+	engine::angview::View &ImageComposerCanvas(ImageComposerState &state) {
+		if (state.Canvas == nullptr) ConfigureImageComposerCanvas(state);
+		return *state.Canvas;
+	}
+	void DrawImageComposerCanvas(ImageComposerState &state) {
+		engine::angview::View &canvas = ImageComposerCanvas(state);
+		engine::ui::NodeGraphCanvas("##composer-canvas", canvas);
+		// Edits the view made this frame are one undo point each.
+		if (!canvas.TakeEdits().empty()) CommitImageComposer(state);
 	}
 	bool LoadImageComposerDocument(
 		ImageComposerState &state, const engine::imagegraph::Document &document, Diagnostic &diagnostic
 	) {
-		nodegraph::Graph graph;
+		engine::ang::Graph graph;
 		if (!LoadImageComposerGraph(document, graph, diagnostic)) return false;
-		ConfigureImageComposerCanvas(state);
 		state.Graph = std::move(graph);
 		state.Outputs = document.Outputs;
 		state.Parameters = document.Parameters;
 		state.Bindings = document.Bindings;
 		state.Storage = document.Storage;
 		state.SelectedOutput = state.Outputs.front().Name;
-		state.Canvas.Select(nodegraph::NO_NODE);
+		ImageComposerCanvas(state).Select({});
+		ImageComposerCanvas(state).GraphChanged();
 		state.Initialized = true;
 		state.Past.clear();
 		state.Future.clear();
@@ -352,17 +376,16 @@ namespace studio {
 	}
 	void DrawImageComposerPalette(ImageComposerState &state) {
 		if (ImGui::BeginTable("##palette", 2)) {
-			for (const auto &type : nodegraph::NodeTypes::All()) {
-				if (type.Category != "Image Composer") continue;
+			for (const auto &type : ImageComposerTypes().Nodes()) {
+				if (type->Category != "Image Composer") continue;
 				ImGui::TableNextColumn();
-				if (ImGui::Button(type.Title.c_str(), ImVec2(-1, 0))) AddImageComposerNode(state, type.Id);
+				if (ImGui::Button(type->Label.c_str(), ImVec2(-1, 0))) AddImageComposerNode(state, type->Id);
 			}
 			ImGui::EndTable();
 		}
 		Inspector(state);
 	}
 	void CommitImageComposer(ImageComposerState &state) {
-		AssignImageComposerIdentities(state.Graph, state.Outputs);
 		auto next = Snapshot(state);
 		if (Same(next, state.Last)) return;
 		if (state.Initialized) state.Past.push_back(std::move(state.Last));
@@ -509,7 +532,7 @@ namespace studio {
 	bool OpenImageComposerProject(ImageComposerState &state, const std::filesystem::path &path) {
 		InitialiseImageComposer(state);
 		Document document;
-		nodegraph::Graph graph;
+		engine::ang::Graph graph;
 		Diagnostic diagnostic;
 		const auto parent = path.has_parent_path() ? path.parent_path() : std::filesystem::current_path();
 		if (!assetc::ReadImageGraphProject(parent, path, document, state.Error)) return false;
@@ -525,8 +548,9 @@ namespace studio {
 		state.SelectedOutput = state.Outputs.front().Name;
 		state.SourceRoot = path.has_parent_path() ? path.parent_path() : std::filesystem::current_path();
 		std::snprintf(state.ProjectPath.data(), state.ProjectPath.size(), "%s", path.string().c_str());
-		state.Canvas.Select(nodegraph::NO_NODE);
-		state.Canvas.Fit(state.Graph);
+		ImageComposerCanvas(state).Select({});
+		ImageComposerCanvas(state).GraphChanged();
+		ImageComposerCanvas(state).Frame();
 		state.Past.clear();
 		state.Future.clear();
 		state.Last = Snapshot(state);
@@ -585,7 +609,7 @@ namespace studio {
 			state.Error = ImageComposerDiagnosticMessage(diagnostic);
 			return false;
 		}
-		nodegraph::Graph accepted;
+		engine::ang::Graph accepted;
 		if (!LoadImageComposerGraph(document, accepted, diagnostic)) {
 			state.Error = ImageComposerDiagnosticMessage(diagnostic);
 			return false;
@@ -596,7 +620,8 @@ namespace studio {
 		if (changedReferences) {
 			state.Graph = std::move(accepted);
 			state.Parameters = document.Parameters;
-			state.Canvas.Select(nodegraph::NO_NODE);
+			ImageComposerCanvas(state).Select({});
+			ImageComposerCanvas(state).GraphChanged();
 			ReloadImageComposerSources(state);
 		}
 		if (changedRoot || changedReferences) CommitImageComposer(state);
@@ -715,7 +740,7 @@ namespace studio {
 		if (ImGui::BeginChild(
 				"##image-canvas", ImVec2(std::max(1.f, ImGui::GetContentRegionAvail().x - sidebar - 8), 0)
 			))
-			state.Canvas.Draw(state.Graph);
+			DrawImageComposerCanvas(state);
 		ImGui::EndChild();
 		ImGui::SameLine();
 		if (ImGui::BeginChild("##image-controls", ImVec2(0, 0))) {

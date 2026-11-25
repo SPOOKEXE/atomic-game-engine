@@ -32,7 +32,6 @@ namespace studio {
 	bool SavePluginImageGraph(PluginImageGraphEditor &editor, std::string &json) {
 		engine::imagegraph::Document document;
 		engine::imagegraph::Diagnostic diagnostic;
-		AssignImageComposerIdentities(editor.State.Graph, editor.State.Outputs);
 		if (!SaveImageComposerDocument(editor.State, document, diagnostic) ||
 			!engine::imagegraph::Write(document, json, diagnostic)) {
 			editor.Error = Message(diagnostic);
@@ -51,7 +50,7 @@ namespace studio {
 				"##plugin-graph-canvas",
 				ImVec2(std::max(1.f, ImGui::GetContentRegionAvail().x - sidebar - 8), canvasHeight)
 			))
-			state.Canvas.Draw(state.Graph);
+			DrawImageComposerCanvas(state);
 		ImGui::EndChild();
 		ImGui::SameLine();
 		if (ImGui::BeginChild("##plugin-graph-controls", ImVec2(0, canvasHeight))) {

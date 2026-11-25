@@ -150,13 +150,13 @@ TEST_CASE("a plugin-hosted node editor reports edits as graph documents", "[stud
 	CHECK(Document(editor) == authored);
 
 	// A parameter edit on the canvas reaches the plugin, which stores the new document.
+	std::vector<std::string> voronoi;
 	for (const auto &node : hosted->State.Graph.Nodes())
-		if (node.Type == "image.voronoi") {
-			nodegraph::Value seed;
-			seed.Kind = nodegraph::WidgetKind::Number;
-			seed.Number = 9;
-			nodegraph::SetValue(hosted->State.Graph, node.Id, "seed", seed);
-		}
+		if (node.Def == "image.voronoi") voronoi.push_back(node.Id);
+	for (const auto &id : voronoi)
+		REQUIRE(
+			hosted->State.Graph.Apply(engine::ang::edit::SetParam{id, "seed", engine::ang::Value(9.0)}).Ok
+		);
 	ImGui::NewFrame();
 	editor.DrawPluginWidgets();
 	ImGui::Render();
@@ -168,11 +168,18 @@ TEST_CASE("a plugin-hosted node editor reports edits as graph documents", "[stud
 	// An incomplete canvas is reported in the panel and not sent to the plugin.
 	const auto blend = std::find_if(
 		hosted->State.Graph.Nodes().begin(), hosted->State.Graph.Nodes().end(), [](const auto &node) {
-			return node.Type == "image.blend";
+			return node.Def == "image.blend";
 		}
 	);
 	REQUIRE(blend != hosted->State.Graph.Nodes().end());
-	REQUIRE(hosted->State.Graph.Disconnect(blend->Id, "Foreground"));
+	const std::string blendId = blend->Id;
+	const auto wire = std::find_if(
+		hosted->State.Graph.Links().begin(), hosted->State.Graph.Links().end(), [&](const auto &link) {
+			return link.ToNode == blendId && link.ToPort == "Foreground";
+		}
+	);
+	REQUIRE(wire != hosted->State.Graph.Links().end());
+	REQUIRE(hosted->State.Graph.Apply(engine::ang::edit::RemoveLink{*wire}).Ok);
 	ImGui::NewFrame();
 	editor.DrawPluginWidgets();
 	ImGui::Render();

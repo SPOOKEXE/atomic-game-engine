@@ -468,3 +468,21 @@ TEST_CASE("a host can supply geometry and make empty drags pan", "[angview][view
 	CHECK(view.Pan().X == 20.0f);
 	CHECK(view.Selection() == std::vector<std::string>{"one"});
 }
+
+TEST_CASE("Ctrl+D duplicates the selection and the links inside it", "[angview][view]") {
+	Scene scene;
+	REQUIRE(scene.Document.Apply(edit::AddLink{{"one", "value", "add", "a"}}).Ok);
+	View &view = *scene.Canvas;
+	view.GraphChanged();
+	CHECK(!view.KeyDown(Key::D, {.Control = true}));
+	view.Select({"one", "add"});
+	CHECK(!view.KeyDown(Key::D));
+	REQUIRE(view.KeyDown(Key::D, {.Control = true}));
+	CHECK(scene.Document.Nodes().size() == 5);
+	CHECK(scene.Document.Links().size() == 2);
+	CHECK(view.Selection().size() == 2);
+	const auto *copy = scene.Document.FindNode(view.Selection().front());
+	REQUIRE(copy != nullptr);
+	CHECK(copy->Position.Y == 24.0f);
+	CHECK(view.TakeEdits().size() == 1);
+}

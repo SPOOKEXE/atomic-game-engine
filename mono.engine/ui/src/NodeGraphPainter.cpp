@@ -146,7 +146,7 @@ namespace engine::ui {
 			consumed |= view.Wheel(io.MouseWheel, local);
 		}
 		if (focused && !io.WantTextInput) {
-			constexpr std::array<std::pair<ImGuiKey, angview::Key>, 10> KEYS{{
+			constexpr std::array<std::pair<ImGuiKey, angview::Key>, 11> KEYS{{
 				{ImGuiKey_Delete, angview::Key::Delete},
 				{ImGuiKey_Backspace, angview::Key::Backspace},
 				{ImGuiKey_Escape, angview::Key::Escape},
@@ -157,6 +157,7 @@ namespace engine::ui {
 				{ImGuiKey_A, angview::Key::A},
 				{ImGuiKey_Space, angview::Key::Space},
 				{ImGuiKey_Tab, angview::Key::Tab},
+				{ImGuiKey_D, angview::Key::D},
 			}};
 			const bool typing = view.AddPalette().Open;
 			for (const auto &[imgui, key] : KEYS) {

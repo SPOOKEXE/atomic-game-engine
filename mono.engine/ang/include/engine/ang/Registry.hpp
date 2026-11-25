@@ -101,6 +101,8 @@ namespace engine::ang {
 		std::string Widget{};
 		double Minimum = 0.0;
 		double Maximum = 0.0;
+		// Allowed values for a "select" widget, in display order.
+		std::vector<std::string> Choices{};
 	};
 
 	// Forwarding used when a node is bypassed: the input's value appears on the output.
