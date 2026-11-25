@@ -212,7 +212,12 @@ namespace engine::gui::detail {
 		return {};
 	}
 
-	template <class Access> WheelPick PointerWheel(const Access &a, const Pointer &pointer) {
+	struct GraphPick {
+		Entity Target;
+		Vector2 Origin, Point;
+	};
+	// The topmost NodeCanvas under the pointer; the wheel zooms it and a press drags in it.
+	template <class Access> GraphPick PointerGraph(const Access &a, const Pointer &pointer) {
 		Entity graph;
 		int32_t graphOrder = 0, graphDepth = 0;
 		core::Vector2 graphOrigin, graphPoint;
@@ -236,7 +241,12 @@ namespace engine::gui::detail {
 				graphPoint = unrotated;
 			}
 		});
-		if (graph != NULL_ENTITY) return {graph, graphOrigin, graphPoint, true};
+		return {graph, graphOrigin, graphPoint};
+	}
+
+	template <class Access> WheelPick PointerWheel(const Access &a, const Pointer &pointer) {
+		if (const GraphPick graph = PointerGraph(a, pointer); graph.Target != NULL_ENTITY)
+			return {graph.Target, graph.Origin, graph.Point, true};
 		Entity best;
 		int32_t bestOrder = 0, bestDepth = 0;
 		a.EachScrolling(

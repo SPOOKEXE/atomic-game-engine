@@ -1986,6 +1986,44 @@ namespace engine::gui {
 			});
 		}
 
+		// Draws the wire the router is pulling: white while free, green over a
+		// port that takes it, red over one that refuses it.
+		void EmitNodeCanvasWire(
+			const Store &store,
+			const NodeCanvasWire &wire,
+			Entity canvas,
+			Entity collector,
+			const Resolved &resolved,
+			DrawList &out
+		) {
+			const Rect canvasBounds{
+				resolved.AbsolutePosition, resolved.AbsolutePosition + resolved.AbsoluteSize
+			};
+			const Rect clip = resolved.Clip.Intersection(canvasBounds);
+			const Vector2 delta{wire.To.X - wire.From.X, wire.To.Y - wire.From.Y};
+			const float length = std::hypot(delta.X, delta.Y);
+			if (clip.Empty() || !(length > 0.0f)) {
+				return;
+			}
+			constexpr float THICKNESS = 3.0f;
+			const Vector2 midpoint{(wire.From.X + wire.To.X) * 0.5f, (wire.From.Y + wire.To.Y) * 0.5f};
+			DrawCommand segment;
+			segment.Kind = DrawKind::Rectangle;
+			segment.Source = canvas;
+			segment.Collector = collector;
+			segment.Spatial = store.Get<SpatialCanvas>(collector) != nullptr;
+			segment.Bounds = Rect{
+				Vector2{midpoint.X - length * 0.5f, midpoint.Y - THICKNESS * 0.5f},
+				Vector2{midpoint.X + length * 0.5f, midpoint.Y + THICKNESS * 0.5f},
+			};
+			segment.Clip = clip;
+			segment.Rotation = std::atan2(delta.Y, delta.X) * 57.2957795f;
+			segment.Tint = !wire.OverPort ? Color3{1.0f, 1.0f, 1.0f}
+						   : wire.Accepts ? Color3{0.3f, 0.9f, 0.4f}
+										  : Color3{0.9f, 0.25f, 0.25f};
+			out.Commands.push_back(segment);
+		}
+
 		// Walks one subtree in paint order.
 		//
 		// Parent first, then children sorted by `ZIndex`. **A child is drawn
@@ -2289,6 +2327,9 @@ namespace engine::gui {
 				nodeCanvasCommandStart = out.Commands.size();
 				nodeCanvasGradientStart = out.Gradients.size();
 				EmitNodeCanvasLinks(store, instance, collector, *resolved, tint, opacity, out);
+				if (request.Wire.Canvas == instance) {
+					EmitNodeCanvasWire(store, request.Wire, instance, collector, *resolved, out);
+				}
 			}
 
 			std::vector<Entity> children;
@@ -2491,6 +2532,11 @@ namespace engine::gui {
 			};
 			stamp = Fold(stamp, localInteraction(request.Hovered));
 			stamp = Fold(stamp, localInteraction(request.Pressed));
+			stamp = Fold(stamp, localInteraction(request.Wire.Canvas));
+			stamp = Fold(stamp, request.Wire.From);
+			stamp = Fold(stamp, request.Wire.To);
+			stamp = Fold(stamp, request.Wire.OverPort);
+			stamp = Fold(stamp, request.Wire.Accepts);
 			stamp = Fold(stamp, request.Viewer);
 			stamp = Fold(stamp, request.ScreenGuis);
 

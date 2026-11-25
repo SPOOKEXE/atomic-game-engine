@@ -194,10 +194,6 @@ TEST_CASE("node links accept any at either typed boundary", "[gui][nodecanvas]")
 	const Entity numberInput = graph.Port(numberDestination, "number", NodePortDirection::Input, "number");
 	const Entity stringInput = graph.Port(stringDestination, "string", NodePortDirection::Input, "string");
 
-	CHECK(NodeCanvasTypesCompatible(Name("number"), Name("any")));
-	CHECK(NodeCanvasTypesCompatible(Name("any"), Name("number")));
-	CHECK_FALSE(NodeCanvasTypesCompatible(Name("number"), Name("string")));
-
 	Entity made;
 	CHECK(ConnectNodePorts(graph.World, graph.Canvas, numberOutput, anyInput, made) == NodeLinkResult::Made);
 	CHECK(ConnectNodePorts(graph.World, graph.Canvas, anyOutput, numberInput, made) == NodeLinkResult::Made);

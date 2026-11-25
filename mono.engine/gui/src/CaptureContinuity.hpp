@@ -24,7 +24,9 @@ namespace engine::gui::detail {
 
 	// Router supplies collector IDs through its existing CollectorOf rule.
 	struct CaptureState {
-		CaptureOwner Holding, Dragging, Detector, Dragged, Canvas;
+		CaptureOwner Holding, Dragging, Detector, Dragged, Canvas, Graph;
+		// NodeCanvasGesture::Digest, or zero with no gesture.
+		uint64_t GraphDigest = 0;
 		ecs::Entity Over;
 		core::Vector2 Last, DragFrom;
 		core::UDim2 DragStart;
@@ -142,7 +144,9 @@ namespace engine::gui::detail {
 		uint64_t StoreIdentity = 0;
 		uint64_t RouterIncarnation = 0;
 		size_t RetainedBytes = 0;
-		CaptureOwner Holding, Dragging, Detector, Dragged, Canvas;
+		CaptureOwner Holding, Dragging, Detector, Dragged, Canvas, Graph;
+		// NodeCanvasGesture::Digest, or zero with no gesture.
+		uint64_t GraphDigest = 0;
 		ecs::Entity Over;
 		std::array<uint32_t, 2> LastBits{};
 		std::array<uint32_t, 7> DragBits{};
@@ -207,6 +211,8 @@ namespace engine::gui::detail {
 			result.Detector = state.Detector;
 			result.Dragged = state.Dragged;
 			result.Canvas = state.Canvas;
+			result.Graph = state.Graph;
+			result.GraphDigest = state.GraphDigest;
 			result.Over = state.Over;
 			result.LastBits = {std::bit_cast<uint32_t>(state.Last.X), std::bit_cast<uint32_t>(state.Last.Y)};
 			result.DragBits = {
@@ -302,6 +308,7 @@ namespace engine::gui::detail {
 			store.Identity() != witness.StoreIdentity || state.Holding != witness.Holding ||
 			state.Dragging != witness.Dragging || state.Detector != witness.Detector ||
 			state.Dragged != witness.Dragged || state.Canvas != witness.Canvas ||
+			state.Graph != witness.Graph || state.GraphDigest != witness.GraphDigest ||
 			state.Over != witness.Over || state.Started != witness.Started ||
 			std::array<uint32_t, 7>{
 				std::bit_cast<uint32_t>(state.DragFrom.X),

@@ -4573,6 +4573,7 @@ namespace client {
 			// reading this frame's hover would depend on its own output.
 			request.Hovered = InterfaceRouter.Hovered();
 			request.Pressed = InterfaceRouter.Pressed();
+			request.Wire = InterfaceRouter.NodeWire();
 
 			Universe_->Enter(interfaceWorld, [&](engine::ecs::Store &store) {
 				if (!BundledFontsAttempted && store.CountMatching<engine::gui::Label>() > 0)

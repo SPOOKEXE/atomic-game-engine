@@ -129,6 +129,10 @@ namespace engine::ang {
 	};
 	LinkVerdict CheckNewLink(const Graph &graph, const Registry &registry, const Link &candidate);
 
+	// Whether adding `candidate` would close a cycle, a self link included.
+	// Looks only at links, so hosts with their own port rules can still ask.
+	bool WouldCycle(const Graph &graph, const Link &candidate);
+
 	// The type of a node port as declared, after resolving generics from the
 	// node's current links. Empty when the node or port is unknown.
 	TypeId PortType(

@@ -62,15 +62,35 @@ namespace engine::angview {
 		return ports;
 	}
 
-	void Layout::Build(
-		const ang::Graph &graph,
-		const ang::Registry &registry,
-		const Theme &theme,
-		const std::vector<std::string> &moving,
-		core::Vector2 offset
-	) {
+	void Layout::Clear() {
 		NodeList.clear();
 		Index.clear();
+	}
+
+	void Layout::Add(NodeLayout node) {
+		Index[node.Id] = NodeList.size();
+		NodeList.push_back(std::move(node));
+	}
+
+	void Layout::Offset(const std::vector<std::string> &nodes, core::Vector2 offset) {
+		for (const std::string &id : nodes) {
+			const auto found = Index.find(id);
+			if (found == Index.end()) {
+				continue;
+			}
+			NodeLayout &node = NodeList[found->second];
+			node.Bounds.Min = node.Bounds.Min + offset;
+			node.Bounds.Max = node.Bounds.Max + offset;
+			for (auto *ports : {&node.Inputs, &node.Outputs}) {
+				for (PortLayout &port : *ports) {
+					port.Centre = port.Centre + offset;
+				}
+			}
+		}
+	}
+
+	void Layout::Build(const ang::Graph &graph, const ang::Registry &registry, const Theme &theme) {
+		Clear();
 		for (const ang::NodeInstance &node : graph.Nodes()) {
 			NodeLayout layout;
 			layout.Id = node.Id;
@@ -80,10 +100,7 @@ namespace engine::angview {
 			layout.Title = def != nullptr									 ? def->Label
 						   : subgraph != nullptr && !subgraph->Label.empty() ? subgraph->Label
 																			 : node.Def;
-			core::Vector2 origin = node.Position;
-			if (std::find(moving.begin(), moving.end(), node.Id) != moving.end()) {
-				origin = origin + offset;
-			}
+			const core::Vector2 origin = node.Position;
 			const auto inputs = PortsOf(graph, registry, node, ang::Direction::Input);
 			const auto outputs = PortsOf(graph, registry, node, ang::Direction::Output);
 			const size_t rows = std::max<size_t>(1, std::max(inputs.size(), outputs.size()));
@@ -107,8 +124,7 @@ namespace engine::angview {
 					 {origin.X + theme.NodeWidth, firstRow + theme.RowHeight * static_cast<float>(index)}}
 				);
 			}
-			Index.emplace(layout.Id, NodeList.size());
-			NodeList.push_back(std::move(layout));
+			Add(std::move(layout));
 		}
 	}
 

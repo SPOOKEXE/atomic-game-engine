@@ -441,3 +441,14 @@ change to `ecs`, not to this module.
 
 Until then: an example that writes text per frame is teaching the wrong habit.
 `examples/Interface.luau` writes at ten hertz and says why.
+
+## NodeCanvas rules and gestures come from ang
+
+Link legality (types, the `any` wildcard, cycles) is `ang`'s, through a
+transient mirror of the canvas (`src/NodeCanvasGesture.hpp`); do not add a gui
+compatibility or cycle check beside it. Pointer gestures on a canvas run
+through one `angview::View` per press, held by the `Router` from press to
+release. The entities stay the only saved and replicated graph: the mirror is
+rebuilt per check or per gesture and dropped after, and every result is
+written back to elements, the canvas pan or link instances. A press only
+becomes a gesture after it travels, so clicks on ports still reach scripts.

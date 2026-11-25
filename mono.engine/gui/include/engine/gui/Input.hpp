@@ -32,6 +32,7 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/gui/DrawList.hpp>
 #include <engine/gui/Event.hpp>
+#include <engine/gui/NodeCanvas.hpp>
 
 #include <array>
 #include <cstdint>
@@ -51,6 +52,7 @@ namespace engine::gui {
 		struct PointerFrameFacts;
 		struct CaptureContinuity;
 		struct CaptureStateStorage;
+		class NodeCanvasGesture;
 	}
 
 	// Where the pointer is and whether it is down.
@@ -471,6 +473,7 @@ namespace engine::gui {
 			// `ScrollMotion` it had, so the rubber band still comes back - this
 			// object is dropping a gesture, not undoing what the gesture did.
 			Canvas = ecs::NULL_ENTITY;
+			Graph.reset();
 		}
 
 		// The `ScrollingFrame` whose bar is being dragged, or null.
@@ -503,6 +506,18 @@ namespace engine::gui {
 		ecs::Entity DragHeld() const {
 			return Detector;
 		}
+
+		// The NodeCanvas a drag is moving a node of, panning or pulling a wire
+		// across, or null. A press that has not yet travelled is still a click
+		// and does not count.
+		//
+		// @since v0.26
+		ecs::Entity GraphHeld() const;
+
+		// The wire being pulled across a NodeCanvas, for `CompileRequest::Wire`.
+		//
+		// @since v0.26
+		NodeCanvasWire NodeWire() const;
 
 		// Whether this pointer has a target or capture in its permitted collectors.
 		// This read-only query uses the current draw list and does not dispatch events.
@@ -641,6 +656,17 @@ namespace engine::gui {
 		//
 		// @since v0.17
 		ecs::Entity Canvas;
+
+		// --- the node canvas gesture -------------------------------------------
+		//
+		// A press on a NodeCanvas, from press to release. It holds a transient
+		// ang mirror of the canvas and the angview interaction over it; what it
+		// produces - element positions, the canvas pan, links - is the world's.
+		// Shared rather than unique only so the router keeps its implicit copies
+		// with an incomplete type; nothing copies a router mid-gesture.
+		//
+		// @since v0.26
+		std::shared_ptr<detail::NodeCanvasGesture> Graph;
 
 		core::Vector2 Last;
 		bool WasDown = false;

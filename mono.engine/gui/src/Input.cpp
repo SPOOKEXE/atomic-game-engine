@@ -2,6 +2,7 @@
 #include "Modal.hpp"
 #include "ModalProjection.hpp"
 #include "NavigationAccess.hpp"
+#include "NodeCanvasGesture.hpp"
 #include "PointerFrameFacts.hpp"
 #include "PointerSelectors.hpp"
 #include "TargetedSemantic.hpp"
@@ -1342,6 +1343,8 @@ namespace engine::gui {
 		state.Detector = owner(Detector);
 		state.Dragged = owner(Dragged);
 		state.Canvas = owner(Canvas);
+		state.Graph = owner(Graph != nullptr ? Graph->Canvas() : NULL_ENTITY);
+		state.GraphDigest = Graph != nullptr ? Graph->Digest() : 0;
 		state.Over = Over;
 		state.Last = Last;
 		state.DragFrom = DragFrom;
@@ -1640,6 +1643,7 @@ namespace engine::gui {
 			const auto bar = detail::PointerBar(access, pointer);
 			const auto drag = detail::PointerDrag(access, pointer);
 			const auto canvas = detail::PointerCanvas(access, pointer);
+			result.VisualGraph = detail::PointerGraph(access, pointer).Target;
 			result.VisualBar = bar.Target;
 			result.VisualBarGrab = bar.Grab;
 			result.VisualBarVertical = bar.Vertical;
@@ -1734,7 +1738,7 @@ namespace engine::gui {
 			current.VisualDragPoint != decision.VisualDragPoint ||
 			current.VisualDragStart != decision.VisualDragStart ||
 			current.VisualDragAngle != decision.VisualDragAngle ||
-			current.VisualCanvas != decision.VisualCanvas ||
+			current.VisualCanvas != decision.VisualCanvas || current.VisualGraph != decision.VisualGraph ||
 			current.VisualCanvasOvershoot != decision.VisualCanvasOvershoot ||
 			current.VisualCaret != decision.VisualCaret ||
 			current.VisualEntryClearOnFocus != decision.VisualEntryClearOnFocus ||
@@ -1953,6 +1957,9 @@ namespace engine::gui {
 			// the physical button level so a held press cannot restart until up.
 			Dragging = NULL_ENTITY;
 			ReleaseCanvas(store);
+			// A withdrawn contact keeps what a node drag or pan already wrote and
+			// makes no link: the same rule the element drag follows.
+			Graph.reset();
 			if (Detector != NULL_ENTITY && store.Alive(Detector)) {
 				const Vector2 point = dragPoint();
 				Events.push_back(
@@ -2045,6 +2052,32 @@ namespace engine::gui {
 			return Events;
 		}
 
+		// **A held node canvas press.** Until it travels it is an ordinary press
+		// and falls through, so a click on a port still clicks; once it travels
+		// it owns the pointer, and the press it began as ends without activating.
+		if (pointer.Down && Graph != nullptr) {
+			if (!store.Alive(Graph->Canvas())) {
+				Graph.reset();
+			} else {
+				const bool claimed = Graph->Active();
+				const Vector2 point =
+					LogicalPoint(list, CollectorOf(store, Graph->Canvas()), pointer.Position);
+				if (Graph->Move(store, point)) {
+					if (!claimed && Holding != NULL_ENTITY) {
+						emit(EventKind::InputEnded, Holding);
+						Holding = NULL_ENTITY;
+						HoldingCollection = NULL_ENTITY;
+						HoldingKey.clear();
+						HoldingIndex = UINT32_MAX;
+					}
+					Last = pointer.Position;
+					WasDown = true;
+					Started = true;
+					return Events;
+				}
+			}
+		}
+
 		if (pointer.Down && !WasDown && pointer.Inside) {
 			// **The bars are tested before the pick and win it.** A
 			// `ScrollingFrame` is not `Active`, so the pick walks straight past
@@ -2106,6 +2139,19 @@ namespace engine::gui {
 				return Events;
 			}
 
+			// **A press inside a NodeCanvas is a gesture candidate and still a
+			// press.** It is recorded here, after every claim above has passed,
+			// and only takes the pointer if it travels.
+			{
+				auto collectorOf = [&](Entity entity) { return CollectorOf(store, entity); };
+				auto allows = [&](Entity entity, Entity) { return AllowsModal(store, entity); };
+				LivePointerAccess access{store, list, allows, collectorOf};
+				const auto graph = detail::PointerGraph(access, pointer);
+				Graph = graph.Target != NULL_ENTITY
+							? std::make_shared<detail::NodeCanvasGesture>(store, graph.Target, graph.Point)
+							: nullptr;
+			}
+
 			Holding = found;
 			HoldingCollection = NULL_ENTITY;
 			HoldingKey.clear();
@@ -2162,6 +2208,17 @@ namespace engine::gui {
 			// Letting go of a canvas owes no event either, and starts the
 			// rubber band coming back. Same rule, one gesture along.
 			ReleaseCanvas(store);
+
+			// A node canvas gesture that travelled finishes here: a pulled wire
+			// dropped on a port that takes it becomes a link.
+			if (Graph != nullptr) {
+				if (Graph->Active() && store.Alive(Graph->Canvas())) {
+					Graph->Release(
+						store, LogicalPoint(list, CollectorOf(store, Graph->Canvas()), pointer.Position)
+					);
+				}
+				Graph.reset();
+			}
 
 			// A drag ends the same way, and it is the one of the two that owes
 			// an event: a script watching `DragEnd` is what commits whatever the
@@ -2705,4 +2762,11 @@ namespace engine::gui {
 		}
 	}
 
+	ecs::Entity Router::GraphHeld() const {
+		return Graph != nullptr && Graph->Active() ? Graph->Canvas() : NULL_ENTITY;
+	}
+
+	NodeCanvasWire Router::NodeWire() const {
+		return Graph != nullptr ? Graph->Wire() : NodeCanvasWire{};
+	}
 }

@@ -92,14 +92,19 @@ namespace engine::angview {
 	}
 
 	void View::EnsureLayout() {
-		if (!LayoutStale && LayoutRevision == Document.Revision()) {
+		// Host geometry can change without a graph edit, so it is always asked.
+		if (!GeometrySource && !LayoutStale && LayoutRevision == Document.Revision()) {
 			return;
 		}
-		static const std::vector<std::string> NONE;
-		const bool moving = Drag == DragKind::Nodes || Drag == DragKind::Group;
-		Shapes.Build(
-			Document, Types, Style, moving ? DragNodes : NONE, moving ? DragOffset : core::Vector2{}
-		);
+		if (GeometrySource) {
+			Shapes.Clear();
+			GeometrySource(Shapes);
+		} else {
+			Shapes.Build(Document, Types, Style);
+		}
+		if (Drag == DragKind::Nodes || Drag == DragKind::Group) {
+			Shapes.Offset(DragNodes, DragOffset);
+		}
 		LayoutRevision = Document.Revision();
 		LayoutStale = false;
 	}
@@ -291,7 +296,7 @@ namespace engine::angview {
 			Drag = DragKind::Group;
 			break;
 		case HitKind::None:
-			Drag = DragKind::BoxSelect;
+			Drag = EmptyDragPans ? DragKind::Pan : DragKind::BoxSelect;
 			break;
 		}
 		Dirty();

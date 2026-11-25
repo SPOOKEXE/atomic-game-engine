@@ -22,6 +22,7 @@ mono_add_library(gui
 	DEPS
 		Engine::core
 		Engine::ecs
+		Engine::angview
 	VENDOR
 		freetype
 		harfbuzz

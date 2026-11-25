@@ -36,7 +36,7 @@ namespace engine::gui {
 		bool Valid = true;
 		uint64_t Store = 0;
 		ecs::Entity Hovered;
-		ecs::Entity VisualBar, VisualDrag, VisualDetector, VisualCanvas, VisualWheel;
+		ecs::Entity VisualBar, VisualDrag, VisualDetector, VisualCanvas, VisualWheel, VisualGraph;
 		float VisualBarGrab = 0.0f;
 		core::Vector2 VisualWheelOrigin, VisualWheelPoint, VisualDragPoint, VisualCanvasOvershoot;
 		core::UDim2 VisualDragStart;

@@ -2336,6 +2336,7 @@ namespace studio {
 							request.Display.Height = canvas.y;
 							request.Hovered = current.GuiRouter.Hovered();
 							request.Pressed = current.GuiRouter.Pressed();
+							request.Wire = current.GuiRouter.NodeWire();
 							request.Seconds = engine::core::Clock::Seconds();
 							request.Fonts = &engine::ui::GuiFontPackage();
 							current.GuiList.RebuildCollector(store, current.Gui, request);
