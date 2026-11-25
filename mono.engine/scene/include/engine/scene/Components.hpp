@@ -972,12 +972,19 @@ namespace engine::scene {
 		// second lobe's roughness and green its weight, replacing the two
 		// scalars beside it; `SecondarySpecularChannel` takes the weight from a
 		// packed PBR channel instead.
+		//
+		// `Clearcoat` is the weight of a water-like lobe over both, for wet or
+		// glossed skin, with its own roughness; `ClearcoatChannel` takes the
+		// weight from a packed PBR channel. The G-buffer keeps four coat
+		// roughnesses: 0.05, 0.12, 0.22 and 0.35.
 		//@{
 		core::Name ThicknessMap = {};
 		core::Name SecondaryRoughnessMap = {};
 		float ScatterRadius = 0.012f;
 		float SecondaryRoughness = 0.3f;
 		float SecondarySpecular = 0.15f;
+		float Clearcoat = 0.0f;
+		float ClearcoatRoughness = 0.05f;
 		//@}
 
 		// Which shader this surface is drawn with, or invalid for the engine's.
@@ -1023,10 +1030,12 @@ namespace engine::scene {
 		// specular lobe's weight, or 255 for `SecondaryRoughnessMap` green or
 		// `SecondarySpecular`.
 		uint8_t SecondarySpecularChannel = 255;
+		// Channel of `PackedPbrMap` scaling `Clearcoat`, or 255 for none.
+		uint8_t ClearcoatChannel = 255;
 		SkinShadingMode SkinMode = SkinShadingMode::ScreenSpace;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[2] = {};
+		uint8_t Reserved[1] = {};
 	};
 
 	// Which material an instance names.

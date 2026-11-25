@@ -70,5 +70,8 @@ void main() {
 		total += texture(sourceImage, uv * pass.Scale.xy).rgb * weight;
 		weights += weight;
 	}
-	outColour = vec4(total / weights, composite ? 1.0 : centre.a);
+	// A clear coat reflects before the light scatters, so coated pixels keep half of
+	// their unblurred light and with it the sharp highlight.
+	float kept = 0.5 * SkinCoat(profile).x;
+	outColour = vec4(total / weights, composite ? 1.0 - kept : centre.a);
 }

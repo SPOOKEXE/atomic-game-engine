@@ -108,6 +108,7 @@ namespace engine::render {
 			State->SlotSecondaryRoughnessMap.resize(uploadCount);
 			State->SlotSkin.resize(uploadCount);
 			State->SlotSkinLobe.resize(uploadCount);
+			State->SlotSkinCoat.resize(uploadCount);
 			State->SlotPackedPbrChannels.resize(uploadCount);
 			State->SlotResample.resize(uploadCount);
 			State->SlotShadowDetail.resize(uploadCount);
@@ -183,6 +184,12 @@ namespace engine::render {
 				instance.SecondaryRoughness,
 				instance.SecondarySpecular,
 				static_cast<float>(instance.SecondarySpecularChannel),
+				0.0f
+			};
+			State->SlotSkinCoat[drawSlot] = glm::vec4{
+				instance.Clearcoat,
+				instance.ClearcoatRoughness,
+				static_cast<float>(instance.ClearcoatChannel),
 				0.0f
 			};
 			State->SlotPackedPbrChannels[drawSlot] = glm::vec4{
@@ -411,6 +418,7 @@ namespace engine::render {
 							State->SlotSecondaryRoughnessMap[sceneSlot];
 						State->SlotSkin[drawSlot] = State->SlotSkin[sceneSlot];
 						State->SlotSkinLobe[drawSlot] = State->SlotSkinLobe[sceneSlot];
+						State->SlotSkinCoat[drawSlot] = State->SlotSkinCoat[sceneSlot];
 						State->SlotResample[drawSlot] = State->SlotResample[sceneSlot];
 						State->SlotShadowDetail[drawSlot] = State->SlotShadowDetail[sceneSlot];
 						State->SlotTwoSided[drawSlot] = State->SlotTwoSided[sceneSlot];

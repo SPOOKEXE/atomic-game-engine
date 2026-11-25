@@ -1537,6 +1537,8 @@ namespace engine::render {
 		std::vector<core::Name> SlotSecondaryRoughnessMap;
 		std::vector<glm::vec4> SlotSkin;
 		std::vector<glm::vec4> SlotSkinLobe;
+		// Coat weight, roughness and packed PBR channel.
+		std::vector<glm::vec4> SlotSkinCoat;
 		// Set when a G-buffer draw this frame wrote a skin pixel; the deferred
 		// lighting node runs the subsurface pass only then, and clears it.
 		bool SkinDrawn = false;
@@ -1799,8 +1801,9 @@ namespace engine::render {
 				   SlotThicknessMap[next] == SlotThicknessMap[slot] &&
 				   SlotSecondaryRoughnessMap[next] == SlotSecondaryRoughnessMap[slot] &&
 				   SlotSkin[next] == SlotSkin[slot] && SlotSkinLobe[next] == SlotSkinLobe[slot] &&
-				   SlotResample[next] == SlotResample[slot] && SlotShader[next] == SlotShader[slot] &&
-				   SlotSeam[next] == SlotSeam[slot] && SlotSeamFirst[next] == SlotSeamFirst[slot] &&
+				   SlotSkinCoat[next] == SlotSkinCoat[slot] && SlotResample[next] == SlotResample[slot] &&
+				   SlotShader[next] == SlotShader[slot] && SlotSeam[next] == SlotSeam[slot] &&
+				   SlotSeamFirst[next] == SlotSeamFirst[slot] &&
 				   SlotSeamSecond[next] == SlotSeamSecond[slot] &&
 				   SlotSeamCentre[next] == SlotSeamCentre[slot] &&
 				   SlotSeamLight[next] == SlotSeamLight[slot] && SlotTwoSided[next] == SlotTwoSided[slot];

@@ -1668,6 +1668,8 @@ declare interface MeshPart extends BasePart {
 	AutoLodLevels: number;
 	AutoLodStrategy: Enum.AutoMeshLODStrategy;
 	AutoLodTargetQuadArea: number;
+	Clearcoat: number;
+	ClearcoatRoughness: number;
 	CustomLod1MeshId: string;
 	CustomLod1Ratio: number;
 	CustomLod2MeshId: string;
@@ -1695,6 +1697,7 @@ declare interface MeshPart extends BasePart {
 	MetalnessMap: string;
 	NormalMap: string;
 	OcclusionMap: string;
+	PackedClearcoatChannel: number;
 	PackedHeightChannel: number;
 	PackedMetalnessChannel: number;
 	PackedOcclusionChannel: number;

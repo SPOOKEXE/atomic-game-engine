@@ -234,7 +234,20 @@ vec4 ShadeDeferred(out vec4 directionalResponse) {
 	float spread = skin && IsPreIntegrated(albedo.a) ? texture(emissiveImage, geometryUv).a : -1.0;
 	float cosine = dot(normal, toLight);
 	vec3 response = spread < 0.0 ? vec3(lambert) : PreIntegratedDiffuse(cosine, spread, falloff);
-	vec3 unshadowedDirect = (diffuse * response + specular) * pass.Direct.rgb;
+	vec3 surfaceResponse = diffuse * response + specular;
+	if (skin) {
+		// A water-like coat (reflectance 0.02) takes its share of the light first.
+		vec2 coat = SkinCoat(albedo.a);
+		if (coat.x > 0.0) {
+			float coatFresnel = FresnelSchlick(max(dot(halfway, viewDirection), 0.0), vec3(0.02)).r * coat.x;
+			float coatGeometry = GeometrySchlickGGX(max(dot(normal, viewDirection), 0.0), coat.y) *
+								 GeometrySchlickGGX(lambert, coat.y);
+			float coatLobe = DistributionGGX(normal, halfway, coat.y) * coatGeometry * coatFresnel /
+							 max(4.0 * max(dot(normal, viewDirection), 0.0) * lambert, 1e-4);
+			surfaceResponse = surfaceResponse * (1.0 - coatFresnel) + vec3(coatLobe);
+		}
+	}
+	vec3 unshadowedDirect = surfaceResponse * pass.Direct.rgb;
 	float shadow = ShadowFactor(world, normal, toLight);
 	// The surface's own shadow begins at the terminator and would cut off the light
 	// scattered past it.

@@ -1905,6 +1905,8 @@ declare extern type MeshPart extends BasePart with
 	AutoLodLevels: number
 	AutoLodStrategy: Enum_AutoMeshLODStrategy
 	AutoLodTargetQuadArea: number
+	Clearcoat: number
+	ClearcoatRoughness: number
 	read CustomLod1MeshId: string
 	write CustomLod1MeshId: string?
 	CustomLod1Ratio: number
@@ -1946,6 +1948,7 @@ declare extern type MeshPart extends BasePart with
 	write NormalMap: string?
 	read OcclusionMap: string
 	write OcclusionMap: string?
+	PackedClearcoatChannel: number
 	PackedHeightChannel: number
 	PackedMetalnessChannel: number
 	PackedOcclusionChannel: number

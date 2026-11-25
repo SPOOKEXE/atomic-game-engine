@@ -120,9 +120,12 @@ namespace engine::scene {
 		float ScatterRadius = 0.012f;
 		float SecondaryRoughness = 0.3f;
 		float SecondarySpecular = 0.15f;
+		float Clearcoat = 0.0f;
+		float ClearcoatRoughness = 0.05f;
 		uint8_t SubsurfaceProfile = 1;
 		bool SkinShading = false;
 		uint8_t SecondarySpecularChannel = 255;
+		uint8_t ClearcoatChannel = 255;
 		SkinShadingMode SkinMode = SkinShadingMode::ScreenSpace;
 		//@}
 
@@ -517,6 +520,9 @@ namespace engine::scene {
 			instance.SkinShading = appearance->SkinShading;
 			instance.SkinMode = appearance->SkinMode;
 			instance.SecondarySpecularChannel = appearance->SecondarySpecularChannel;
+			instance.Clearcoat = appearance->Clearcoat;
+			instance.ClearcoatRoughness = appearance->ClearcoatRoughness;
+			instance.ClearcoatChannel = appearance->ClearcoatChannel;
 			instance.Shader = appearance->Shader;
 			instance.Alpha = appearance->Mode;
 			instance.AlphaCutoff = appearance->AlphaCutoff;

@@ -168,6 +168,8 @@ namespace engine::scene {
 						uint32_t(instance.SkinMode) << 24u
 				)
 			);
+			d = MixSignature(d, Pair(BitsOf(instance.Clearcoat), BitsOf(instance.ClearcoatRoughness)));
+			d = MixSignature(d, Pair(instance.ClearcoatChannel, 0u));
 			for (size_t level = 0; level < LOD_LEVELS - 1; ++level) {
 				a = MixSignature(a, Pair(instance.LodMeshes[level].Id(), BitsOf(instance.LodRatios[level])));
 				b = MixSignature(b, Pair(BitsOf(instance.LodMinimumDistances[level]), level));

@@ -485,6 +485,12 @@ namespace engine::render {
 					thicknessMap != nullptr ? 1.0f : 0.0f,
 					(secondaryMap != nullptr ? 1.0f : 0.0f) + 2.0f * weightChannel
 				};
+				uniforms.SkinCoat = glm::vec4{
+					SlotSkinCoat[slot].x,
+					SlotSkinCoat[slot].y,
+					packedPbr != nullptr && SlotSkinCoat[slot].z < 4.0f ? SlotSkinCoat[slot].z + 1.0f : 0.0f,
+					0.0f
+				};
 				if (skin && gbufferPass && SlotSkin[slot].x < 1.5f) SkinDrawn = true;
 				uniforms.Transmission = glm::vec4{
 					SlotIndexOfRefraction[slot],

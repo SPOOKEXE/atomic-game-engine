@@ -1860,6 +1860,54 @@ TEST_CASE(
 	CHECK(ball.Capture(true).Bytes == skin.Bytes);
 }
 
+TEST_CASE("a clear coat adds a sharp highlight over skin", "[render][gpu][skin][.]") {
+	// A plane facing the camera with the sun behind it: the highlight is centred.
+	SkinScene plane(core::Name("fixture.white"));
+	scene::WorldLighting sun;
+	sun.Direction = core::Vector3{0.0f, 0.0f, -1.0f};
+	sun.Direct = {0.2f, 0.2f, 0.2f};
+	sun.Ambient = {0, 0, 0};
+	sun.OutdoorAmbient = {0, 0, 0};
+	plane.Fixture.Render.SetLighting(sun);
+	plane.View.Lighting = sun;
+	plane.Surface.SecondarySpecular = 0.0f;
+	// Scatter in the lighting, so the subsurface blur does not soften the lobe.
+	plane.Surface.SkinMode = scene::SkinShadingMode::PreIntegrated;
+	plane.Surface.ScatterRadius = 0.05f;
+	const uint32_t x = plane.Target.Width / 2, y = plane.Target.Height / 2;
+	const auto bare = plane.Capture(true);
+	plane.Surface.Clearcoat = 1.0f;
+	plane.Surface.ClearcoatRoughness = 0.22f;
+	const auto coated = plane.Capture(true);
+	plane.Surface.Clearcoat = 0.5f;
+	const auto half = plane.Capture(true);
+	const auto gain = [&](const CapturedImage &image, uint32_t column) {
+		return plane.At(image, column, y)[1] - plane.At(bare, column, y)[1];
+	};
+	INFO(
+		"centre +" << gain(coated, x) << ", half weight +" << gain(half, x) << ", 12 px off +"
+				   << gain(coated, x + 12)
+	);
+	CHECK(gain(coated, x) > 20);
+	CHECK(gain(half, x) > 5);
+	CHECK(gain(half, x) < gain(coated, x));
+	// Sharp: away from the mirror direction the coat only takes its small share.
+	CHECK(gain(coated, x + 12) <= 2);
+	// The subsurface pass leaves the highlight visible.
+	plane.Surface.SkinMode = scene::SkinShadingMode::ScreenSpace;
+	plane.Surface.ScatterRadius = 0.4f;
+	plane.Surface.Clearcoat = 0.0f;
+	const auto scattered = plane.Capture(true);
+	plane.Surface.Clearcoat = 1.0f;
+	CHECK(plane.At(plane.Capture(true), x, y)[1] - plane.At(scattered, x, y)[1] > 10);
+	plane.Surface.SkinMode = scene::SkinShadingMode::PreIntegrated;
+	plane.Surface.ScatterRadius = 0.05f;
+	// No weight leaves the skin as it was, whatever the roughness.
+	plane.Surface.Clearcoat = 0.0f;
+	plane.Surface.ClearcoatRoughness = 0.35f;
+	CHECK(plane.Capture(true).Bytes == bare.Bytes);
+}
+
 TEST_CASE("a UDIM tile whose graph output is not ready draws the default", "[render][gpu][udim][.]") {
 	SkinScene plane(core::Name("fixture.white"));
 	scene::WorldLighting bright;

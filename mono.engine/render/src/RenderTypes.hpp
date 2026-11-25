@@ -189,6 +189,9 @@ namespace engine::render {
 		// more than the packed PBR channel holding the weight (zero for none).
 		glm::vec4 Skin{0.0f, 1.0f, 0.0f, 0.0f};
 		glm::vec4 SkinLobe{0.0f, 0.0f, 0.0f, 0.0f};
+		// x coat weight, y coat roughness, z one more than the packed PBR channel
+		// scaling the weight (zero for none).
+		glm::vec4 SkinCoat{0.0f, 0.05f, 0.0f, 0.0f};
 	};
 
 	struct ShadowUniforms {

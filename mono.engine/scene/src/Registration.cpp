@@ -1525,6 +1525,9 @@ namespace engine::scene {
 				writer.WriteFloat(appearances[index].SecondarySpecular);
 				writer.WriteUInt8(appearances[index].SecondarySpecularChannel);
 				writer.WriteUInt8(static_cast<uint8_t>(appearances[index].SkinMode));
+				writer.WriteFloat(appearances[index].Clearcoat);
+				writer.WriteFloat(appearances[index].ClearcoatRoughness);
+				writer.WriteUInt8(appearances[index].ClearcoatChannel);
 			}
 		}
 
@@ -1621,6 +1624,9 @@ namespace engine::scene {
 					reader.ReadUInt8() == static_cast<uint8_t>(SkinShadingMode::PreIntegrated)
 						? SkinShadingMode::PreIntegrated
 						: SkinShadingMode::ScreenSpace;
+				appearances[index].Clearcoat = reader.ReadFloat();
+				appearances[index].ClearcoatRoughness = reader.ReadFloat();
+				appearances[index].ClearcoatChannel = channel();
 			}
 		}
 

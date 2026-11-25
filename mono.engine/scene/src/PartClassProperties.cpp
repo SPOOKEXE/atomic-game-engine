@@ -829,6 +829,13 @@ namespace engine::scene::part_detail {
 			meshPart, BoundedSurfaceFactorProperty<&SurfaceAppearance::SecondarySpecular>("SecondarySpecular")
 		);
 		ecs::Classes::Computed(
+			meshPart, BoundedSurfaceFactorProperty<&SurfaceAppearance::Clearcoat>("Clearcoat")
+		);
+		ecs::Classes::Computed(
+			meshPart,
+			BoundedSurfaceFactorProperty<&SurfaceAppearance::ClearcoatRoughness>("ClearcoatRoughness")
+		);
+		ecs::Classes::Computed(
 			meshPart, PackedPbrChannelProperty<&SurfaceAppearance::RoughnessChannel>("PackedRoughnessChannel")
 		);
 		ecs::Classes::Computed(
@@ -845,6 +852,9 @@ namespace engine::scene::part_detail {
 			PackedPbrChannelProperty<&SurfaceAppearance::SecondarySpecularChannel>(
 				"PackedSecondarySpecularChannel"
 			)
+		);
+		ecs::Classes::Computed(
+			meshPart, PackedPbrChannelProperty<&SurfaceAppearance::ClearcoatChannel>("PackedClearcoatChannel")
 		);
 		ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 1>("Lod1MeshId"));
 		ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 2>("Lod2MeshId"));
