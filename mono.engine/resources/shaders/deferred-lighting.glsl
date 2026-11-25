@@ -223,7 +223,9 @@ vec4 ShadeDeferred(out vec4 directionalResponse) {
 		specular = mix(specular, second, secondWeight);
 		// Thin parts pass light through, reddened by the profile's falloff.
 		float thickness = material.g * 4.0;
-		transmitted = albedo.rgb * exp(-thickness / SkinProfileFalloff(albedo.a));
+		// The byte saturates at four radii, which means opaque, so it fades out there.
+		transmitted = albedo.rgb * exp(-thickness / SkinProfileFalloff(albedo.a)) *
+					  (1.0 - smoothstep(0.75, 1.0, material.g));
 	}
 	vec3 diffuse = albedo.rgb * (1.0 - fresnel) * (1.0 - metalness);
 	vec3 ambient = AmbientRadiance(albedo.rgb, metalness, normal, pass.Ambient.rgb,

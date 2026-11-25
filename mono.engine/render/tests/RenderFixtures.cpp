@@ -1916,12 +1916,13 @@ TEST_CASE("a thickness set transmits through its thin tile only", "[render][gpu]
 	render::SceneLight behind;
 	behind.Position = {0, 0, -3};
 	behind.Range = 4;
-	behind.Colour = {1, 1, 1};
+	behind.Colour = {4, 4, 4};
 	body.View.Lights = std::span(&behind, 1);
 	const auto image = body.Capture(true);
 	const uint32_t y = body.Target.Height / 2, x = body.Target.Width / 2;
 	const auto thin = body.At(image, x - 8, y), thick = body.At(image, x + 8, y);
 	INFO("thin " << thin[0] << " " << thin[1] << " thick " << thick[0]);
 	CHECK(thin[0] > 40);
-	CHECK(thick[0] < thin[0] / 2);
+	// Thickness past the channel's range lets nothing through, however strong the light.
+	CHECK(thick[0] == 0);
 }
