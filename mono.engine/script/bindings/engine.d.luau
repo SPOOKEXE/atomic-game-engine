@@ -1047,6 +1047,7 @@ declare Enum: {
 		Multiply: Enum_LayerBlend,
 		Add: Enum_LayerBlend,
 		Screen: Enum_LayerBlend,
+		Height: Enum_LayerBlend,
 	},
 	LensShape: {
 		Sphere: Enum_LensShape,
@@ -2030,6 +2031,8 @@ declare extern type Attachment extends Instance with
 end
 
 declare extern type Material extends Instance with
+	read Keywords: string
+	write Keywords: string?
 	read MaterialId: string
 	write MaterialId: string?
 	read Shader: string

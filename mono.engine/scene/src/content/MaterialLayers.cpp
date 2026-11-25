@@ -10,12 +10,13 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <charconv>
 #include <cmath>
 
 namespace engine::scene {
 	namespace {
-		constexpr std::array<std::string_view, 4> BLENDS{"Over", "Multiply", "Add", "Screen"};
+		constexpr std::array<std::string_view, 5> BLENDS{"Over", "Multiply", "Add", "Screen", "Height"};
 		constexpr std::array<std::pair<std::string_view, uint8_t>, 7> CHANNELS{{
 			{"Albedo", LAYER_ALBEDO},
 			{"Normal", LAYER_NORMAL},
@@ -50,6 +51,27 @@ namespace engine::scene {
 			return lines;
 		}
 
+		// The names a source declares with `#pragma keyword`, at most eight.
+		std::vector<std::string> Keywords(std::string_view source) {
+			std::vector<std::string> names;
+			for (size_t at = 0; at < source.size();) {
+				size_t end = source.find('\n', at);
+				if (end == std::string_view::npos) end = source.size();
+				std::string_view line = source.substr(at, end - at);
+				at = end + 1;
+				constexpr std::string_view LEAD = "#pragma keyword ";
+				if (!line.starts_with(LEAD)) continue;
+				line.remove_prefix(LEAD.size());
+				while (!line.empty() && (line.back() == ' ' || line.back() == '\r'))
+					line.remove_suffix(1);
+				const bool word = !line.empty() && std::all_of(line.begin(), line.end(), [](char letter) {
+					return std::isalnum(static_cast<unsigned char>(letter)) || letter == '_';
+				});
+				if (word && names.size() < 8) names.emplace_back(line);
+			}
+			return names;
+		}
+
 		// `layer` over `o`, for a colour-like value.
 		std::string Blended(LayerBlend blend, const std::string &from, const std::string &to) {
 			switch (blend) {
@@ -59,6 +81,7 @@ namespace engine::scene {
 				return from + " + " + to;
 			case LayerBlend::Screen:
 				return "1.0 - (1.0 - " + from + ") * (1.0 - " + to + ")";
+			case LayerBlend::Height:
 			case LayerBlend::Over:
 				break;
 			}
@@ -66,8 +89,24 @@ namespace engine::scene {
 		}
 	}
 
-	LayeredSurface ComposeLayers(std::string_view base, std::span<const LayerSource> layers) {
+	LayeredSurface
+	ComposeLayers(std::string_view base, std::span<const LayerSource> layers, std::string_view keywords) {
 		LayeredSurface result;
+		std::string defines;
+		const std::vector<std::string> switches = Keywords(base);
+		while (!keywords.empty()) {
+			const size_t end = std::min(keywords.find(','), keywords.size());
+			std::string word(keywords.substr(0, end));
+			std::erase(word, ' ');
+			keywords = end < keywords.size() ? keywords.substr(end + 1) : std::string_view{};
+			if (word.empty()) continue;
+			// Only what the shader declares, so the permutations are its author's.
+			if (std::find(switches.begin(), switches.end(), word) == switches.end()) {
+				result.Error = "the shader declares no keyword '" + word + "'";
+				return result;
+			}
+			defines += "#define " + word + " 1\n";
+		}
 		// The base's declarations come first and in order, so its parameters keep
 		// the floats they have without layers.
 		std::string head;
@@ -129,9 +168,22 @@ namespace engine::scene {
 			std::string weight =
 				result.Opacities[index].empty() ? Float(layer.Opacity) : result.Opacities[index];
 			if (!layer.Mask.empty()) {
-				const size_t dot = layer.Mask.find('.');
-				const std::string texture = layer.Mask.substr(0, dot);
-				const std::string channel = dot == std::string::npos ? "r" : layer.Mask.substr(dot + 1);
+				const size_t where = std::min(layer.Mask.find('@'), layer.Mask.size());
+				const std::string named = layer.Mask.substr(0, where);
+				const std::string source = where < layer.Mask.size() ? layer.Mask.substr(where + 1) : "uv";
+				std::string at = "i.UV";
+				if (source == "mesh") {
+					at = "i.MeshUV";
+				} else if (source.size() == 10 && source.starts_with("attribute") && source[9] >= '0' &&
+						   source[9] <= '3') {
+					at = std::string("i.Attributes[") + source[9] + "].xy";
+				} else if (source != "uv") {
+					result.Error = "layer '" + layer.Module + "': no coordinates called '" + source + "'";
+					return result;
+				}
+				const size_t dot = named.find('.');
+				const std::string texture = named.substr(0, dot);
+				const std::string channel = dot == std::string::npos ? "r" : named.substr(dot + 1);
 				if (layout.FindTexture(texture) < 0 || channel.size() != 1 ||
 					std::string_view("rgba").find(channel) == std::string_view::npos) {
 					result.Error = "layer '" + layer.Module + "': the mask '" + layer.Mask +
@@ -139,11 +191,13 @@ namespace engine::scene {
 					return result;
 				}
 				// An unbound mask hides its layer rather than covering everything.
-				weight +=
-					" * (" + texture + "Bound() ? texture(" + texture + ", i.UV)." + channel + " : 0.0)";
+				weight += " * (" + texture + "Bound() ? texture(" + texture + ", " + at + ")." + channel +
+						  " : 0.0)";
 			}
 			blend += "\t{\n\t\tSurfaceOutput l = o;\n\t\t" + function + "(i, l);\n\t\tfloat w = clamp(" +
 					 weight + ", 0.0, 1.0);\n";
+			if (layer.Blend == LayerBlend::Height)
+				blend += "\t\tw *= smoothstep(-0.1, 0.1, l.Height - o.Height + (w - 0.5) * 2.0);\n";
 			const auto mix = [&](std::string_view field, uint8_t channel, bool colour) {
 				if ((layer.Channels & channel) == 0) return;
 				const std::string o = "o." + std::string(field), l = "l." + std::string(field);
@@ -155,6 +209,7 @@ namespace engine::scene {
 			mix("Roughness", LAYER_ROUGHNESS, false);
 			mix("Metalness", LAYER_METALNESS, false);
 			mix("Occlusion", LAYER_OCCLUSION, false);
+			blend += "\t\to.Height = mix(o.Height, l.Height, w);\n";
 			if ((layer.Channels & LAYER_NORMAL) != 0)
 				blend += "\t\to.Normal = normalize(mix(o.Normal, l.Normal, w));\n";
 			if ((layer.Channels & LAYER_CUSTOM) != 0)
@@ -162,7 +217,11 @@ namespace engine::scene {
 			blend += "\t}\n";
 		}
 		blend += "}\n";
-		result.Source = head + body + blend;
+		// With no layers the base is the surface.
+		if (layers.empty())
+			result.Source = defines + std::string(base);
+		else
+			result.Source = head + defines + body + blend;
 		return result;
 	}
 
@@ -321,6 +380,15 @@ namespace engine::scene {
 			if (part == ecs::NULL_ENTITY || store.Get<SurfaceAppearance>(part) == nullptr) return;
 			parts[part.Id].push_back({entity, layer});
 		});
+		// A material with keywords is a stack of none.
+		store.Each<const MaterialRef>([&](ecs::Entity entity, const MaterialRef &material) {
+			if (!material.Keywords.IsValid() || material.Keywords.Text().empty() ||
+				!material.Shader.IsValid())
+				return;
+			const ecs::Entity part = store.ParentOf(entity);
+			if (part != ecs::NULL_ENTITY && store.Get<SurfaceAppearance>(part) != nullptr)
+				(void)parts[part.Id];
+		});
 		LayeredShaders *held = store.ResourceMutable<LayeredShaders>();
 		if (held == nullptr) {
 			if (parts.empty()) return;
@@ -352,14 +420,17 @@ namespace engine::scene {
 															 : left.Entity.Id < right.Entity.Id;
 			});
 			if (rows.size() > MAX_MATERIAL_LAYERS) rows.resize(MAX_MATERIAL_LAYERS);
-			core::Name base;
+			core::Name base, keywords;
 			store.EachChild(part, [&](ecs::Entity child) {
 				const auto *material = store.Get<MaterialRef>(child);
-				if (material != nullptr && material->Shader.IsValid()) base = material->Shader;
+				if (material == nullptr || !material->Shader.IsValid()) return;
+				base = material->Shader;
+				keywords = material->Keywords;
 			});
 			const ShaderText baseText = base.IsValid() ? ShaderTextOf(store, base) : ShaderText{};
 			uint64_t signature = Fold(0, (uint64_t(base.Id()) << 32) | baseText.Revision);
 			signature = Fold(signature, baseText.Source.Id);
+			signature = Fold(signature, keywords.Id());
 			std::vector<ShaderText> modules;
 			for (const Row &row : rows) {
 				modules.push_back(ShaderModuleTextOf(store, row.Layer.Shader));
@@ -391,7 +462,11 @@ namespace engine::scene {
 						 layer.Channels}
 					);
 				}
-				LayeredSurface composed = ComposeLayers(baseText.Code, sources);
+				LayeredSurface composed = ComposeLayers(
+					baseText.Code,
+					sources,
+					keywords.IsValid() ? std::string_view(keywords.Text()) : std::string_view{}
+				);
 				if (!composed.Error.empty()) {
 					// The compiler reports it in the author's terms, on the script.
 					composed.Source = "#error " + composed.Error +
@@ -404,7 +479,7 @@ namespace engine::scene {
 				auto &surface = held->Surfaces[shader.Id()];
 				++surface.Uses;
 				surface.Source = std::move(composed.Source);
-				surface.Reporter = baseText.Found ? baseText.Source : rows.front().Entity;
+				surface.Reporter = baseText.Found || rows.empty() ? baseText.Source : rows.front().Entity;
 				// The old stack's opacities may sit where the new one's values go.
 				if (auto *stale = store.GetMutable<SurfaceAppearance>(part))
 					ClearOpacities(*held, state, *stale);

@@ -88,6 +88,7 @@ void main() {
 	o.Specular = lighting.MaterialExtra.z;
 	o.Emissive = (ResolvedSurfaceFeatures() & FEATURE_EMISSION) != 0u ? inEmission.rgb * inEmission.a : vec3(0.0);
 	o.Alpha = inColour.a;
+	o.Height = 0.5;
 	o.User = 0.0;
 	for (int index = 0; index < 4; index++) o.Custom[index] = vec4(0.0);
 	Surface(i, o);

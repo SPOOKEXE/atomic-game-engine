@@ -1058,6 +1058,10 @@ namespace engine::scene {
 		//
 		// @since v0.15
 		core::Name Shader = {};
+
+		// Switches of that shader to turn on, joined by commas; see
+		// `content/MaterialLayers.hpp`.
+		core::Name Keywords = {};
 	};
 
 	// Which tags an entity carries, as a bitmask.

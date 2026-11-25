@@ -988,6 +988,7 @@ namespace engine::scene::part_detail {
 		// the engine ships and no manifest lists. `scene/Shaders.hpp` is the
 		// resolution order and why it is that way round.
 		ecs::Classes::Property<&MaterialRef::Shader>(materialClass, "Shader");
+		ecs::Classes::Property<&MaterialRef::Keywords>(materialClass, "Keywords");
 
 		// The light's shared properties. Type-specific controls are declared on
 		// the two classes that consume them, so a point light never offers an

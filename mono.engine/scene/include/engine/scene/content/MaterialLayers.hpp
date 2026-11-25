@@ -8,7 +8,9 @@
 //
 // where `o` arrives as the surface so far. The layers of a part, sorted by
 // `Order`, are composed with its `Material`'s shader (or the part's own maps)
-// into one generated surface, so the whole stack is one draw. Parts with the
+// into one generated surface, so the whole stack is one draw. A `Material` with
+// `Keywords` goes the same way, with `#define`s for the switches its shader
+// declares with `#pragma keyword NAME`. Parts with the
 // same stack share a shader. A layer's opacity is a material parameter, so
 // fading one compiles nothing.
 //
@@ -39,6 +41,8 @@ namespace engine::scene {
 		Multiply = 1,
 		Add = 2,
 		Screen = 3,
+		// The higher of the two shows, by `Height` and opacity.
+		Height = 4,
 	};
 
 	// What a layer may change, one bit each.
@@ -58,7 +62,9 @@ namespace engine::scene {
 	struct MaterialLayer {
 		// The `ShaderModule` holding the Layer function.
 		core::Name Shader = {};
-		// A declared texture and channel such as `masks.g`, or nothing for all of it.
+		// A declared texture and channel such as `masks.g`, or nothing for all of
+		// it. `@mesh` reads it at the authored UVs and `@attribute0` to
+		// `@attribute3` at that display attribute's first two values.
 		core::Name Mask = {};
 		float Opacity = 1.0f;
 		int32_t Order = 0;
@@ -87,8 +93,10 @@ namespace engine::scene {
 	};
 
 	// Composes layers, already in order, over a surface's source. An empty base
-	// is the part's own maps.
-	LayeredSurface ComposeLayers(std::string_view base, std::span<const LayerSource> layers);
+	// is the part's own maps. `keywords` are the base's declared switches to turn
+	// on, joined by commas.
+	LayeredSurface
+	ComposeLayers(std::string_view base, std::span<const LayerSource> layers, std::string_view keywords = {});
 
 	// Generated surfaces by name. Derived by `ResolveMaterials` and never saved.
 	struct LayeredShaders {

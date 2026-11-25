@@ -800,6 +800,7 @@ declare namespace Enum {
 		readonly Multiply: LayerBlend;
 		readonly Add: LayerBlend;
 		readonly Screen: LayerBlend;
+		readonly Height: LayerBlend;
 	};
 	const LensShape: {
 		readonly Sphere: LensShape;
@@ -1772,6 +1773,7 @@ declare interface Attachment extends Instance {
 }
 
 declare interface Material extends Instance {
+	Keywords: string;
 	MaterialId: string;
 	Shader: string;
 }

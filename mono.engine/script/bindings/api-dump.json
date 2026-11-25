@@ -456,6 +456,7 @@
 			"superclass": "Instance",
 			"tags": [],
 			"members": [
+				{"kind":"property","name":"Keywords","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"MaterialId","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"Shader","type":"string","writable":true,"valueType":"Name","storage":"field"}
 			]
@@ -3649,7 +3650,8 @@
 				{"name":"Over","value":0},
 				{"name":"Multiply","value":1},
 				{"name":"Add","value":2},
-				{"name":"Screen","value":3}
+				{"name":"Screen","value":3},
+				{"name":"Height","value":4}
 			]
 		},
 		{

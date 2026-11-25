@@ -224,6 +224,7 @@ TEST_CASE("a composed layer stack compiles over maps, a Surface and a Light", "[
 		{"paint", paint, "", 1.0f, scene::LayerBlend::Multiply, scene::LAYER_ALBEDO},
 		{"mud", mud, "masks.b", 1.0f, scene::LayerBlend::Screen},
 		{"paint", paint, "", 1.0f, scene::LayerBlend::Add},
+		{"mud", mud, "masks.r@attribute1", 1.0f, scene::LayerBlend::Height},
 	};
 	for (const std::string base : {std::string(), std::string(PLAIN), std::string(LIT)}) {
 		const auto composed = scene::ComposeLayers(base, layers);

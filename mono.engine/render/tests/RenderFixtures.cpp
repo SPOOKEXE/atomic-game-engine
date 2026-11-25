@@ -1763,10 +1763,28 @@ TEST_CASE(
 	CHECK(lit[1] > 60);
 	CHECK(lit[0] < 10);
 	CHECK(lit[2] < 10);
-	const auto normal = CapturePresentationResource(
-		plane.Fixture.Render, core::Name("normal"), plane.View.Slot, plane.Target.Width, plane.Target.Height
+	// Its G-buffer normal is the author's, and the marker tells deferred lighting
+	// to leave the pixel alone.
+	const auto normal = CaptureResource(
+		plane.Fixture.Render,
+		core::Name("normal"),
+		plane.View.Slot,
+		plane.Target.Width,
+		plane.Target.Height,
+		ImageFormat::Rgba8Unorm
 	);
-	REQUIRE_FALSE(normal.Bytes.empty());
+	uint32_t texel = 0;
+	std::memcpy(&texel, normal.Bytes.data() + size_t(y) * normal.RowStrideBytes + size_t(x) * 4, 4);
+	const auto axis = [&](uint32_t shift) { return float(texel >> shift & 1023u) / 1023.0f * 2.0f - 1.0f; };
+	CHECK(std::abs(axis(0) - 0.7071f) < 0.01f);
+	CHECK(std::abs(axis(20) - 0.7071f) < 0.01f);
+	CHECK((texel >> 30) == 1u);
+
+	// The forward module draws the same light when the surface is transparent.
+	plane.Surface.Transparency = 0.02f;
+	const auto blended = plane.At(plane.Capture(), x, y);
+	CHECK(blended[1] > 60);
+	CHECK(blended[2] < 20);
 }
 
 TEST_CASE("authored parameters and textures come from the part", "[render][gpu][material][.]") {

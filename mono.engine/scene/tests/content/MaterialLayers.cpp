@@ -172,3 +172,34 @@ TEST_CASE("a base that arrives under layers moves their opacities out of its flo
 	// Float 0 is the base's now and unset; the opacity is after it.
 	CHECK(FormatMaterialParameters(*world.Store.Get<SurfaceAppearance>(world.Part)) == "3=1");
 }
+
+TEST_CASE("a material's keywords make a variant and only declared ones", "[scene][material]") {
+	World world;
+	const auto script = world.Store.CreateInstance(ShaderScriptClass(), "base");
+	REQUIRE(SetShaderSource(
+		world.Store,
+		script,
+		"#pragma keyword COAT\n#pragma keyword FUZZ\nvoid Surface(SurfaceInput i, inout SurfaceOutput o) {}\n"
+	));
+	const auto material = world.Store.CreateInstance(MaterialClass(), "Material");
+	world.Store.GetMutable<MaterialRef>(material)->Shader = core::Name("base");
+	REQUIRE(world.Store.SetParent(material, world.Part));
+	CHECK(world.Shader() == core::Name("base"));
+	world.Store.GetMutable<MaterialRef>(material)->Keywords = core::Name("COAT, FUZZ");
+	CHECK(world.Source().find("#define COAT 1\n#define FUZZ 1\n") != std::string::npos);
+	world.Store.GetMutable<MaterialRef>(material)->Keywords = core::Name("NOPE");
+	CHECK(world.Source().find("#error") != std::string::npos);
+	world.Store.GetMutable<MaterialRef>(material)->Keywords = core::Name{};
+	CHECK(world.Shader() == core::Name("base"));
+}
+
+TEST_CASE("masks read the coordinates they name", "[scene][material]") {
+	const auto composed = [](const char *mask) {
+		const LayerSource layer{"mud", MUD, mask};
+		return ComposeLayers("", std::span(&layer, 1));
+	};
+	CHECK(composed("masks.g@mesh").Source.find("i.MeshUV).g") != std::string::npos);
+	CHECK(composed("masks.b@attribute2").Source.find("i.Attributes[2].xy).b") != std::string::npos);
+	CHECK_FALSE(composed("masks.g@attribute4").Error.empty());
+	CHECK_FALSE(composed("masks.g@nowhere").Error.empty());
+}

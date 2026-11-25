@@ -1189,7 +1189,7 @@ namespace engine::scene {
 				layers[index].Opacity = reader.ReadFloat();
 				layers[index].Order = reader.ReadInt32();
 				const uint8_t blend = reader.ReadUInt8();
-				layers[index].Blend = blend <= static_cast<uint8_t>(LayerBlend::Screen)
+				layers[index].Blend = blend <= static_cast<uint8_t>(LayerBlend::Height)
 										  ? static_cast<LayerBlend>(blend)
 										  : LayerBlend::Over;
 				layers[index].Channels = static_cast<uint8_t>(reader.ReadUInt8() & LAYER_ALL);
@@ -1243,6 +1243,7 @@ namespace engine::scene {
 				// that came back drawn by the engine's default and nothing in
 				// the file saying why.
 				writer.WriteName(refs[index].Shader);
+				writer.WriteName(refs[index].Keywords);
 			}
 		}
 
@@ -1251,6 +1252,7 @@ namespace engine::scene {
 			for (size_t index = 0; index < count; index++) {
 				refs[index].Asset = reader.ReadName();
 				refs[index].Shader = reader.ReadName();
+				refs[index].Keywords = reader.ReadName();
 			}
 		}
 

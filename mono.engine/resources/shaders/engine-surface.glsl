@@ -20,6 +20,8 @@ struct SurfaceOutput {
 	float Specular;
 	vec3 Emissive;
 	float Alpha;
+	// Relief for height-blended layers, 0 to 1.
+	float Height;
 	// Tag other passes can test on pixels with a Light function, 0 to 1.
 	float User;
 	// Free values a Surface hands to its Light.
@@ -46,6 +48,14 @@ vec3 ApplyNormalMap(vec3 normal, vec2 uv, vec3 mapped) {
 // Two normals over one base, the second detail on top of the first.
 vec3 BlendNormals(vec3 base, vec3 detail, vec3 geometric) {
 	return normalize(base + detail - geometric * dot(detail, geometric));
+}
+
+// A texture projected along the three axes, for surfaces without usable UVs.
+vec4 SampleTriplanar(sampler2D image, vec3 position, vec3 normal, float scale) {
+	vec3 weight = pow(abs(normal), vec3(4.0));
+	weight /= max(weight.x + weight.y + weight.z, 1e-4);
+	return texture(image, position.zy * scale) * weight.x + texture(image, position.xz * scale) * weight.y +
+		   texture(image, position.xy * scale) * weight.z;
 }
 
 // The engine's own reading of the part's maps, for a Surface that adds to it.
