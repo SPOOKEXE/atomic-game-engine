@@ -9,7 +9,7 @@
 
 namespace studio {
 	namespace {
-		std::string Message(const engine::imagegraph::Diagnostic &diagnostic) {
+		std::string PluginGraphMessage(const engine::imagegraph::Diagnostic &diagnostic) {
 			return diagnostic.Node.empty() ? diagnostic.Message : diagnostic.Node + ": " + diagnostic.Message;
 		}
 	}
@@ -21,7 +21,7 @@ namespace studio {
 		if (!engine::imagegraph::Read(json, document, diagnostic) ||
 			!engine::imagegraph::Write(document, canonical, diagnostic) ||
 			!LoadImageComposerDocument(editor.State, document, diagnostic)) {
-			failure = Message(diagnostic);
+			failure = PluginGraphMessage(diagnostic);
 			return false;
 		}
 		editor.Document = std::move(canonical);
@@ -34,7 +34,7 @@ namespace studio {
 		engine::imagegraph::Diagnostic diagnostic;
 		if (!SaveImageComposerDocument(editor.State, document, diagnostic) ||
 			!engine::imagegraph::Write(document, json, diagnostic)) {
-			editor.Error = Message(diagnostic);
+			editor.Error = PluginGraphMessage(diagnostic);
 			return false;
 		}
 		editor.Error.clear();

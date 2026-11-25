@@ -17,7 +17,9 @@
 
 namespace engine::script {
 
-	namespace {
+	// Named rather than anonymous: unity builds compile this beside files with
+	// their own `Text`, `Number` and `Store`.
+	namespace node_graph_detail {
 		// A table's identity in cache keys: its contents, never its address.
 		uint64_t HashScript(uint64_t hash, const ScriptValue &value) {
 			hash = ang::HashMix(hash, static_cast<uint64_t>(value.Tag));
@@ -152,6 +154,7 @@ namespace engine::script {
 	}
 
 	ang::Value ToGraphValue(const ScriptValue &value, std::string_view type) {
+		using namespace node_graph_detail;
 		switch (value.Tag) {
 		case ValueTag::Nil:
 			return {};
@@ -186,6 +189,7 @@ namespace engine::script {
 	}
 
 	ScriptValue ToScriptValue(const ang::Value &value) {
+		using namespace node_graph_detail;
 		return std::visit(
 			[&](const auto &held) -> ScriptValue {
 				using Held = std::decay_t<decltype(held)>;
@@ -227,7 +231,7 @@ namespace engine::script {
 
 	// --- the per-VM objects ---------------------------------------------------------------------
 
-	namespace {
+	namespace node_graph_detail {
 		struct Callbacks {
 			std::function<void(CallbackRef)> Release;
 			std::vector<CallbackRef> Held;
@@ -288,11 +292,11 @@ namespace engine::script {
 	struct NodeGraphLibrary::State {
 		std::function<void(CallbackRef)> Release;
 		NodeGraphLimits Bounds;
-		std::unordered_map<uint32_t, Object> Objects;
+		std::unordered_map<uint32_t, node_graph_detail::Object> Objects;
 		uint32_t NextHandle = 0;
 		// The call running a graph, so script Evaluate functions can reach their VM.
 		ScriptCall *ActiveCall = nullptr;
-		std::vector<HookEvent> Queued;
+		std::vector<node_graph_detail::HookEvent> Queued;
 	};
 
 	NodeGraphLibrary::NodeGraphLibrary(std::function<void(CallbackRef)> release, NodeGraphLimits limits)
@@ -315,7 +319,7 @@ namespace engine::script {
 		return *Owned;
 	}
 
-	namespace {
+	namespace node_graph_detail {
 		NodeGraphLibrary::State &StateOf(ScriptCall &call) {
 			return call.NodeGraphs().Data();
 		}
@@ -1350,7 +1354,7 @@ namespace engine::script {
 		static const ServiceSurface SURFACE = [] {
 			ServiceSurface surface;
 			surface.Name = "NodeGraphService";
-			surface.Methods = METHODS;
+			surface.Methods = node_graph_detail::METHODS;
 			return surface;
 		}();
 		return SURFACE;

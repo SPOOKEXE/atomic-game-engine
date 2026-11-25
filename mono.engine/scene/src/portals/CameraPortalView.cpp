@@ -5,16 +5,16 @@
 
 namespace engine::scene {
 	namespace {
-		bool Finite(const core::Vector3 &v) {
+		bool FiniteVector(const core::Vector3 &v) {
 			return std::isfinite(v.X) && std::isfinite(v.Y) && std::isfinite(v.Z);
 		}
 		bool Rigid(const core::CFrame &frame) {
 			const auto rotation = frame.Rotation();
-			return Finite(frame.Position) && std::isfinite(glm::dot(rotation, rotation)) &&
+			return FiniteVector(frame.Position) && std::isfinite(glm::dot(rotation, rotation)) &&
 				   std::abs(glm::dot(rotation, rotation) - 1.0f) < .001f;
 		}
 		bool Valid(const SeamTransform &through) {
-			return Rigid(through.Frame) && Finite(through.Origin) && std::isfinite(through.Scale) &&
+			return Rigid(through.Frame) && FiniteVector(through.Origin) && std::isfinite(through.Scale) &&
 				   through.Scale > 0;
 		}
 		bool RouteText(std::string_view text) {
@@ -23,7 +23,7 @@ namespace engine::scene {
 		bool Valid(const CameraPortalRoute &route) {
 			return RouteText(route.SourceWorld) && RouteText(route.DestinationWorld) &&
 				   RouteText(route.PanePath) && RouteText(route.FarPath) && Valid(route.BeforeFromInput) &&
-				   Finite(route.EntryInputPoint) && Finite(route.EntryInputDirection) &&
+				   FiniteVector(route.EntryInputPoint) && FiniteVector(route.EntryInputDirection) &&
 				   route.EntryInputDirection.Dot(route.EntryInputDirection) > .00000001f;
 		}
 		core::Vector3 UnmapPoint(const SeamTransform &map, const core::Vector3 &point) {
@@ -46,7 +46,7 @@ namespace engine::scene {
 		const bool arrival =
 			view.ArrivedFrom.empty() ||
 			(view.Started && RouteText(view.ArrivedFrom) && RouteText(view.ArrivalPanePath) &&
-			 Finite(view.ArrivalPoint) && Finite(view.ArrivalNormal) &&
+			 FiniteVector(view.ArrivalPoint) && FiniteVector(view.ArrivalNormal) &&
 			 std::abs(view.ArrivalNormal.Dot(view.ArrivalNormal) - 1) < .001f &&
 			 std::isfinite(view.ArrivalTolerance) && view.ArrivalTolerance > 0);
 		if (!arrival || !Valid(view.FromInput) || view.Route.size() > MAX_CAMERA_PORTAL_ROUTE_HOPS)
