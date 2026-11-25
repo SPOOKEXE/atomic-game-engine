@@ -2,6 +2,7 @@
 
 // Image graph source bindings and the per-evaluation statistics the renderer reports.
 
+#include <engine/assets/Texture.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/imagegraph/Document.hpp>
 
@@ -20,10 +21,19 @@ namespace engine::render {
 		core::Name Owner;
 		// Colour imports encoded colour; Data preserves normalized numeric channels.
 		imagegraph::SourceInterpretation Interpretation = imagegraph::SourceInterpretation::Colour;
+		// The texture's name identifies its pixels, so it need only be resident while an
+		// evaluation reads it. Width, Height and Format describe it while it is not;
+		// `Renderer::ImageGraphNeededSource` says when to provide it.
+		bool ContentAddressed = false;
+		// Declared extent of a content-addressed texture.
+		uint32_t Width = 0, Height = 0;
+		// Declared format of a content-addressed texture.
+		assets::TextureFormat Format = assets::TextureFormat::RGBA8;
 	};
 
-	// Accepted GPU update, unchanged resident output, or last-good output retained.
-	enum class ImageGraphEvaluation : uint8_t { Updated, Reused, Refused };
+	// Accepted GPU update, unchanged resident output, last-good output retained, or work
+	// spread over later calls: call again each frame until it settles.
+	enum class ImageGraphEvaluation : uint8_t { Updated, Reused, Refused, Pending };
 
 	// Cumulative traffic and the latest completed GPU evaluation measurement.
 	struct ImageGraphStatistics {

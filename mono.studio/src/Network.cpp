@@ -1025,6 +1025,13 @@ namespace studio {
 				}) != 1)
 				continue;
 			imagegraph::Diagnostic diagnostic;
+			// Says once why a graph does not publish, rather than every frame it retries.
+			const auto report = [&] {
+				std::string message = diagnostic.Node + ": " + diagnostic.Message;
+				if (message == applied.Reported) return;
+				ENGINE_WARN("image graph {}: {}", demand.Name.Text(), message);
+				applied.Reported = std::move(message);
+			};
 			const imagegraph::Document *authored = nullptr;
 			uint64_t contentRevision = 0;
 			if (!demand.Document.empty()) {
@@ -1071,21 +1078,24 @@ namespace studio {
 					const core::Name texture(source);
 					(void)RequestContentAsset(texture);
 				}
+				std::vector<render::ImageGraphSourceBinding> bindings;
 				uint64_t lowered = 0;
 				if (lowers) {
 					bool accepted = false;
 					Universe->Enter(demand.World, [&](ecs::Store &store) {
 						accepted =
-							ImageGraphMeshes.Lower(store, Renderer, demand.Owner, key, resolved, diagnostic);
+							ImageGraphMeshes.Lower(store, demand.Owner, resolved, bindings, diagnostic);
 					});
-					if (!accepted) continue;
+					if (!accepted) {
+						report();
+						continue;
+					}
 					for (const auto &node : resolved.Nodes)
 						if (const auto *source = std::get_if<imagegraph::Source>(&node.Value))
 							lowered = (lowered ^ std::hash<std::string>{}(source->Path)) * 1099511628211ull;
 				}
 				if (edited || lowered != applied.Lowered) {
 					// Each output admits its own sources; an unavailable cone must not stall another.
-					std::vector<render::ImageGraphSourceBinding> bindings;
 					for (const auto &node : resolved.Nodes) {
 						const auto *source = std::get_if<imagegraph::Source>(&node.Value);
 						if (!source ||
@@ -1104,8 +1114,10 @@ namespace studio {
 							 source->Interpretation}
 						);
 					}
-					if (!Renderer.SetImageGraph(demand.Owner, demand.Name, resolved, bindings, diagnostic))
+					if (!Renderer.SetImageGraph(demand.Owner, demand.Name, resolved, bindings, diagnostic)) {
+						report();
 						continue;
+					}
 					applied.Asset = demand.Asset;
 					applied.ContentRevision = contentRevision;
 					applied.InputRevision = demand.Revision;
@@ -1116,19 +1128,37 @@ namespace studio {
 			for (const auto output : demand.Outputs) {
 				imagegraph::Reference reference;
 				if (!imagegraph::ParseReference(output.Text(), reference)) continue;
-				if (Renderer.EvaluateImageGraph(
-						demand.Owner, demand.Name, reference.Output, output, diagnostic
-					) == render::ImageGraphEvaluation::Updated)
-					changed = true;
+				const auto evaluation = Renderer.EvaluateImageGraph(
+					demand.Owner, demand.Name, reference.Output, output, diagnostic
+				);
+				if (evaluation == render::ImageGraphEvaluation::Updated) changed = true;
+				if (evaluation == render::ImageGraphEvaluation::Refused) {
+					report();
+					continue;
+				}
+				const core::Name needed = Renderer.ImageGraphNeededSource(demand.Owner, demand.Name);
+				if (!needed.IsValid()) continue;
+				bool provided = true;
+				Universe->Enter(demand.World, [&](ecs::Store &store) {
+					provided = ImageGraphMeshes.Provide(store, Renderer, demand.Owner, needed, diagnostic);
+				});
+				if (!provided) report();
 			}
 		}
+		std::vector<core::Name> retired;
 		std::erase_if(AppliedImageGraphs, [&](const auto &entry) {
 			const auto &applied = entry.second;
 			if (applied.Seen) return false;
-			ImageGraphMeshes.Forget(Renderer, entry.first);
+			retired.push_back(applied.Owner);
 			changed = Renderer.DropImageGraph(applied.Owner, applied.Name) || changed;
 			return true;
 		});
+		// Tiles are shared by content, so they go when their world's last graph does.
+		for (const core::Name owner : retired)
+			if (std::none_of(AppliedImageGraphs.begin(), AppliedImageGraphs.end(), [&](const auto &entry) {
+					return entry.second.Owner == owner;
+				}))
+				ImageGraphMeshes.Forget(Renderer, owner);
 		if (changed) ++VisualResourceRevision;
 		return changed;
 	}

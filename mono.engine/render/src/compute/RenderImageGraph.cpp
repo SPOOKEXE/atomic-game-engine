@@ -385,9 +385,15 @@ namespace engine::render {
 			TimingSequences[slot] = 0;
 		}
 	}
+	void ImageGraphGpuState::AbandonJob(SDL_GPUDevice *device) {
+		for (const auto &image : Job.Pool)
+			imagegraph_gpu_detail::Release(device, image.Texture, image.Extent.Bytes, *this);
+		Job = {};
+	}
 	void ImageGraphGpuState::ReleaseDocument(
 		SDL_GPUDevice *device, TextureTable &table, ImageGraphGpuDocument &graph
 	) {
+		if (Job.Graph == &graph) AbandonJob(device);
 		// SDL defers native destruction until submitted readers complete. Dropping
 		// the public handle now prevents later submissions from reusing it.
 		for (auto &node : graph.Nodes) {
@@ -404,6 +410,10 @@ namespace engine::render {
 		graph = {};
 	}
 	void ImageGraphGpuState::Shutdown(SDL_GPUDevice *device, TextureTable &table) {
+		AbandonJob(device);
+		if (JobFence) SDL_ReleaseGPUFence(device, JobFence);
+		JobFence = nullptr;
+		JobRetryAt = {};
 		for (auto &[key, graph] : Documents) {
 			(void)key;
 			ReleaseDocument(device, table, graph);
@@ -595,6 +605,276 @@ namespace engine::render {
 		}
 	}
 
+	// Starts, continues or finishes the one resident-free evaluation. Every image is
+	// allocated from the job's pool as its node begins and returned after its last reader,
+	// so the live set stays near Execution.LiveBytes whatever the node count.
+	ImageGraphEvaluation Renderer::Impl::AdvanceImageGraphJob(
+		const ImageGraphJobRequest &request,
+		const imagegraph::ExecutionPlan &execution,
+		std::span<SDL_GPUTexture *const> sourceTextures,
+		std::span<const assets::TextureFormat> sourceFormats,
+		const imagegraph::ImageExtent &published,
+		imagegraph::Diagnostic &diagnostic
+	) {
+		using namespace imagegraph_gpu_detail;
+		ENGINE_PROFILE_CAT("imagegraph job slice", core::ProfileCategory::Render);
+		auto &state = ImageGraphs;
+		auto &graph = request.Graph;
+		auto &job = state.Job;
+		const auto now = std::chrono::steady_clock::now();
+		const bool wide = graph.Document.Storage == imagegraph::Precision::Wide;
+		const auto fail = [&](std::string_view node, std::string_view message) {
+			state.AbandonJob(Device);
+			state.JobRetryAt = now + ImageGraphGpuState::JOB_IDLE;
+			Refuse(diagnostic, node, message);
+			return ImageGraphEvaluation::Refused;
+		};
+		const bool mine = job.Graph == &graph && job.Published == request.Published;
+		if (mine) job.Touched = now;
+		if (job.Graph && !mine) {
+			if (now - job.Touched < ImageGraphGpuState::JOB_IDLE) return ImageGraphEvaluation::Pending;
+			state.AbandonJob(Device);
+		}
+		if (state.JobFence) {
+			if (!SDL_QueryGPUFence(Device, state.JobFence)) return ImageGraphEvaluation::Pending;
+			SDL_ReleaseGPUFence(Device, state.JobFence);
+			state.JobFence = nullptr;
+		}
+		if (mine && job.Signature != request.Signature) state.AbandonJob(Device);
+		if (!job.Graph) {
+			if (now < state.JobRetryAt) {
+				Refuse(diagnostic, {}, "GPU imagegraph allocation failed; waiting to retry");
+				return ImageGraphEvaluation::Refused;
+			}
+			// Nothing kept from a smaller version of this graph is read again.
+			for (auto &node : graph.Nodes) {
+				Release(Device, node.Texture, node.Extent.Bytes, state);
+				Release(Device, node.Scratch, ScratchBytes(node.Extent), state);
+				node.Texture = node.Scratch = nullptr;
+				node.AcceptedSignature = 0;
+			}
+			// A full texture table is reported before the work rather than after it.
+			ImageGraphGpuState::Reservation room;
+			if (!state.Reserve(Textures, graph.Owner, request.Published, published.Bytes, room))
+				return fail({}, "texture publication budget exceeded");
+			state.Cancel(Textures, room);
+			job.Graph = &graph;
+			job.Published = request.Published;
+			job.Signature = request.Signature;
+			job.Execution = execution;
+			job.Images.assign(graph.Nodes.size(), -1);
+			job.Readers.assign(graph.Nodes.size(), 0);
+			for (const size_t index : execution.Order)
+				for (const size_t input : graph.Plan.Inputs[index])
+					++job.Readers[input];
+			job.Touched = now;
+		}
+		const size_t target = job.Execution.Target;
+		const auto take = [&](const imagegraph::ImageExtent &extent, SDL_GPUTextureFormat format) -> int32_t {
+			for (size_t index = 0; index < job.Pool.size(); ++index) {
+				auto &image = job.Pool[index];
+				if (!image.Free || image.Extent != extent || image.Format != format) continue;
+				image.Free = false;
+				return static_cast<int32_t>(index);
+			}
+			// Free images of another shape are dropped before the job grows.
+			for (size_t index = 0; index < job.Pool.size(); ++index) {
+				auto &image = job.Pool[index];
+				if (!image.Free || !image.Texture) continue;
+				Release(Device, image.Texture, image.Extent.Bytes, state);
+				image.Texture = nullptr;
+				image.Extent = {};
+				image.Format = SDL_GPU_TEXTUREFORMAT_INVALID;
+			}
+			SDL_GPUTexture *texture = Allocate(
+				Device,
+				extent,
+				format,
+				SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE,
+				state
+			);
+			if (!texture) return -1;
+			job.Pool.push_back({texture, extent, format, false});
+			return static_cast<int32_t>(job.Pool.size() - 1);
+		};
+		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
+		if (!command) return fail({}, "GPU command acquisition failed");
+		const auto cancel = [&](std::string_view node, std::string_view message) {
+			SDL_CancelGPUCommandBuffer(command);
+			return fail(node, message);
+		};
+		uint64_t budget = ImageGraphGpuState::JOB_SLICE_WORK, dispatches = 0;
+		const auto format =
+			wide ? SDL_GPU_TEXTUREFORMAT_R16G16B16A16_UNORM : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+		bool waiting = false;
+		while (budget > 0 && job.Position < job.Execution.Order.size()) {
+			const size_t index = job.Execution.Order[job.Position];
+			const auto &node = graph.Document.Nodes[index];
+			const auto &extent = job.Execution.Extents[index];
+			const auto &inputs = graph.Plan.Inputs[index];
+			if (const auto *source = std::get_if<imagegraph::Source>(&node.Value);
+				source && !sourceTextures[index]) {
+				graph.NeededSource = SourceBinding(graph, *source)->Texture;
+				waiting = true;
+				break;
+			}
+			const bool blur = std::holds_alternative<imagegraph::Blur>(node.Value);
+			if (job.Images[index] < 0 && (job.Images[index] = take(extent, format)) < 0)
+				return cancel(node.Id, "GPU intermediate allocation failed");
+			if (blur && job.Scratch < 0) {
+				const imagegraph::ImageExtent scratch{extent.Width, extent.Height, ScratchBytes(extent)};
+				job.Scratch = take(scratch, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_UNORM);
+				if (job.Scratch < 0) return cancel(node.Id, "GPU blur scratch allocation failed");
+			}
+			ImageGraphGpuUniforms uniforms;
+			const auto input = inputs.empty() ? extent : job.Execution.Extents[inputs[0]];
+			if (!Uniforms(node, extent, input, sourceFormats[index], uniforms, diagnostic)) {
+				const imagegraph::Diagnostic refused = diagnostic;
+				return cancel(refused.Node, refused.Message);
+			}
+			std::array<SDL_GPUTexture *, imagegraph::Limits::MaximumInputs> bound{};
+			bound.fill(FallbackTexture);
+			if (sourceTextures[index]) bound[0] = sourceTextures[index];
+			for (size_t slot = 0; slot < inputs.size(); ++slot)
+				bound[slot] = job.Pool[size_t(job.Images[inputs[slot]])].Texture;
+			SDL_GPUTexture *output = job.Pool[size_t(job.Images[index])].Texture;
+			SDL_GPUComputePipeline *pipeline = wide || (blur && job.Pass == 0) ? state.Wide : state.Compute;
+			if (blur) {
+				uniforms.Control[3] = job.Pass;
+				(job.Pass == 0 ? output : bound[0]) = job.Pool[size_t(job.Scratch)].Texture;
+			}
+			const uint64_t perRow = std::max<uint64_t>(1, job.Execution.Work[index] / extent.Height);
+			const uint64_t fits = std::max<uint64_t>(8, budget / perRow / 8 * 8);
+			const auto rows = static_cast<uint32_t>(std::min<uint64_t>(fits, extent.Height - job.Row));
+			if (!RecordImageGraphNode(
+					command, pipeline, Textures.PixelSampler(), bound, output, uniforms, job.Row, rows
+				))
+				return cancel(node.Id, "GPU compute recording failed");
+			++dispatches;
+			budget -= std::min(budget, perRow * rows);
+			job.Row += rows;
+			if (job.Row < extent.Height) continue;
+			job.Row = 0;
+			if (blur && job.Pass == 0) {
+				job.Pass = 1;
+				continue;
+			}
+			job.Pass = 0;
+			if (blur) {
+				job.Pool[size_t(job.Scratch)].Free = true;
+				job.Scratch = -1;
+			}
+			for (const size_t read : inputs)
+				if (--job.Readers[read] == 0) {
+					job.Pool[size_t(job.Images[read])].Free = true;
+					job.Images[read] = -1;
+				}
+			++job.Position;
+		}
+		job.Dispatches += dispatches;
+		const bool finished = job.Position == job.Execution.Order.size();
+		SDL_GPUTexture *publicationTarget = nullptr;
+		const auto &binding = graph.Document.Outputs[request.Output];
+		if (finished) {
+			const bool copy = request.PublishSlot == 1 && !wide;
+			publicationTarget = Allocate(
+				Device,
+				published,
+				PUBLICATION_FORMATS[request.PublishSlot],
+				SDL_GPU_TEXTUREUSAGE_SAMPLER | (copy ? 0u : SDL_GPU_TEXTUREUSAGE_COLOR_TARGET),
+				state
+			);
+			if (!publicationTarget) return cancel({}, "GPU output allocation failed");
+			SDL_GPUTexture *image = job.Pool[size_t(job.Images[target])].Texture;
+			bool recorded = true;
+			if (copy) {
+				auto *pass = SDL_BeginGPUCopyPass(command);
+				recorded = pass != nullptr;
+				if (pass) {
+					SDL_GPUTextureLocation source{}, destination{};
+					source.texture = image;
+					destination.texture = publicationTarget;
+					SDL_CopyGPUTextureToTexture(
+						pass, &source, &destination, published.Width, published.Height, 1, false
+					);
+					SDL_EndGPUCopyPass(pass);
+				}
+			} else
+				recorded = RecordImageGraphPublication(
+					command,
+					state.Publish[request.PublishSlot],
+					Textures.PixelSampler(),
+					image,
+					publicationTarget,
+					request.PublishSlot == 0
+				);
+			if (!recorded) {
+				Release(Device, publicationTarget, published.Bytes, state);
+				return cancel({}, "GPU publication recording failed");
+			}
+		}
+		if (dispatches == 0 && !finished) {
+			SDL_CancelGPUCommandBuffer(command);
+			return ImageGraphEvaluation::Pending;
+		}
+		ImageGraphGpuState::Reservation reservation;
+		if (finished &&
+			!state.Reserve(Textures, graph.Owner, request.Published, published.Bytes, reservation)) {
+			Release(Device, publicationTarget, published.Bytes, state);
+			return cancel({}, "texture publication budget exceeded");
+		}
+		state.JobFence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+		if (!state.JobFence) {
+			if (finished) {
+				state.Cancel(Textures, reservation);
+				Release(Device, publicationTarget, published.Bytes, state);
+			}
+			return fail({}, "GPU submission failed");
+		}
+		++state.Profile.CommandBuffers;
+		state.Profile.ComputeDispatches += dispatches;
+		core::Metrics::Count("render.imagegraph.dispatches", dispatches);
+		core::Metrics::Count("render.imagegraph.command_buffers", 1);
+		diagnostic = {};
+		if (!finished) return ImageGraphEvaluation::Pending;
+		// SDL keeps a released texture alive until submitted readers complete.
+		auto publication =
+			std::find_if(graph.Publications.begin(), graph.Publications.end(), [&](const auto &entry) {
+				return entry.Name == request.Published;
+			});
+		const size_t retiredBytes = publication == graph.Publications.end() ? 0 : publication->Extent.Bytes;
+		Release(
+			Device,
+			state.Commit(Textures, reservation, publicationTarget, published, binding.Space, binding.Format),
+			retiredBytes,
+			state
+		);
+		const ImageGraphGpuPublication entry{
+			request.Published,
+			publicationTarget,
+			published,
+			binding.Space,
+			binding.Format,
+			request.PublicationSignature
+		};
+		if (publication == graph.Publications.end())
+			graph.Publications.push_back(entry);
+		else
+			*publication = entry;
+		state.AbandonJob(Device);
+		++ResourceEpoch;
+		++state.Profile.Evaluations;
+		state.Profile.CopiedBytes += published.Bytes;
+		core::Metrics::Count("render.imagegraph.published_bytes", published.Bytes);
+		return ImageGraphEvaluation::Updated;
+	}
+
+	core::Name Renderer::ImageGraphNeededSource(core::Name owner, core::Name name) const {
+		if (!State) return {};
+		const auto found = State->ImageGraphs.Documents.find(imagegraph_gpu_detail::Key(owner, name));
+		return found == State->ImageGraphs.Documents.end() ? core::Name{} : found->second.NeededSource;
+	}
+
 	ImageGraphEvaluation Renderer::EvaluateImageGraph(
 		core::Name owner,
 		core::Name name,
@@ -628,6 +908,7 @@ namespace engine::render {
 			if (selected == graph.Document.Outputs.end()) return refuse({}, "selected output does not exist");
 			outputIndex = static_cast<size_t>(selected - graph.Document.Outputs.begin());
 		}
+		graph.NeededSource = {};
 		const size_t targetIndex = graph.Plan.Outputs[outputIndex];
 		const auto space = graph.Document.Outputs[outputIndex].Space;
 		const auto format = graph.Document.Outputs[outputIndex].Format;
@@ -642,7 +923,6 @@ namespace engine::render {
 			if (needed[*node])
 				for (size_t input : graph.Plan.Inputs[*node])
 					needed[input] = 1;
-		bool dirty = false;
 		for (size_t index : graph.Plan.Order) {
 			if (!needed[index]) continue;
 			uint64_t signature = graph.Nodes[index].AuthoredSignature;
@@ -651,20 +931,20 @@ namespace engine::render {
 			if (const auto *source = std::get_if<imagegraph::Source>(&graph.Document.Nodes[index].Value)) {
 				const auto *binding = SourceBinding(graph, *source);
 				sourceTextures[index] = State->Textures.Find(binding->Texture, binding->Owner);
-				if (!sourceTextures[index] ||
-					!State->Textures.FormatOf(binding->Texture, sourceFormats[index], binding->Owner))
+				if (binding->ContentAddressed)
+					sourceFormats[index] = binding->Format;
+				else if (!sourceTextures[index] ||
+						 !State->Textures.FormatOf(binding->Texture, sourceFormats[index], binding->Owner))
 					return refuse(graph.Document.Nodes[index].Id, "resident source is unavailable");
 				if (binding->Owner == owner && binding->Texture == publishedTexture)
 					return refuse(
 						graph.Document.Nodes[index].Id, "an output cannot be its own resident source"
 					);
-				signature = Fold(
-					Fold(signature, Key(binding->Owner, binding->Texture)),
-					State->Textures.RevisionOf(binding->Texture, binding->Owner)
-				);
+				signature = Fold(signature, Key(binding->Owner, binding->Texture));
+				if (!binding->ContentAddressed)
+					signature = Fold(signature, State->Textures.RevisionOf(binding->Texture, binding->Owner));
 			}
 			signatures[index] = signature;
-			dirty = dirty || !graph.Nodes[index].Texture || graph.Nodes[index].AcceptedSignature != signature;
 		}
 		auto publication =
 			std::find_if(graph.Publications.begin(), graph.Publications.end(), [&](const auto &binding) {
@@ -675,8 +955,8 @@ namespace engine::render {
 		if (publication != graph.Publications.end() &&
 			State->Textures.Find(publishedTexture, owner) != publication->Texture)
 			return refuse({}, "published output was replaced by another content owner");
-		if (!dirty && publication != graph.Publications.end() &&
-			publication->Signature == publicationSignature) {
+		// The target's signature covers its whole cone, resident or not.
+		if (publication != graph.Publications.end() && publication->Signature == publicationSignature) {
 			++state.Profile.CacheHits;
 			core::Metrics::Count("render.imagegraph.cache_hits", 1);
 			diagnostic = {};
@@ -693,7 +973,7 @@ namespace engine::render {
 			(void)otherKey;
 			for (const auto &published : other.Publications)
 				for (size_t index : graph.Plan.Order)
-					if (needed[index] && sourceTextures[index] == published.Texture)
+					if (sourceTextures[index] && sourceTextures[index] == published.Texture)
 						return refuse(
 							graph.Document.Nodes[index].Id, "live graph outputs cannot be source feedback"
 						);
@@ -703,8 +983,7 @@ namespace engine::render {
 				return slot.Fence == nullptr;
 			}
 		);
-		if (pending == state.PendingSubmissions.end())
-			return refuse({}, "GPU imagegraph queue is full; retry after completion");
+		if (pending == state.PendingSubmissions.end()) return ImageGraphEvaluation::Pending;
 		const auto started = std::chrono::steady_clock::now();
 		std::array<SDL_GPUTexture *, imagegraph::Limits::MaximumNodes> textures{};
 		std::array<ImageGraphGpuUniforms, imagegraph::Limits::MaximumNodes> uniforms{};
@@ -755,11 +1034,12 @@ namespace engine::render {
 		try {
 			std::array<std::array<uint32_t, 2>, imagegraph::Limits::MaximumNodes> sourceShapes{};
 			for (size_t index : graph.Plan.Order) {
-				if (!needed[index] || !sourceTextures[index]) continue;
-				uint32_t width = 0, height = 0;
-				const auto *binding =
-					SourceBinding(graph, std::get<imagegraph::Source>(graph.Document.Nodes[index].Value));
-				State->Textures.SizeOf(binding->Texture, width, height, binding->Owner);
+				const auto *source = std::get_if<imagegraph::Source>(&graph.Document.Nodes[index].Value);
+				if (!needed[index] || !source) continue;
+				const auto *binding = SourceBinding(graph, *source);
+				uint32_t width = binding->Width, height = binding->Height;
+				if (!binding->ContentAddressed)
+					State->Textures.SizeOf(binding->Texture, width, height, binding->Owner);
 				sourceShapes[index] = {width, height};
 				executionSignature = Fold(Fold(Fold(executionSignature, index), width), height);
 			}
@@ -771,7 +1051,7 @@ namespace engine::render {
 				std::vector<imagegraph::SourceExtent> sources;
 				sources.reserve(graph.Sources.size());
 				for (size_t index : graph.Plan.Order)
-					if (needed[index] && sourceTextures[index])
+					if (needed[index] && sourceShapes[index][0] != 0)
 						sources.push_back(
 							{graph.Document.Nodes[index].Id, sourceShapes[index][0], sourceShapes[index][1]}
 						);
@@ -813,10 +1093,33 @@ namespace engine::render {
 								   publication->Extent != published || publication->Space != space ||
 								   publication->Format != format;
 			if (allocatedPublication) newBytes += published.Bytes;
-			if (state.Profile.ResidentBytes > imagegraph::Limits::MaximumRetainedBytes ||
+			if (execution.PixelWork > ImageGraphGpuState::RESIDENT_WORK ||
+				state.Profile.ResidentBytes > imagegraph::Limits::MaximumRetainedBytes ||
 				newBytes > imagegraph::Limits::MaximumRetainedBytes - state.Profile.ResidentBytes) {
+				allocatedPublication = false;
+				const uint64_t signature = Fold(publicationSignature, executionSignature);
+				const auto result = State->AdvanceImageGraphJob(
+					{graph, publishedTexture, signature, publicationSignature, outputIndex, publishSlot},
+					execution,
+					sourceTextures,
+					sourceFormats,
+					published,
+					diagnostic
+				);
+				graph.Executions[outputIndex] = std::move(execution);
+				graph.ExecutionSignatures[outputIndex] = executionSignature;
+				borrowedExecution = false;
+				return result;
+			}
+			for (size_t index : execution.Order) {
+				const auto *source = std::get_if<imagegraph::Source>(&graph.Document.Nodes[index].Value);
+				if (!source || sourceTextures[index] ||
+					(graph.Nodes[index].Texture && graph.Nodes[index].AcceptedSignature == signatures[index]))
+					continue;
+				allocatedPublication = false;
 				cleanup();
-				return refuse({}, "GPU imagegraph residency budget exceeded");
+				graph.NeededSource = SourceBinding(graph, *source)->Texture;
+				return ImageGraphEvaluation::Pending;
 			}
 			if (!state.Reserve(State->Textures, owner, publishedTexture, published.Bytes, reservation)) {
 				cleanup();

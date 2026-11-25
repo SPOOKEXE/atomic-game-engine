@@ -304,11 +304,16 @@ namespace engine::render {
 				  State->SlotMetalnessMap[entry.Instance],
 				  State->SlotEmissiveMap[entry.Instance],
 				  State->SlotPackedPbrMap[entry.Instance]})
-				for (const auto &entryTile : State->TileSetOf(name))
-					if (std::find(tiles.begin(), tiles.end(), entryTile.Tile) == tiles.end() &&
-						State->Textures.Find(entryTile.Texture, State->SlotContentOwner[entry.Instance]) !=
-							nullptr)
-						tiles.push_back(entryTile.Tile);
+				for (const auto &entryTile : State->TileSetOf(name)) {
+					if (std::find(tiles.begin(), tiles.end(), entryTile.Tile) != tiles.end()) continue;
+					const core::Name tileOwner = State->TextureContentOwnerWithFallback(
+						entryTile.Texture,
+						State->SlotContentOwner[entry.Instance],
+						State->SlotImageGraphWorld[entry.Instance],
+						State->SlotImageGraphFallbackWorld[entry.Instance]
+					);
+					if (State->TileDraws(name, entryTile.Texture, tileOwner)) tiles.push_back(entryTile.Tile);
+				}
 			std::sort(tiles.begin(), tiles.end());
 			if (tiles.empty()) tiles.push_back(0);
 			for (const uint16_t tile : tiles) {
@@ -327,7 +332,7 @@ namespace engine::render {
 				);
 				SDL_GPUTexture *found = State->Textures.Find(texture, owner);
 				const TextureChoice choice = ChooseTexture(
-					found != nullptr, texture.IsValid(), State->Textures.Expecting(texture, owner)
+					found != nullptr, texture.IsValid(), State->AwaitingTexture(texture, owner)
 				);
 				SDL_GPUTexture *sampled = choice == TextureChoice::Named	 ? found
 										  : choice == TextureChoice::Missing ? State->Textures.Missing()
@@ -342,7 +347,7 @@ namespace engine::render {
 					);
 					SDL_GPUTexture *map = State->Textures.Find(name, mapOwner);
 					if (map != nullptr) return map;
-					if (name.IsValid() && !State->Textures.Expecting(name, mapOwner))
+					if (name.IsValid() && !State->AwaitingTexture(name, mapOwner))
 						return State->Textures.Missing();
 					return static_cast<SDL_GPUTexture *>(nullptr);
 				};

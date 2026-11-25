@@ -920,20 +920,35 @@ TEST_CASE(
 	const auto cook = [&] {
 		Document lowered = document;
 		INFO(diagnostic.Message);
-		REQUIRE(meshes.Lower(store, fixture.Render, owner, 1, lowered, diagnostic));
+		std::vector<render::ImageGraphSourceBinding> bindings;
+		REQUIRE(meshes.Lower(store, owner, lowered, bindings, diagnostic));
+		REQUIRE(bindings.size() == 1);
 		REQUIRE(std::holds_alternative<Source>(lowered.Nodes[0].Value));
-		const auto &path = std::get<Source>(lowered.Nodes[0].Value).Path;
-		const std::array bindings{
-			render::ImageGraphSourceBinding{path, core::Name(path), owner, SourceInterpretation::Data}
-		};
 		REQUIRE(fixture.Render.SetImageGraph(owner, graph, lowered, bindings, diagnostic));
+		// The evaluation asks for its tile, which is provided before it is read.
+		REQUIRE(
+			fixture.Render.EvaluateImageGraph(owner, graph, "albedo", output, diagnostic) ==
+			render::ImageGraphEvaluation::Pending
+		);
+		const core::Name needed = fixture.Render.ImageGraphNeededSource(owner, graph);
+		REQUIRE(needed.IsValid());
+		REQUIRE(meshes.Provide(store, fixture.Render, owner, needed, diagnostic));
 		REQUIRE(
 			fixture.Render.EvaluateImageGraph(owner, graph, "albedo", output, diagnostic) ==
 			render::ImageGraphEvaluation::Updated
 		);
 		return CaptureTexture(fixture.Render, output, owner);
 	};
+	const auto settle = [&] {
+		auto result = render::ImageGraphEvaluation::Pending;
+		for (size_t frame = 0; frame < 4; ++frame)
+			result = fixture.Render.EvaluateImageGraph(owner, graph, "albedo", output, diagnostic);
+		return result;
+	};
 	const auto gpu = cook();
+	// Outputs stand without their tile.
+	meshes.Forget(fixture.Render, owner);
+	CHECK(settle() == render::ImageGraphEvaluation::Reused);
 	assets::TextureData expected;
 	expected.Width = first.Width;
 	expected.Height = first.Height;
@@ -954,5 +969,199 @@ TEST_CASE(
 	// A fresh cook of the same seed reproduces the GPU bytes exactly.
 	REQUIRE(fixture.Render.DropImageGraph(owner, graph));
 	CHECK(cook().Bytes == gpu.Bytes);
-	meshes.Forget(fixture.Render, 1);
+	meshes.Forget(fixture.Render, owner);
+}
+
+namespace {
+	// Calls until a sliced evaluation settles, as a host does once per frame.
+	render::ImageGraphEvaluation Settle(
+		render::Renderer &renderer,
+		core::Name owner,
+		core::Name graph,
+		std::string_view output,
+		core::Name published,
+		imagegraph::Diagnostic &diagnostic,
+		size_t &calls
+	) {
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+		for (calls = 1;; ++calls) {
+			const auto result = renderer.EvaluateImageGraph(owner, graph, output, published, diagnostic);
+			if (result != render::ImageGraphEvaluation::Pending ||
+				std::chrono::steady_clock::now() > deadline)
+				return result;
+			SDL_Delay(1);
+		}
+	}
+	// Wide pore-like detail over every node a skin tile graph uses: `count` generators
+	// summed down a chain, then a blur and a normal map.
+	imagegraph::Document DetailGraph(uint32_t size, size_t count) {
+		using namespace imagegraph;
+		Document document{
+			.Nodes = {{"sum0", Solid{size, size, {20, 20, 20, 255}}, {}, {}}},
+			.Outputs = {{"height", "soft", OutputSpace::Linear}, {"normal", "normal", OutputSpace::Linear}},
+			.Parameters = {},
+			.Bindings = {},
+			.Storage = Precision::Wide
+		};
+		for (size_t index = 1; index <= count; ++index) {
+			const std::string id = std::to_string(index);
+			document.Nodes.push_back({"cells" + id, Voronoi{size, size, 4.0 + index, 1}, {}, {}});
+			document.Nodes.push_back({"low" + id, Levels{.OutputMaximum = 0.02}, {"cells" + id}, {}});
+			document.Nodes.push_back(
+				{"sum" + id,
+				 Math{.Operation = MathOperation::Add, .Channels = 7},
+				 {"sum" + std::to_string(index - 1), "low" + id},
+				 {}}
+			);
+		}
+		document.Nodes.push_back({"soft", Blur{3}, {"sum" + std::to_string(count)}, {}});
+		document.Nodes.push_back({"normal", NormalMap{}, {"soft"}, {}});
+		return document;
+	}
+}
+
+TEST_CASE(
+	"GPU graphs past the residency budget publish in slices and match the CPU",
+	"[render][gpu][imagegraph][slow][.]"
+) {
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	const core::Name owner("gpu-imagegraph-sliced"), height("height.png"), normal("normal.png");
+	imagegraph::Diagnostic diagnostic;
+	size_t calls = 0;
+	// Forty-three nodes of 32 MiB each would keep 1.4 GiB resident.
+	const auto document = DetailGraph(2048, 13);
+	const core::Name graph("sliced");
+	REQUIRE(fixture.Render.SetImageGraph(owner, graph, document, {}, diagnostic));
+	const auto before = fixture.Render.ImageGraphProfile();
+	REQUIRE(
+		Settle(fixture.Render, owner, graph, "height", height, diagnostic, calls) ==
+		render::ImageGraphEvaluation::Updated
+	);
+	INFO(diagnostic.Message);
+	CHECK(calls > 1);
+	REQUIRE(
+		Settle(fixture.Render, owner, graph, "normal", normal, diagnostic, calls) ==
+		render::ImageGraphEvaluation::Updated
+	);
+	// Only the two outputs stay resident.
+	CHECK(
+		fixture.Render.ImageGraphProfile().ResidentBytes - before.ResidentBytes == size_t(2048) * 2048 * 4 * 2
+	);
+	CHECK(
+		fixture.Render.EvaluateImageGraph(owner, graph, "normal", normal, diagnostic) ==
+		render::ImageGraphEvaluation::Reused
+	);
+	imagegraph::Plan plan;
+	imagegraph::Image expected;
+	REQUIRE(imagegraph::Compile(document, plan, diagnostic));
+	REQUIRE(imagegraph::Evaluate(document, plan, "height", {}, expected, diagnostic));
+	const auto actual = CaptureTexture(fixture.Render, height, owner);
+	size_t wrong = 0;
+	for (size_t row = 0; row < 2048; ++row)
+		for (size_t byte = 0; byte < 2048 * 4; ++byte) {
+			const int a = std::to_integer<int>(actual.Bytes[row * actual.RowStrideBytes + byte]);
+			const int b = std::to_integer<int>(expected.Pixels[row * 2048 * 4 + byte]);
+			wrong += std::abs(a - b) > 2;
+		}
+	CHECK(wrong < 2048);
+}
+
+TEST_CASE("GPU graphs publish 4096 and 8192 tiles", "[render][gpu][imagegraph][slow][.]") {
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	const core::Name owner("gpu-imagegraph-tiers");
+	for (const uint32_t size : {4096u, 8192u}) {
+		const core::Name graph("tier" + std::to_string(size)), output("tier" + std::to_string(size) + ".png");
+		imagegraph::Diagnostic diagnostic;
+		REQUIRE(fixture.Render.SetImageGraph(owner, graph, DetailGraph(size, 24), {}, diagnostic));
+		size_t calls = 0;
+		const auto result = Settle(fixture.Render, owner, graph, "normal", output, diagnostic, calls);
+		INFO(size << " after " << calls << " calls: " << diagnostic.Message);
+		REQUIRE(result == render::ImageGraphEvaluation::Updated);
+		uint32_t width = 0, rows = 0;
+		REQUIRE(fixture.Render.TextureSize(output, width, rows, owner));
+		CHECK(width == size);
+	}
+}
+
+TEST_CASE(
+	"an editable image factor leaves the other image unchanged and follows its edits",
+	"[render][gpu][imagegraph][slow][.]"
+) {
+	using namespace engine::imagegraph;
+	scene::RegisterSceneClasses();
+	for (const uint32_t size : {256u, 2048u}) {
+		ecs::Store store("imagegraph.editable.factor");
+		render::test::FixtureDevice fixture;
+		fixture.Initialise();
+		const core::Name owner("gpu-imagegraph-factor"), graph("factor"), output("albedo.png");
+		const auto image = store.CreateInstance(scene::EditableImageClass(), "Detail");
+		std::vector<uint8_t> pixels(size_t(size) * size * 4);
+		const auto write = [&](uint8_t green) {
+			for (size_t offset = 0; offset < pixels.size(); offset += 4) {
+				pixels[offset] = pixels[offset + 2] = 0x80;
+				pixels[offset + 1] = green;
+				pixels[offset + 3] = 0;
+			}
+			REQUIRE(scene::EditableImageFromBuffer(store, image, std::as_bytes(std::span(pixels))));
+		};
+		REQUIRE(scene::ResizeEditableImage(store, image, size, size));
+		write(0);
+		render::EditableImageUploader images;
+		REQUIRE(images.Refresh(store, fixture.Render, owner) == 1);
+		const std::string path(scene::EditableImageContentName(store, image).Text());
+		Math darken, offset, apply;
+		darken.Operation = apply.Operation = MathOperation::Multiply;
+		offset.Operation = MathOperation::Add;
+		darken.Channels = offset.Channels = apply.Channels = 7;
+		darken.Value = {0.65, 0.65, 0.65, 1};
+		offset.Value = {0.25, 0.25, 0.25, 0};
+		Channels pick;
+		pick.Picks = {{{0, 1}, {0, 1}, {0, 1}, {-2, 0}}};
+		// Twelve extra nodes of detail put the 2048 graph past the residency budget.
+		Document document = DetailGraph(size, 13);
+		document.Nodes.push_back({"detail", Source{path, SourceInterpretation::Data}, {}, {}});
+		document.Nodes.push_back({"pick", pick, {"detail"}, {}});
+		document.Nodes.push_back({"scaled", darken, {"pick"}, {}});
+		document.Nodes.push_back({"factor", offset, {"scaled"}, {}});
+		document.Nodes.push_back({"albedo", apply, {"soft", "factor"}, {}});
+		document.Outputs = {{"albedo", "albedo", OutputSpace::SRGB}};
+		const std::array bindings{
+			render::ImageGraphSourceBinding{path, core::Name(path), owner, SourceInterpretation::Data}
+		};
+		Diagnostic diagnostic;
+		REQUIRE(fixture.Render.SetImageGraph(owner, graph, document, bindings, diagnostic));
+		size_t calls = 0;
+		const auto check = [&] {
+			INFO(size << " " << diagnostic.Message);
+			REQUIRE(
+				Settle(fixture.Render, owner, graph, "albedo", output, diagnostic, calls) ==
+				render::ImageGraphEvaluation::Updated
+			);
+			Plan plan;
+			Image expected;
+			REQUIRE(Compile(document, plan, diagnostic));
+			const TypedSourceResolver sources = [&](const Source &, Image &out, std::string &) {
+				out.Width = out.Height = size;
+				out.Pixels.resize(pixels.size());
+				std::memcpy(out.Pixels.data(), pixels.data(), pixels.size());
+				return true;
+			};
+			REQUIRE(EvaluateTyped(document, plan, "albedo", sources, expected, diagnostic));
+			const auto actual = CaptureTexture(fixture.Render, output, owner);
+			size_t wrong = 0;
+			for (size_t row = 0; row < size; ++row)
+				for (size_t byte = 0; byte < size_t(size) * 4; ++byte)
+					wrong += std::abs(
+								 std::to_integer<int>(actual.Bytes[row * actual.RowStrideBytes + byte]) -
+								 std::to_integer<int>(expected.Pixels[row * size * 4 + byte])
+							 ) > 2;
+			CHECK(wrong < size);
+		};
+		check();
+		write(0xff);
+		REQUIRE(images.Refresh(store, fixture.Render, owner) == 1);
+		check();
+	}
 }

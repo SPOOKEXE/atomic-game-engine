@@ -2,7 +2,10 @@
 
 #include <engine/imagegraph/Document.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <functional>
+#include <vector>
 
 namespace engine::imagegraph::detail {
 	// Intermediate bytes per pixel for a document's precision.
@@ -56,5 +59,63 @@ namespace engine::imagegraph::detail {
 	inline bool MatchingInputs(const Operation &operation) {
 		return std::holds_alternative<Blend>(operation) || std::holds_alternative<Math>(operation) ||
 			   std::holds_alternative<Channels>(operation) || std::holds_alternative<Warp>(operation);
+	}
+	// A depth-first order over the nodes `target` reaches that keeps few images live:
+	// at each node the input whose subtree peaks highest above what it leaves runs first.
+	inline std::vector<size_t>
+	LiveOrder(const Plan &plan, size_t target, const std::vector<ImageExtent> &extents) {
+		std::vector<size_t> peak(extents.size());
+		std::vector<uint8_t> needed(extents.size());
+		std::vector<std::vector<size_t>> inputs(extents.size());
+		needed[target] = 1;
+		for (auto node = plan.Order.rbegin(); node != plan.Order.rend(); ++node)
+			if (needed[*node])
+				for (const size_t input : plan.Inputs[*node])
+					needed[input] = 1;
+		for (const size_t node : plan.Order) {
+			if (!needed[node]) continue;
+			inputs[node] = plan.Inputs[node];
+			std::stable_sort(inputs[node].begin(), inputs[node].end(), [&](size_t a, size_t b) {
+				return peak[a] - extents[a].Bytes > peak[b] - extents[b].Bytes;
+			});
+			size_t held = 0;
+			for (const size_t input : inputs[node]) {
+				peak[node] = std::max(peak[node], held + peak[input]);
+				held += extents[input].Bytes;
+			}
+			peak[node] = std::max(peak[node], held + extents[node].Bytes);
+		}
+		std::vector<size_t> order;
+		std::vector<uint8_t> visited(extents.size());
+		const std::function<void(size_t)> visit = [&](size_t node) {
+			if (visited[node]) return;
+			visited[node] = 1;
+			for (const size_t input : inputs[node])
+				visit(input);
+			order.push_back(node);
+		};
+		visit(target);
+		return order;
+	}
+	// Readers of each node inside `order`, counting one per connected input.
+	inline std::vector<uint32_t> Readers(const Plan &plan, const std::vector<size_t> &order) {
+		std::vector<uint32_t> readers(plan.Inputs.size());
+		for (const size_t node : order)
+			for (const size_t input : plan.Inputs[node])
+				++readers[input];
+		return readers;
+	}
+	// Peak bytes when `order` runs and each image is freed after its last reader.
+	inline size_t
+	LiveBytes(const Plan &plan, const std::vector<size_t> &order, const std::vector<ImageExtent> &extents) {
+		std::vector<uint32_t> readers = Readers(plan, order);
+		size_t live = 0, peak = 0;
+		for (const size_t node : order) {
+			live += extents[node].Bytes;
+			peak = std::max(peak, live);
+			for (const size_t input : plan.Inputs[node])
+				if (--readers[input] == 0) live -= extents[input].Bytes;
+		}
+		return peak;
 	}
 }

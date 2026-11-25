@@ -59,7 +59,7 @@ namespace engine::imagegraph {
 				std::min(double(height), std::ceil(*std::max_element(ys.begin(), ys.end())));
 			if (left >= right || top >= bottom) continue;
 			work += uint64_t(right - left) * uint64_t(bottom - top);
-			if (work > Limits::MaximumPixelWork)
+			if (work > Limits::MaximumRasterWork)
 				return Refuse(diagnostic, "mesh rasterization work budget exceeded");
 			for (auto y = uint32_t(top); y < uint32_t(bottom); ++y)
 				for (auto x = uint32_t(left); x < uint32_t(right); ++x) {

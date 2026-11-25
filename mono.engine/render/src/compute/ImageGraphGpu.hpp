@@ -12,6 +12,7 @@
 #include <SDL3/SDL_gpu.h>
 
 #include <array>
+#include <chrono>
 #include <unordered_map>
 
 namespace engine::render {
@@ -54,11 +55,55 @@ namespace engine::render {
 		uint64_t GeometrySignature = 0;
 		std::vector<imagegraph::ExecutionPlan> Executions;
 		std::vector<uint64_t> ExecutionSignatures;
+		// Content-addressed source texture the last Pending evaluation waits for.
+		core::Name NeededSource;
+	};
+
+	// One evaluation too large to keep resident, recorded in slices. Intermediates come
+	// from a pool and return to it after their last reader; nothing survives the job.
+	struct ImageGraphGpuJob {
+		struct Pooled {
+			SDL_GPUTexture *Texture = nullptr;
+			imagegraph::ImageExtent Extent;
+			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
+			bool Free = true;
+		};
+		const ImageGraphGpuDocument *Graph = nullptr;
+		core::Name Published;
+		uint64_t Signature = 0;
+		imagegraph::ExecutionPlan Execution;
+		std::vector<uint32_t> Readers;
+		// Pool index of each node's image, or -1.
+		std::vector<int32_t> Images;
+		std::vector<Pooled> Pool;
+		int32_t Scratch = -1;
+		// Next node in Execution.Order, its pass and its first unrecorded row.
+		size_t Position = 0;
+		uint32_t Pass = 0;
+		uint32_t Row = 0;
+		uint64_t Dispatches = 0;
+		std::chrono::steady_clock::time_point Touched{};
+	};
+
+	// What one AdvanceImageGraphJob call evaluates and where it publishes.
+	struct ImageGraphJobRequest {
+		ImageGraphGpuDocument &Graph;
+		core::Name Published;
+		uint64_t Signature = 0;
+		uint64_t PublicationSignature = 0;
+		size_t Output = 0;
+		size_t PublishSlot = 0;
 	};
 
 	struct ImageGraphGpuState {
 		static constexpr size_t MAXIMUM_GRAPHS = 64;
 		static constexpr size_t MAXIMUM_PENDING = 8;
+		// Pixel work one job slice records; the next waits for its fence.
+		static constexpr uint64_t JOB_SLICE_WORK = uint64_t(256) * 1024 * 1024;
+		// Pixel work one resident evaluation may submit at once.
+		static constexpr uint64_t RESIDENT_WORK = uint64_t(1024) * 1024 * 1024;
+		// A job nobody asked for in this long is abandoned for the next graph.
+		static constexpr std::chrono::seconds JOB_IDLE{2};
 		// Each node may retire its texture and a blur scratch, plus one publication.
 		static constexpr size_t MAXIMUM_RETIRED = imagegraph::Limits::MaximumNodes * 2 + 1;
 		struct Pending {
@@ -78,6 +123,10 @@ namespace engine::render {
 		std::array<SDL_GPUGraphicsPipeline *, 4> Publish{};
 		std::unordered_map<uint64_t, ImageGraphGpuDocument> Documents;
 		std::array<Pending, MAXIMUM_PENDING> PendingSubmissions{};
+		ImageGraphGpuJob Job;
+		SDL_GPUFence *JobFence = nullptr;
+		// Set after a job's allocation fails, so the retry does not run every frame.
+		std::chrono::steady_clock::time_point JobRetryAt{};
 		VulkanTimestamps Timestamps;
 		std::array<uint64_t, VulkanTimestamps::SLOTS> TimingSequences{};
 		ImageGraphStatistics Profile;
@@ -98,18 +147,22 @@ namespace engine::render {
 		);
 		void Touch(TextureTable &, core::Name owner, core::Name name);
 		void Collect(SDL_GPUDevice *);
+		void AbandonJob(SDL_GPUDevice *);
 		void ReleaseDocument(SDL_GPUDevice *, TextureTable &, ImageGraphGpuDocument &);
 		void Shutdown(SDL_GPUDevice *, TextureTable &);
 	};
 
-	// Native node family with up to four sampled inputs. Every invocation writes one bounded image.
+	// Native node family with up to four sampled inputs. Writes `rows` rows of
+	// one bounded image from `firstRow`, a multiple of eight; zero rows means all of them.
 	bool RecordImageGraphNode(
 		SDL_GPUCommandBuffer *,
 		SDL_GPUComputePipeline *,
 		SDL_GPUSampler *,
 		const std::array<SDL_GPUTexture *, imagegraph::Limits::MaximumInputs> &,
 		SDL_GPUTexture *,
-		const ImageGraphGpuUniforms &
+		const ImageGraphGpuUniforms &,
+		uint32_t firstRow = 0,
+		uint32_t rows = 0
 	);
 	// Draws an intermediate into a publication target; decode applies only to sRGB RGBA8.
 	bool RecordImageGraphPublication(

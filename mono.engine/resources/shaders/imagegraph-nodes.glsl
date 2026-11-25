@@ -15,7 +15,7 @@ layout(set = 2, binding = 0, std140) uniform Node {
 	ivec4 Region;	// crop/flip offsets, seeds, input presence, vector size or channel picks
 	vec4 Colour;
 	vec4 Affine;
-	vec4 Parameters;
+	vec4 Parameters;	// transform offset, blend opacity, first row of this dispatch
 	vec4 Values[2];
 	vec4 StopPositions[4];
 	vec4 StopColours[16];
@@ -263,7 +263,7 @@ float WaveAt(vec2 uv) {
 }
 
 void main() {
-	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy) + ivec2(0, int(node.Parameters.w));
 	if (any(greaterThanEqual(pixel, node.Extents.xy))) return;
 	vec4 result = vec4(0.0);
 	uint kind = node.Control.x;

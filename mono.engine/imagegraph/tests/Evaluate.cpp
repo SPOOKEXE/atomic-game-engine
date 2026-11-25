@@ -271,28 +271,40 @@ TEST_CASE(
 		CHECK(diagnostic.Message.find("matching") != std::string::npos);
 	}
 	SECTION("pixel work") {
-		document = {
-			.Nodes =
-				{{"solid", Solid{4096, 4096}, {}, {}},
-				 {"blur", Blur{Limits::MaximumBlurRadius}, {"solid"}, {}}},
-			.Outputs = {{"main", "blur"}}
-		};
+		document = {.Nodes = {{"solid", Solid{8192, 8192}, {}, {}}}, .Outputs = {{"main", "blur4"}}};
+		for (size_t index = 1; index <= 4; index++)
+			document.Nodes.push_back(
+				{"blur" + std::to_string(index),
+				 Blur{Limits::MaximumBlurRadius},
+				 {index == 1 ? "solid" : "blur" + std::to_string(index - 1)},
+				 {}}
+			);
 		REQUIRE(Compile(document, plan, diagnostic));
 		CHECK_FALSE(Evaluate(document, plan, {}, {}, output, diagnostic));
 		CHECK(diagnostic.Message.find("pixel work") != std::string::npos);
 	}
-	SECTION("retained bytes") {
-		document = {.Nodes = {{"solid", Solid{4096, 4096}, {}, {}}}, .Outputs = {{"main", "flip16"}}};
-		for (size_t index = 1; index <= 16; index++)
+	SECTION("live bytes") {
+		// Twenty wide 8192 squared images of 512 MiB, all read again after the last is made.
+		document = {.Nodes = {{"solid", Solid{8192, 8192}, {}, {}}}, .Outputs = {{"main", "sum40"}}};
+		document.Storage = Precision::Wide;
+		for (size_t index = 1; index <= 20; index++)
 			document.Nodes.push_back(
 				{"flip" + std::to_string(index),
 				 Flip{},
 				 {index == 1 ? "solid" : "flip" + std::to_string(index - 1)},
 				 {}}
 			);
+		for (size_t index = 21; index <= 40; index++)
+			document.Nodes.push_back(
+				{"sum" + std::to_string(index),
+				 Math{},
+				 {index == 21 ? "flip20" : "sum" + std::to_string(index - 1),
+				  "flip" + std::to_string(41 - index)},
+				 {}}
+			);
 		REQUIRE(Compile(document, plan, diagnostic));
 		CHECK_FALSE(Evaluate(document, plan, {}, {}, output, diagnostic));
-		CHECK(diagnostic.Message.find("retained") != std::string::npos);
+		CHECK(diagnostic.Message.find("live image") != std::string::npos);
 	}
 	Same(output, Asymmetric());
 }

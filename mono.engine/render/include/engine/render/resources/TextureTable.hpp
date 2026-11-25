@@ -110,8 +110,9 @@ namespace engine::render {
 		// How much device memory the table will hold, in bytes.
 		//
 		// Bounds device memory reachable from content. Sized for an Ultra skin
-		// body: an 8192 face tile and six 4096 tiles per map, with mips.
-		static constexpr size_t MAXIMUM_BYTES = size_t(2048) * 1024u * 1024u;
+		// body: an 8192 face tile and six 4096 tiles for each of four RGBA8 maps
+		// (2.5 GiB), its detail sources and the rasters its bake is reading.
+		static constexpr size_t MAXIMUM_BYTES = size_t(6144) * 1024u * 1024u;
 
 		// A source copy exists only for exact owner-scoped export. The individual
 		// and aggregate limits keep decoded CPU pixels from becoming a second,

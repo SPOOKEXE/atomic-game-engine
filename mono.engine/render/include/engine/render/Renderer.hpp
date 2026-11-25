@@ -409,6 +409,9 @@ namespace engine::render {
 		// Evaluates only the selected dirty dependency cone before consumers record.
 		// Publishes an ordinary texture in `owner`; unchanged calls submit no work.
 		// Same-size updates preserve TextureHandle. Refusal retains accepted pixels.
+		// A graph too large to keep resident runs as one job at a time, a slice of pixel
+		// work per call, freeing each intermediate after its last reader; those calls
+		// return Pending.
 		ImageGraphEvaluation EvaluateImageGraph(
 			core::Name owner,
 			core::Name name,
@@ -416,6 +419,10 @@ namespace engine::render {
 			core::Name publishedTexture,
 			imagegraph::Diagnostic &diagnostic
 		);
+
+		// The content-addressed source the last Pending evaluation of this graph waits for,
+		// or an invalid name when it waits for nothing.
+		core::Name ImageGraphNeededSource(core::Name owner, core::Name name) const;
 
 		// Releases this graph's intermediates and outputs without touching its sources.
 		bool DropImageGraph(core::Name owner, core::Name name);

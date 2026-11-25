@@ -46,6 +46,7 @@
 #include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
+#include <engine/imagegraph/Reference.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/capture/DataFactoryHookBind.hpp>
 #include <engine/render/capture/VisibilityObservation.hpp>
@@ -106,6 +107,14 @@ namespace engine::render {
 		bool EnsureImageGraphPipelines();
 		// Creates the publication pipeline for one target slot on first use.
 		bool EnsureImageGraphPublication(size_t slot);
+		ImageGraphEvaluation AdvanceImageGraphJob(
+			const ImageGraphJobRequest &,
+			const imagegraph::ExecutionPlan &,
+			std::span<SDL_GPUTexture *const> sourceTextures,
+			std::span<const assets::TextureFormat> sourceFormats,
+			const imagegraph::ImageExtent &published,
+			imagegraph::Diagnostic &
+		);
 
 		using InstalledPipeline = engine::render::InstalledPipeline;
 		using PipelineCompilation = engine::render::PipelineCompilation;
@@ -1522,7 +1531,7 @@ namespace engine::render {
 		std::vector<float> SlotTransmissionFactor;
 		std::vector<float> SlotIndexOfRefraction;
 		std::vector<float> SlotThickness;
-		// Skin shading per slot. SlotSkin: enabled, profile id, scatter radius,
+		// Skin shading per slot. SlotSkin: 1 + SkinMode or 0 off, profile id, scatter radius,
 		// thickness. SlotSkinLobe: second lobe roughness and weight.
 		std::vector<core::Name> SlotThicknessMap;
 		std::vector<core::Name> SlotSecondaryRoughnessMap;
@@ -1747,6 +1756,17 @@ namespace engine::render {
 		// Parsed UDIM sets by slot name id. A set is one interned name, so its
 		// parse never changes and is kept for the renderer's life.
 		std::unordered_map<uint32_t, std::vector<scene::UdimTile>> TileSets;
+		// Content on its way: requested, or an image graph output not published yet.
+		bool AwaitingTexture(const core::Name &name, core::Name owner) const {
+			return Textures.Expecting(name, owner) ||
+				   (name.IsValid() && imagegraph::IsReference(name.Text()));
+		}
+		// Whether a set's tile draws. An explicit set's tiles always do, with the slot's
+		// default until their texture arrives; a prefix set only probes for its tiles.
+		bool TileDraws(core::Name set, const core::Name &texture, core::Name owner) const {
+			return !set.Text().starts_with("udim://") || Textures.Find(texture, owner) != nullptr ||
+				   AwaitingTexture(texture, owner);
+		}
 		const std::vector<scene::UdimTile> &TileSetOf(core::Name name) {
 			auto [found, inserted] = TileSets.try_emplace(name.Id());
 			if (inserted) found->second = scene::ExpandTileSet(name.Text());

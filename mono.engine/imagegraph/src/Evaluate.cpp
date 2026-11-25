@@ -22,17 +22,17 @@ namespace engine::imagegraph {
 			diagnostic = {std::string(node.substr(0, 128)), std::string(message.substr(0, 4096))};
 			return false;
 		}
-		// Count declared work and retained results before any resolver or pixel allocation.
+		// Count declared work and peak live results before any resolver or pixel allocation.
 		// Source extents remain unknown until decoded and are checked by the execution gate.
 		bool Preflight(
 			const Document &document,
 			const Plan &plan,
 			const std::vector<uint8_t> &needed,
+			size_t target,
 			Diagnostic &diagnostic
 		) {
 			const size_t bytesPerPixel = detail::StorageBytes(document.Storage);
 			std::vector<ImageExtent> extents(document.Nodes.size());
-			size_t retained = 0;
 			uint64_t work = 0;
 			for (size_t index : plan.Order) {
 				if (!needed[index] || std::holds_alternative<Source>(document.Nodes[index].Value)) continue;
@@ -44,17 +44,15 @@ namespace engine::imagegraph {
 				extents[index] = extent;
 				const uint64_t pixels = uint64_t(extent.Width) * extent.Height *
 										detail::WorkPerPixel(document.Nodes[index].Value);
-				if (extent.Bytes > Limits::MaximumRetainedBytes - retained)
-					return EvaluationFailure(
-						diagnostic, document.Nodes[index].Id, "retained image budget exceeded"
-					);
 				if (pixels > Limits::MaximumPixelWork - work)
 					return EvaluationFailure(
 						diagnostic, document.Nodes[index].Id, "pixel work budget exceeded"
 					);
-				retained += extent.Bytes;
 				work += pixels;
 			}
+			if (detail::LiveBytes(plan, detail::LiveOrder(plan, target, extents), extents) >
+				Limits::MaximumLiveBytes)
+				return EvaluationFailure(diagnostic, document.Nodes[target].Id, "live image budget exceeded");
 			return true;
 		}
 
@@ -508,7 +506,7 @@ namespace engine::imagegraph {
 				if (needed[*node])
 					for (size_t input : plan.Inputs[*node])
 						needed[input] = 1;
-			if (!Preflight(*document, plan, needed, diagnostic)) return false;
+			if (!Preflight(*document, plan, needed, target, diagnostic)) return false;
 			std::vector<std::optional<Buffer>> results(document->Nodes.size());
 			std::vector<SourceExtent> extents;
 			size_t retainedSources = 0;
@@ -555,8 +553,8 @@ namespace engine::imagegraph {
 			if (!Prepare(*document, plan, output, extents, execution, diagnostic)) return false;
 			// The needed nodes run as an ang graph: one definition per document
 			// node whose Evaluate is that node's kernel, image buffers as blobs and
-			// the retained-image limit as the runner budget, so a consumed
-			// intermediate is the first thing evicted when the budget is tight.
+			// the plan's peak as the runner budget, so consumed intermediates are
+			// evicted as the run goes.
 			ang::Registry types;
 			types.DefineType({.Id = "image", .Bytes = [](const ang::Value &value) {
 								  const ang::Blob *blob = value.Get<ang::Blob>();
@@ -564,11 +562,7 @@ namespace engine::imagegraph {
 							  }});
 			ang::Graph graph;
 			Diagnostic kernelFailure;
-			// Sources were decoded above and are graph nodes too, so this walks the
-			// compile order rather than the execution order.
-			std::vector<size_t> members;
-			for (const size_t index : plan.Order)
-				if (needed[index]) members.push_back(index);
+			const std::vector<size_t> &members = execution.Order;
 			for (const size_t index : members) {
 				const auto &node = document->Nodes[index];
 				ang::NodeDef def{
@@ -577,6 +571,9 @@ namespace engine::imagegraph {
 				for (size_t slot = 0; slot < plan.Inputs[index].size(); ++slot) {
 					def.Inputs.push_back({.Name = "in" + std::to_string(slot), .Type = "image"});
 				}
+				// Runs after the previous node in the order, which makes every wave one
+				// node: breadth-first waves would hold every branch's images at once.
+				def.Inputs.push_back({.Name = "after", .Type = "image", .Optional = true});
 				// Each node's identity in the blob is its operation and position in
 				// the plan, which is all a pure kernel's output depends on here.
 				const uint64_t identity = ang::HashMix(Fingerprint(node.Value), index) | 1u;
@@ -637,12 +634,23 @@ namespace engine::imagegraph {
 					);
 				}
 			}
+			for (size_t position = 1; position < members.size(); ++position)
+				graph.Apply(
+					ang::edit::AddLink{
+						{document->Nodes[members[position - 1]].Id,
+						 "image",
+						 document->Nodes[members[position]].Id,
+						 "after"}
+					}
+				);
 			ang::Plan compiled;
 			const ang::CompileResult compiledResult =
 				ang::Compile(graph, types, {.Runs = ang::Domain::Tool}, compiled);
 			if (!compiledResult.Ok)
 				return EvaluationFailure(diagnostic, {}, compiledResult.Diagnostics.front().Message);
-			ang::Runner runner(std::move(compiled), {.BudgetBytes = Limits::MaximumRetainedBytes});
+			// Host buffers hold sixteen bits per channel at either precision.
+			const size_t budget = execution.LiveBytes * (wide ? 1 : 2);
+			ang::Runner runner(std::move(compiled), {.BudgetBytes = budget});
 			const ang::RunReport report = runner.Run();
 			for (size_t index = 0; index < report.Nodes.size(); ++index) {
 				const ang::NodeReport &entry = report.Nodes[index];

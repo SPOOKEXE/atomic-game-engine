@@ -11,11 +11,13 @@
 
 #include <algorithm>
 #include <assetc/ImageGraph.hpp>
+#include <chrono>
 #include <cstdio>
 #include <imgui.h>
 #include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
 #include <studio/PropertySelection.hpp>
+#include <thread>
 #include <unordered_set>
 
 namespace studio {
@@ -198,9 +200,23 @@ namespace studio {
 						state.PreviewOwner, state.PreviewNames[0], document, bindings, diagnostic
 					))
 					return false;
-				const auto evaluation = Renderer.EvaluateImageGraph(
-					state.PreviewOwner, state.PreviewNames[0], output, state.PreviewNames[1], diagnostic
-				);
+				const auto evaluate = [&] {
+					return Renderer.EvaluateImageGraph(
+						state.PreviewOwner, state.PreviewNames[0], output, state.PreviewNames[1], diagnostic
+					);
+				};
+				auto evaluation = evaluate();
+				// A preview is one request, so a sliced evaluation is waited out, briefly.
+				const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+				while (evaluation == render::ImageGraphEvaluation::Pending &&
+					   std::chrono::steady_clock::now() < deadline) {
+					std::this_thread::sleep_for(std::chrono::milliseconds(1));
+					evaluation = evaluate();
+				}
+				if (evaluation == render::ImageGraphEvaluation::Pending) {
+					diagnostic = {{}, "GPU preview did not finish in time"};
+					return false;
+				}
 				if (evaluation == render::ImageGraphEvaluation::Refused) return false;
 				preview.Handle = Renderer.TextureHandle(state.PreviewNames[1], state.PreviewOwner);
 				if (preview.Handle == nullptr ||

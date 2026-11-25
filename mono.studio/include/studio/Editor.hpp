@@ -3121,6 +3121,8 @@ namespace studio {
 			std::optional<engine::imagegraph::Document> Runtime;
 			// Signature of the lowered mesh attribute sources last installed.
 			uint64_t Lowered = 0;
+			// Last refusal logged for this graph.
+			std::string Reported;
 			// Whether the graph appeared in the latest live scan.
 			bool Seen = false;
 		};

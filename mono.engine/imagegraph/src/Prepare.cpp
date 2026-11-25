@@ -55,6 +55,7 @@ namespace engine::imagegraph {
 			execution.Target = plan.Outputs[selected];
 			execution.Output = selected;
 			execution.Extents.resize(document->Nodes.size());
+			execution.Work.resize(document->Nodes.size());
 			std::vector<uint8_t> needed(document->Nodes.size());
 			needed[execution.Target] = 1;
 			for (auto node = plan.Order.rbegin(); node != plan.Order.rend(); ++node)
@@ -110,15 +111,18 @@ namespace engine::imagegraph {
 				}
 				const uint64_t work =
 					uint64_t(extent.Width) * extent.Height * detail::WorkPerPixel(node.Value);
-				if (extent.Bytes > Limits::MaximumRetainedBytes - execution.RetainedBytes)
-					return AdmissionFailure(diagnostic, node.Id, "retained image budget exceeded");
 				if (work > Limits::MaximumPixelWork - execution.PixelWork)
 					return AdmissionFailure(diagnostic, node.Id, "pixel work budget exceeded");
-				execution.RetainedBytes += extent.Bytes;
 				execution.PixelWork += work;
+				execution.Work[index] = work;
 				execution.Extents[index] = extent;
-				execution.Order.push_back(index);
 			}
+			execution.Order = detail::LiveOrder(plan, execution.Target, execution.Extents);
+			execution.LiveBytes = detail::LiveBytes(plan, execution.Order, execution.Extents);
+			if (execution.LiveBytes > Limits::MaximumLiveBytes)
+				return AdmissionFailure(
+					diagnostic, document->Nodes[execution.Target].Id, "live image budget exceeded"
+				);
 			out = std::move(execution);
 			diagnostic = {};
 			return true;

@@ -37,11 +37,11 @@ TEST_CASE(
 	CHECK(execution.Extents[1] == ImageExtent{4, 3, 48});
 	CHECK(execution.Extents[2] == ImageExtent{4, 3, 48});
 	CHECK(execution.Extents[3] == ImageExtent{});
-	CHECK(execution.RetainedBytes == 120);
+	CHECK(execution.LiveBytes == 96);
 	CHECK(execution.PixelWork == 6 + 48 + 12);
 	REQUIRE(Prepare(document, plan, "original", sources, execution, diagnostic));
 	CHECK(execution.Order == std::vector<size_t>{0});
-	CHECK(execution.RetainedBytes == 24);
+	CHECK(execution.LiveBytes == 24);
 }
 TEST_CASE(
 	"shared admission refuses missing stale incompatible or oversized metadata without altering accepted "
@@ -100,11 +100,11 @@ TEST_CASE(
 		.Nodes = {{"source", Source{"source.png"}, {}, {}}, {"flip", Flip{}, {"source"}, {}}},
 		.Outputs = {{"main", "flip"}}
 	};
-	// Seventeen 4096 squared RGBA8 images exceed the 1 GiB retained budget.
+	// Fifteen blurs of 258 passes over an 8192 squared source pass the 1024 allowed.
 	for (size_t index = 2; index <= 16; ++index)
 		document.Nodes.push_back(
 			{"flip" + std::to_string(index),
-			 Flip{},
+			 Blur{64},
 			 {index == 2 ? "flip" : "flip" + std::to_string(index - 1)},
 			 {}}
 		);
@@ -112,10 +112,10 @@ TEST_CASE(
 	Plan plan;
 	Diagnostic diagnostic;
 	REQUIRE(Compile(document, plan, diagnostic));
-	const std::array<SourceExtent, 1> sources{{{"source", 4096, 4096}}};
+	const std::array<SourceExtent, 1> sources{{{"source", 8192, 8192}}};
 	ExecutionPlan execution;
 	CHECK_FALSE(Prepare(document, plan, {}, sources, execution, diagnostic));
-	CHECK(diagnostic.Message.find("retained") != std::string::npos);
+	CHECK(diagnostic.Message.find("pixel work") != std::string::npos);
 }
 TEST_CASE("typed source interpretation and output space preserve numeric bytes", "[imagegraph][prepare]") {
 	Document document{
@@ -147,37 +147,58 @@ TEST_CASE("typed source interpretation and output space preserve numeric bytes",
 	CHECK(diagnostic.Message.find("typed") != std::string::npos);
 }
 
-TEST_CASE(
-	"shared admission accepts exact memory and work ceilings and rejects the next retained image",
-	"[imagegraph][prepare]"
-) {
-	// Eight wide 4096 squared images fill 1 GiB. The source and seven nodes declare
-	// 1 + 30 + 22 + 4 + 4 + 1 + 1 + 1 = 64 pixel passes, exactly 2^30 pixel work.
+TEST_CASE("admission counts images live at once and rejects the next work pass", "[imagegraph][prepare]") {
+	// Two wide 4096 squared images are live at a time down the chain, whatever its length.
+	constexpr uint64_t PIXELS = uint64_t(4096) * 4096;
 	Document document{
-		.Nodes =
-			{{"source", Source{"source.png"}, {}, {}},
-			 {"wide", Blur{7}, {"source"}, {}},
-			 {"narrow", Blur{5}, {"wide"}, {}},
-			 {"normal1", NormalMap{}, {"narrow"}, {}},
-			 {"normal2", NormalMap{}, {"normal1"}, {}},
-			 {"flip1", Flip{}, {"normal2"}, {}},
-			 {"flip2", Flip{}, {"flip1"}, {}},
-			 {"flip3", Flip{}, {"flip2"}, {}}},
-		.Outputs = {{"main", "flip3"}},
+		.Nodes = {{"source", Source{"source.png"}, {}, {}}},
+		.Outputs = {{"main", "blur15"}},
 		.Storage = Precision::Wide
 	};
+	// One pass for the source and 258 per blur, against 4096 allowed at this size:
+	// fifteen blurs fit and sixteen do not.
+	for (size_t index = 1; index <= 15; ++index)
+		document.Nodes.push_back(
+			{"blur" + std::to_string(index),
+			 Blur{64},
+			 {index == 1 ? "source" : "blur" + std::to_string(index - 1)},
+			 {}}
+		);
 	Diagnostic diagnostic;
 	Plan plan;
 	ExecutionPlan execution;
 	const std::array<SourceExtent, 1> sources{{{"source", 4096, 4096}}};
 	REQUIRE(Compile(document, plan, diagnostic));
 	REQUIRE(Prepare(document, plan, {}, sources, execution, diagnostic));
-	CHECK(execution.RetainedBytes == Limits::MaximumRetainedBytes);
-	CHECK(execution.PixelWork == Limits::MaximumPixelWork);
+	CHECK(execution.LiveBytes == PIXELS * 8 * 2);
+	CHECK(execution.PixelWork == PIXELS * (1 + 15 * 258));
 	const auto accepted = execution;
-	document.Nodes.push_back({"flip4", Flip{}, {"flip3"}, {}});
-	document.Outputs[0].Node = "flip4";
+	document.Nodes.push_back({"blur16", Blur{64}, {"blur15"}, {}});
+	document.Outputs[0].Node = "blur16";
 	REQUIRE(Compile(document, plan, diagnostic));
 	CHECK_FALSE(Prepare(document, plan, {}, sources, execution, diagnostic));
+	CHECK(diagnostic.Message.find("pixel work") != std::string::npos);
 	CHECK(execution == accepted);
+}
+
+TEST_CASE("a wide fan of branches runs depth first", "[imagegraph][prepare]") {
+	// Forty generators summed pairwise down a chain: breadth first would hold all forty.
+	Document document{.Nodes = {{"n0", Noise{64, 64}, {}, {}}}, .Outputs = {{"main", "sum39"}}};
+	for (size_t index = 1; index < 40; ++index) {
+		const std::string noise = "n" + std::to_string(index), sum = "sum" + std::to_string(index);
+		document.Nodes.push_back({noise, Noise{64, 64}, {}, {}});
+		document.Nodes.push_back(
+			{sum, Math{}, {index == 1 ? "n0" : "sum" + std::to_string(index - 1), noise}, {}}
+		);
+	}
+	Plan plan;
+	Diagnostic diagnostic;
+	ExecutionPlan execution;
+	INFO(diagnostic.Message);
+	REQUIRE(Compile(document, plan, diagnostic));
+	REQUIRE(Prepare(document, plan, {}, {}, execution, diagnostic));
+	CHECK(execution.LiveBytes == size_t(64) * 64 * 4 * 3);
+	Image image;
+	REQUIRE(Evaluate(document, plan, {}, {}, image, diagnostic));
+	CHECK(image.Width == 64);
 }

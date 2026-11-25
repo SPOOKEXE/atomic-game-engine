@@ -37,11 +37,16 @@ namespace engine::imagegraph {
 		static constexpr uint32_t MaximumDimension = 8192;
 		// Largest single evaluated image in bytes: one 8192 x 8192 RGBA8 tile.
 		static constexpr size_t MaximumImageBytes = size_t(256) * 1024 * 1024;
-		// Largest combined retained pixel storage in one evaluation.
-		// Wide intermediates count eight bytes per pixel against this budget.
+		// Largest pixel storage a cache keeps across evaluations.
 		static constexpr size_t MaximumRetainedBytes = size_t(1024) * 1024 * 1024;
-		// Largest total pixel work allowed for one selected output.
-		static constexpr uint64_t MaximumPixelWork = uint64_t(1024) * 1024 * 1024;
+		// Largest pixel storage live at once in one evaluation, freeing each image after
+		// its last reader. Wide intermediates count eight bytes per pixel.
+		static constexpr size_t MaximumLiveBytes = size_t(8192) * 1024 * 1024;
+		// Largest total pixel work for one selected output: 1024 passes over an
+		// 8192 x 8192 tile. GPU hosts spread it over frames.
+		static constexpr uint64_t MaximumPixelWork = uint64_t(64) * 1024 * 1024 * 1024;
+		// Largest mesh rasterization work for one attribute tile.
+		static constexpr uint64_t MaximumRasterWork = uint64_t(1024) * 1024 * 1024;
 		// Largest node input count (channel merge takes four).
 		static constexpr size_t MaximumInputs = 4;
 		// Largest number of colour ramp stops.
@@ -591,8 +596,10 @@ namespace engine::imagegraph {
 		size_t Target = 0;
 		// Index in Document::Outputs of the requested output.
 		size_t Output = 0;
-		// Total retained intermediate storage across reachable nodes.
-		size_t RetainedBytes = 0;
+		// Pixel work of each document node; omitted nodes have none.
+		std::vector<uint64_t> Work;
+		// Peak live storage over Order when each image is freed after its last reader.
+		size_t LiveBytes = 0;
 		// Total pixel work for the selected dependency cone.
 		uint64_t PixelWork = 0;
 		// Compares the selected execution data and budgets.

@@ -7,7 +7,9 @@ namespace engine::render {
 		SDL_GPUSampler *sampler,
 		const std::array<SDL_GPUTexture *, imagegraph::Limits::MaximumInputs> &inputs,
 		SDL_GPUTexture *target,
-		const ImageGraphGpuUniforms &uniforms
+		const ImageGraphGpuUniforms &uniforms,
+		uint32_t firstRow,
+		uint32_t rows
 	) {
 		SDL_GPUStorageTextureReadWriteBinding destination{};
 		destination.texture = target;
@@ -21,8 +23,11 @@ namespace engine::render {
 		for (size_t index = 0; index < bindings.size(); ++index)
 			bindings[index] = {inputs[index], sampler};
 		SDL_BindGPUComputeSamplers(pass, 0, bindings.data(), static_cast<uint32_t>(bindings.size()));
-		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
-		SDL_DispatchGPUCompute(pass, (uniforms.Extents[0] + 7u) / 8u, (uniforms.Extents[1] + 7u) / 8u, 1);
+		ImageGraphGpuUniforms band = uniforms;
+		band.Parameters[3] = static_cast<float>(firstRow);
+		SDL_PushGPUComputeUniformData(command, 0, &band, sizeof(band));
+		const uint32_t count = rows != 0 ? rows : static_cast<uint32_t>(uniforms.Extents[1]);
+		SDL_DispatchGPUCompute(pass, (uniforms.Extents[0] + 7u) / 8u, (count + 7u) / 8u, 1);
 		SDL_EndGPUComputePass(pass);
 		return true;
 	}

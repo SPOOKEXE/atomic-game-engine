@@ -1085,6 +1085,8 @@ namespace client {
 				std::optional<engine::imagegraph::Document> Runtime;
 				// Signature of the lowered mesh attribute sources last installed.
 				uint64_t Lowered = 0;
+				// Last refusal logged for this graph.
+				std::string Reported;
 				// Whether this graph appeared in the latest scan.
 				bool Seen = false;
 			};

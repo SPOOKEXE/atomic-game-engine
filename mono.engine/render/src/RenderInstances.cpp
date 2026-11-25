@@ -324,7 +324,7 @@ namespace engine::render {
 				// device.
 				SDL_GPUTexture *const found = Textures.Find(texture, textureOwner);
 				const TextureChoice choice = ChooseTexture(
-					found != nullptr, texture.IsValid(), Textures.Expecting(texture, textureOwner)
+					found != nullptr, texture.IsValid(), AwaitingTexture(texture, textureOwner)
 				);
 
 				// **Untextured draws the default and not the named image**, and
@@ -357,7 +357,7 @@ namespace engine::render {
 					if (foundMap != nullptr) {
 						return foundMap;
 					}
-					if (name.IsValid() && !Textures.Expecting(name, mapOwner)) {
+					if (name.IsValid() && !AwaitingTexture(name, mapOwner)) {
 						return Textures.Missing();
 					}
 					return static_cast<SDL_GPUTexture *>(nullptr);
@@ -485,7 +485,7 @@ namespace engine::render {
 					thicknessMap != nullptr ? 1.0f : 0.0f,
 					(secondaryMap != nullptr ? 1.0f : 0.0f) + 2.0f * weightChannel
 				};
-				if (skin && gbufferPass) SkinDrawn = true;
+				if (skin && gbufferPass && SlotSkin[slot].x < 1.5f) SkinDrawn = true;
 				uniforms.Transmission = glm::vec4{
 					SlotIndexOfRefraction[slot],
 					SlotThickness[slot],
@@ -543,7 +543,7 @@ namespace engine::render {
 				// still needs only the compact shadow block rather than all lighting.
 				SDL_GPUTexture *const found = Textures.Find(texture, textureOwner);
 				const TextureChoice choice = ChooseTexture(
-					found != nullptr, texture.IsValid(), Textures.Expecting(texture, textureOwner)
+					found != nullptr, texture.IsValid(), AwaitingTexture(texture, textureOwner)
 				);
 				SDL_GPUTexture *const sampled = choice == TextureChoice::Named	   ? found
 												: choice == TextureChoice::Missing ? Textures.Missing()
@@ -680,8 +680,8 @@ namespace engine::render {
 					tileName(9, tile)
 				};
 			};
-			// Tiles any set names, kept when some slot's texture for it is resident or
-			// coming, so a prefix set's probe of 1001..1020 draws only real tiles.
+			// Tiles any set names, so a prefix set's probe of 1001..1020 draws only real
+			// tiles; see `TileDraws`.
 			std::vector<uint16_t> tiles;
 			for (size_t field = 0; field < sets.size(); ++field)
 				for (const auto &entry : *sets[field]) {
@@ -692,9 +692,7 @@ namespace engine::render {
 						SlotImageGraphWorld[slot],
 						SlotImageGraphFallbackWorld[slot]
 					);
-					if (Textures.Find(entry.Texture, owner) != nullptr ||
-						Textures.Expecting(entry.Texture, owner))
-						tiles.push_back(entry.Tile);
+					if (TileDraws(*fields[field], entry.Texture, owner)) tiles.push_back(entry.Tile);
 				}
 			std::sort(tiles.begin(), tiles.end());
 			if ((lighting == nullptr && simpleShadow) || tiles.empty()) {

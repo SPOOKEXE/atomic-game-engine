@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
@@ -33,7 +34,7 @@ namespace engine::render {
 		}
 		// Byte graphs upload linear RGBA8; wide graphs keep 16-bit detail as RGBA16F.
 		assets::TextureData
-		Tile(const imagegraph::MeshAttribute &node, const std::vector<float> &rgba, bool wide) {
+		TilePixels(const imagegraph::MeshAttribute &node, const std::vector<float> &rgba, bool wide) {
 			assets::TextureData texture;
 			texture.Width = node.Width;
 			texture.Height = node.Height;
@@ -89,17 +90,36 @@ namespace engine::render {
 		});
 	}
 
+	namespace {
+		// Identifies a tile's pixels: node properties, mesh entity and revision.
+		core::Name TileName(
+			const imagegraph::MeshAttribute &node,
+			const scene::EditableMesh &mesh,
+			core::Name owner,
+			bool wide
+		) {
+			uint64_t key = FoldMeshWord(
+				FoldMeshWord(imagegraph::Fingerprint(imagegraph::Operation(node)), mesh.Revision), owner.Id()
+			);
+			key = FoldMeshWord(FoldMeshWord(key, std::hash<std::string>{}(node.Mesh)), wide);
+			return core::Name("imagegraph-mesh-attribute/" + Hex(key));
+		}
+		uint64_t UploadKey(core::Name owner, core::Name tile) {
+			return (uint64_t(owner.Id()) << 32) | tile.Id();
+		}
+	}
+
 	bool ImageGraphMeshUploader::Lower(
 		const ecs::Store &store,
-		Renderer &renderer,
 		core::Name owner,
-		uint64_t graph,
 		imagegraph::Document &resolved,
+		std::vector<ImageGraphSourceBinding> &bindings,
 		imagegraph::Diagnostic &diagnostic
 	) {
 		ENGINE_PROFILE("imagegraph mesh attribute lowering");
 		const bool wide = resolved.Storage == imagegraph::Precision::Wide;
-		std::vector<Upload> named;
+		// Names are content keys, so forgetting old ones costs a re-lower at worst.
+		if (Named.size() > 4096) Named.clear();
 		for (auto &node : resolved.Nodes) {
 			const auto *attribute = std::get_if<imagegraph::MeshAttribute>(&node.Value);
 			if (attribute == nullptr) continue;
@@ -108,47 +128,120 @@ namespace engine::render {
 				diagnostic = {node.Id, "mesh attribute names no editable mesh in this world"};
 				return false;
 			}
-			uint64_t key =
-				FoldMeshWord(FoldMeshWord(imagegraph::Fingerprint(node.Value), mesh->Revision), owner.Id());
-			key = FoldMeshWord(FoldMeshWord(key, std::hash<std::string>{}(attribute->Mesh)), wide);
-			const core::Name texture("imagegraph-mesh-attribute/" + Hex(key));
-			if (renderer.TextureHandle(texture, owner) == nullptr) {
-				imagegraph::MeshAttributeData data;
-				if (!CopyMeshAttribute(*mesh, attribute->Attribute, data)) {
-					diagnostic = {node.Id, "editable mesh has no values in the selected attribute channel"};
-					return false;
-				}
-				std::vector<float> rgba;
-				if (!imagegraph::RasteriseMeshAttribute(*attribute, data, rgba, diagnostic)) {
-					diagnostic.Node = node.Id;
-					return false;
-				}
-				if (!renderer.AddTexture(texture, Tile(*attribute, rgba, wide), owner)) {
-					diagnostic = {node.Id, "mesh attribute tile upload refused"};
-					return false;
-				}
+			if (attribute->Attribute >= scene::EDITABLE_ATTRIBUTE_CHANNELS ||
+				mesh->Attributes[attribute->Attribute].empty()) {
+				diagnostic = {node.Id, "editable mesh has no values in the selected attribute channel"};
+				return false;
 			}
-			named.push_back({owner, texture});
-			node.Value =
-				imagegraph::Source{std::string(texture.Text()), imagegraph::SourceInterpretation::Data};
-		}
-		auto &previous = Uploads[graph];
-		for (const auto &upload : previous)
-			if (std::none_of(named.begin(), named.end(), [&](const Upload &kept) {
-					return kept.Texture == upload.Texture && kept.Owner == upload.Owner;
+			const core::Name tile = TileName(*attribute, *mesh, owner, wide);
+			Named.insert_or_assign(UploadKey(owner, tile), Tile{*attribute, wide});
+			const std::string path(tile.Text());
+			if (std::none_of(bindings.begin(), bindings.end(), [&](const auto &binding) {
+					return binding.Path == path;
 				}))
-				renderer.DropTexture(upload.Texture, upload.Owner);
-		previous = std::move(named);
-		if (previous.empty()) Uploads.erase(graph);
+				bindings.push_back(
+					{.Path = path,
+					 .Texture = tile,
+					 .Owner = owner,
+					 .Interpretation = imagegraph::SourceInterpretation::Data,
+					 .ContentAddressed = true,
+					 .Width = attribute->Width,
+					 .Height = attribute->Height,
+					 .Format =
+						 wide ? assets::TextureFormat::RGBA16_FLOAT : assets::TextureFormat::RGBA8_LINEAR}
+				);
+			node.Value = imagegraph::Source{path, imagegraph::SourceInterpretation::Data};
+		}
 		diagnostic = {};
 		return true;
 	}
 
-	void ImageGraphMeshUploader::Forget(Renderer &renderer, uint64_t graph) {
-		const auto found = Uploads.find(graph);
-		if (found == Uploads.end()) return;
-		for (const auto &upload : found->second)
+	bool ImageGraphMeshUploader::Add(
+		Renderer &renderer,
+		core::Name owner,
+		core::Name tile,
+		RasterResult result,
+		imagegraph::Diagnostic &diagnostic
+	) {
+		if (!result.Diagnostic.Message.empty()) {
+			diagnostic = std::move(result.Diagnostic);
+			return false;
+		}
+		// A tile its world dropped leaves a stale row behind.
+		std::erase_if(Uploads, [&](const Upload &upload) {
+			return upload.Owner == owner && upload.Texture == tile;
+		});
+		const size_t bytes = result.Texture.Pixels.size();
+		size_t resident = bytes;
+		for (const auto &upload : Uploads)
+			resident += upload.Bytes;
+		while (resident > BUDGET && !Uploads.empty()) {
+			resident -= Uploads.front().Bytes;
+			renderer.DropTexture(Uploads.front().Texture, Uploads.front().Owner);
+			Uploads.erase(Uploads.begin());
+		}
+		if (!renderer.AddTexture(tile, result.Texture, owner)) {
+			diagnostic = {std::string(tile.Text()), "mesh attribute tile upload refused"};
+			return false;
+		}
+		Uploads.push_back({owner, tile, bytes});
+		diagnostic = {};
+		return true;
+	}
+
+	bool ImageGraphMeshUploader::Provide(
+		const ecs::Store &store,
+		Renderer &renderer,
+		core::Name owner,
+		core::Name tile,
+		imagegraph::Diagnostic &diagnostic
+	) {
+		if (renderer.TextureHandle(tile, owner) != nullptr) return true;
+		if (Running) {
+			if (Running->Result.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return true;
+			Raster finished = std::move(*Running);
+			Running.reset();
+			// Whoever asked for it, so graphs taking turns never discard each other's work.
+			if (!Add(renderer, finished.Owner, finished.Texture, finished.Result.get(), diagnostic) ||
+				(finished.Texture == tile && finished.Owner == owner))
+				return diagnostic.Message.empty();
+		}
+		const auto named = Named.find(UploadKey(owner, tile));
+		// The mesh was edited since this graph was lowered; its next lowering renames it.
+		if (named == Named.end()) return true;
+		const Tile tileNode = named->second;
+		const auto *mesh = FindMesh(store, tileNode.Node.Mesh);
+		if (mesh == nullptr || TileName(tileNode.Node, *mesh, owner, tileNode.Wide) != tile) return true;
+		imagegraph::MeshAttributeData data;
+		if (!CopyMeshAttribute(*mesh, tileNode.Node.Attribute, data)) {
+			diagnostic = {
+				std::string(tile.Text()), "editable mesh has no values in the selected attribute channel"
+			};
+			return false;
+		}
+		auto rasterise = [tileNode, data = std::move(data)] {
+			RasterResult result;
+			try {
+				std::vector<float> rgba;
+				if (imagegraph::RasteriseMeshAttribute(tileNode.Node, data, rgba, result.Diagnostic))
+					result.Texture = TilePixels(tileNode.Node, rgba, tileNode.Wide);
+			} catch (const std::bad_alloc &) {
+				result.Diagnostic = {{}, "mesh attribute raster allocation refused"};
+			}
+			return result;
+		};
+		if (size_t(tileNode.Node.Width) * tileNode.Node.Height <= INLINE_PIXELS)
+			return Add(renderer, owner, tile, rasterise(), diagnostic);
+		Running.emplace(Raster{owner, tile, std::async(std::launch::async, std::move(rasterise))});
+		diagnostic = {};
+		return true;
+	}
+
+	void ImageGraphMeshUploader::Forget(Renderer &renderer, core::Name owner) {
+		std::erase_if(Uploads, [&](const Upload &upload) {
+			if (upload.Owner != owner) return false;
 			renderer.DropTexture(upload.Texture, upload.Owner);
-		Uploads.erase(found);
+			return true;
+		});
 	}
 }
