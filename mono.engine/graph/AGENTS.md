@@ -73,3 +73,18 @@ rather than an ordering one.
 
 If the stage count ever justifies a resolver, replacing this is the change to
 make. Growing it into one a field at a time is not.
+
+## Data-flow nodes run on ang
+
+`BuiltinNodes.hpp` registers the logical, scalar, flow and conversion nodes as
+`ang::NodeDef`s into a host's own registry. There is no evaluator, cache or
+port compatibility check here: caching by hash, bypass routes and Async
+completion are the ang runner's, and link legality is
+`ang::Registry::CheckLink` / `ang::CheckNewLink`. Cycles are refused; delayed
+or feedback values are modelled outside the same-run dependency list.
+
+## Edit logs share graphcore's text reader
+
+`PipelineDocument` owns its words and fields only. Quoting, numbers, headers,
+`pipeline` sections and the sorted `PipelineSet` come from
+`graphcore/Document.hpp`, the same reader `bakegraph` uses.

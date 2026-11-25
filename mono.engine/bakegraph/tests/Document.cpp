@@ -552,3 +552,15 @@ TEST_CASE("an empty set writes a header and nothing else", "[bakegraph]") {
 	const PipelineSet set;
 	CHECK(Write(set) == "bakegraph 1\n");
 }
+
+TEST_CASE("every node kind ordinal maps to one text id and back", "[bakegraph][document]") {
+	for (uint8_t ordinal = 0; ordinal <= static_cast<uint8_t>(engine::bake::NodeKind::Flipbook); ++ordinal) {
+		const auto kind = static_cast<engine::bake::NodeKind>(ordinal);
+		engine::bake::NodeKind back = engine::bake::NodeKind::Source;
+		REQUIRE(engine::bake::NodeKindFromId(engine::bake::NodeKindId(kind), back));
+		CHECK(back == kind);
+	}
+	engine::bake::NodeKind ignored{};
+	CHECK_FALSE(engine::bake::NodeKindFromId("bevel", ignored));
+	CHECK_FALSE(engine::bake::NodeKindFromId("", ignored));
+}

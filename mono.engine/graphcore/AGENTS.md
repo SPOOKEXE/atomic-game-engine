@@ -44,3 +44,11 @@ different pin connections may share one deduplicated topology edge.
 
 Cycles are refused. Domains model delayed or history data outside the same-step
 dependency list; no authored flag disables the cycle check.
+
+## One text reader for graph edit logs
+
+`Document.hpp` is the lexer and set framing that `bake::Document` and
+`graph::PipelineDocument` both save in: quoted names with one escape set, whole
+word numbers, `yes`/`no`, header matching and `pipeline "name"` sections.
+Formats own their words and fields; quoting and framing live only here.
+`DocumentSet` sorts names by text, never by interning order.

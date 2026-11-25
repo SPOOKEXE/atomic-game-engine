@@ -27,9 +27,10 @@ graph already states.
 
 ## A node kind is a closed list, and adding one is a format change
 
-`NodeKind`'s ordinals are on the wire and its spellings are in the text, so a
-kind is appended and never inserted, and both halves of `NodeText` /
-`NodeFromText` move together. `IsBareNode` is public because two modules need
+`NodeKind`'s ordinals are in-memory only; the text spells each kind by its
+durable id from `NodeKindId`, and the reader maps ids back to ordinals at load
+through `NodeKindFromId`. The id table is indexed by ordinal, so a kind is
+appended and never inserted or renamed. `IsBareNode` is public because two modules need
 the same answer about the same list; a second copy of it beside the second
 caller is exactly the drift it exists to prevent.
 
@@ -37,6 +38,12 @@ A kind this build does not have reads as a malformed line, deliberately - it is
 indistinguishable from a typo, and guessing would bake something nobody wrote.
 What that refusal *costs* is the caller's: `game::ReadAssetPipelines` drops the
 world's pipelines and keeps the world.
+
+## Quoting, numbers and set framing are graphcore's
+
+`graphcore/Document.hpp` is the one text reader this format and
+`graph::PipelineDocument` share. Do not add a second quoting or line splitter
+here.
 
 ## A set's names sort by text, not by `Name::operator<`
 

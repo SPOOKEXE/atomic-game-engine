@@ -35,6 +35,7 @@
 // @tier L9 · shared
 
 #include <engine/graph/RenderGraph.hpp>
+#include <engine/graphcore/Document.hpp>
 
 #include <cstdint>
 #include <span>
@@ -325,52 +326,9 @@ namespace engine::graph {
 	// round-trip test meaningful.
 	//
 	// @since v0.11
-	class PipelineSet {
-	  public:
-		// Adds a pipeline, or replaces one of that name.
-		//
-		// **Replaces rather than refuses**, unlike `RenderGraph::AddResource`.
-		// A duplicate resource inside one graph is an authoring mistake with no
-		// sensible reading; saving over a pipeline is what "save" means.
-		//
-		// @param name     What it is called. An invalid name is refused.
-		// @param document The pipeline. Copied.
-		// @return `false` for an unnamed pipeline.
-		bool Set(core::Name name, PipelineDocument document);
-
-		// One pipeline.
-		//
-		// @param name Which.
-		// @return The document, or null when there is no such name.
-		const PipelineDocument *Find(core::Name name) const;
-
-		// Drops one.
-		//
-		// @param name Which.
-		// @return `false` when there was no such name.
-		bool Remove(core::Name name);
-
-		// Every name it holds, sorted.
-		//
-		// @return The names. Valid until the next `Set` or `Remove`.
-		std::span<const core::Name> Names() const {
-			return Order;
-		}
-
-		// How many pipelines it holds.
-		size_t Count() const {
-			return Order.size();
-		}
-
-		// Forgets everything.
-		void Clear();
-
-	  private:
-		// Parallel to `Order` and kept in step by every mutator, so `Names` can
-		// hand back a span rather than building one per call.
-		std::vector<core::Name> Order;
-		std::vector<PipelineDocument> Documents;
-	};
+	// The collection is graphcore's `DocumentSet`, shared with the bake
+	// pipeline set. An empty name is refused because it cannot be written back.
+	class PipelineSet : public graphcore::text::DocumentSet<PipelineDocument> {};
 
 	// Writes a set as text.
 	//

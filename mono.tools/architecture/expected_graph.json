@@ -389,6 +389,7 @@
       "tier": "shared",
       "layer": 9,
       "links": [
+        "ang",
         "collision",
         "core",
         "ecs",

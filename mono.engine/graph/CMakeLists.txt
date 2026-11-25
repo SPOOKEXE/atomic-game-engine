@@ -23,6 +23,8 @@ mono_add_library(graph
 	DEPS
 		Engine::core
 		Engine::graphcore
+		# Built-in nodes and the EngineGraph executor run on the ang runner.
+		Engine::ang
 		Engine::ecs
 		Engine::parallel
 
