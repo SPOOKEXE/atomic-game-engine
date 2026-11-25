@@ -114,19 +114,11 @@ namespace engine::scene {
 		float TransmissionFactor = 0.0f;
 		float IndexOfRefraction = 1.5f;
 		float Thickness = 0.0f;
-		// Skin shading, copied from `SurfaceAppearance`; see the fields there.
-		core::Name ThicknessMap;
-		core::Name SecondaryRoughnessMap;
-		float ScatterRadius = 0.012f;
-		float SecondaryRoughness = 0.3f;
-		float SecondarySpecular = 0.15f;
-		float Clearcoat = 0.0f;
-		float ClearcoatRoughness = 0.05f;
-		uint8_t SubsurfaceProfile = 1;
-		bool SkinShading = false;
-		uint8_t SecondarySpecularChannel = 255;
-		uint8_t ClearcoatChannel = 255;
-		SkinShadingMode SkinMode = SkinShadingMode::ScreenSpace;
+		// Values an authored shader reads; see `SurfaceAppearance`.
+		core::Name MaterialTexture0;
+		core::Name MaterialTexture1;
+		float MaterialParameters[16] = {};
+		uint16_t MaterialParameterMask = 0;
 		//@}
 
 		// Which shader draws this instance, or invalid for the engine's own.
@@ -511,18 +503,14 @@ namespace engine::scene {
 			instance.TransmissionFactor = appearance->TransmissionFactor;
 			instance.IndexOfRefraction = appearance->IndexOfRefraction;
 			instance.Thickness = appearance->Thickness;
-			instance.ThicknessMap = appearance->ThicknessMap;
-			instance.SecondaryRoughnessMap = appearance->SecondaryRoughnessMap;
-			instance.ScatterRadius = appearance->ScatterRadius;
-			instance.SecondaryRoughness = appearance->SecondaryRoughness;
-			instance.SecondarySpecular = appearance->SecondarySpecular;
-			instance.SubsurfaceProfile = appearance->SubsurfaceProfile;
-			instance.SkinShading = appearance->SkinShading;
-			instance.SkinMode = appearance->SkinMode;
-			instance.SecondarySpecularChannel = appearance->SecondarySpecularChannel;
-			instance.Clearcoat = appearance->Clearcoat;
-			instance.ClearcoatRoughness = appearance->ClearcoatRoughness;
-			instance.ClearcoatChannel = appearance->ClearcoatChannel;
+			instance.MaterialTexture0 = appearance->MaterialTexture0;
+			instance.MaterialTexture1 = appearance->MaterialTexture1;
+			std::copy(
+				std::begin(appearance->MaterialParameters),
+				std::end(appearance->MaterialParameters),
+				std::begin(instance.MaterialParameters)
+			);
+			instance.MaterialParameterMask = appearance->MaterialParameterMask;
 			instance.Shader = appearance->Shader;
 			instance.Alpha = appearance->Mode;
 			instance.AlphaCutoff = appearance->AlphaCutoff;

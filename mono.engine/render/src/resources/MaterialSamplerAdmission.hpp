@@ -25,9 +25,10 @@ namespace engine::render {
 			"heightMap",
 			"metalnessMap",
 			"packedPbrMap",
-			// Owned by the pass, not the material: refraction and transparent layers.
-			"",
-			"",
+			// The shader's own, under any name.
+			"*",
+			"*",
+			// Owned by the pass: transparent layers.
 			"",
 			"",
 			"weatherShadowImage"
@@ -46,7 +47,7 @@ namespace engine::render {
 			if (resource.Set != 2 || resource.Binding >= names.size() || names[resource.Binding].empty())
 				return location + " is outside the material sampler contract";
 			if (occupied[resource.Binding]) return location + " duplicates a material sampler slot";
-			if (resource.Name != names[resource.Binding])
+			if (names[resource.Binding] != "*" && resource.Name != names[resource.Binding])
 				return location + " must be named '" + std::string(names[resource.Binding]) + "'";
 			occupied[resource.Binding] = true;
 		}

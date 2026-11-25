@@ -410,7 +410,6 @@ namespace engine::render {
 		State->ShaderLensCount = std::min(lighting.ShaderLensCount, State->ShaderLenses.size());
 		State->WorldRenderFeatures = lighting.RenderFeatures;
 		State->HalfResolutionAmbientOcclusion = lighting.HalfResolutionAmbientOcclusion;
-		State->HalfResolutionSubsurface = lighting.HalfResolutionSubsurface;
 	}
 
 	scene::WorldLighting Renderer::CurrentLighting() const {
@@ -448,7 +447,6 @@ namespace engine::render {
 		lighting.ShaderLensCount = State->ShaderLensCount;
 		lighting.RenderFeatures = State->WorldRenderFeatures;
 		lighting.HalfResolutionAmbientOcclusion = State->HalfResolutionAmbientOcclusion;
-		lighting.HalfResolutionSubsurface = State->HalfResolutionSubsurface;
 		return lighting;
 	}
 

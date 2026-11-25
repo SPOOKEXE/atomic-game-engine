@@ -128,6 +128,8 @@
 				{"kind":"method","name":"SetLayer","parameters":[{"name":"index","type":"number"},{"name":"colour","type":"Color3"},{"name":"alpha","type":"number"},{"name":"size","type":"number"},{"name":"acceleration","type":"Vector3"}],"returns":"boolean"},
 				{"kind":"method","name":"SetLinearVelocity","parameters":[{"name":"velocity","type":"Vector3"}],"returns":"()"},
 				{"kind":"method","name":"SetLocalTransparency","parameters":[{"name":"value","type":"number"}],"returns":"()"},
+				{"kind":"method","name":"SetMaterialParameter","parameters":[{"name":"name","type":"string"},{"name":"value","type":"(Color3 | Rect | Vector2 | Vector3 | number)?"}],"returns":"()"},
+				{"kind":"method","name":"SetMaterialTexture","parameters":[{"name":"name","type":"string"},{"name":"content","type":"(string | {string})?"}],"returns":"()"},
 				{"kind":"method","name":"SetNetworkOwner","parameters":[{"name":"player","type":"Instance?"}],"returns":"()"},
 				{"kind":"method","name":"SetSpawnSamples","parameters":[{"name":"samples","type":"buffer"}],"returns":"boolean"},
 				{"kind":"method","name":"SetTileTextures","parameters":[{"name":"slot","type":"string"},{"name":"tiles","type":"{string}?"}],"returns":"()"},
@@ -317,8 +319,6 @@
 				{"kind":"property","name":"AutoLodLevels","type":"number","writable":true,"valueType":"int32","storage":"structural"},
 				{"kind":"property","name":"AutoLodStrategy","type":"Enum.AutoMeshLODStrategy","writable":true,"valueType":"Enum.AutoMeshLODStrategy","storage":"structural"},
 				{"kind":"property","name":"AutoLodTargetQuadArea","type":"number","writable":true,"valueType":"float","storage":"structural"},
-				{"kind":"property","name":"Clearcoat","type":"number","writable":true,"valueType":"float","storage":"field"},
-				{"kind":"property","name":"ClearcoatRoughness","type":"number","writable":true,"valueType":"float","storage":"field"},
 				{"kind":"property","name":"CustomLod1MeshId","type":"string","writable":true,"valueType":"Name","storage":"structural"},
 				{"kind":"property","name":"CustomLod1Ratio","type":"number","writable":true,"valueType":"float","storage":"structural"},
 				{"kind":"property","name":"CustomLod2MeshId","type":"string","writable":true,"valueType":"Name","storage":"structural"},
@@ -342,29 +342,22 @@
 				{"kind":"property","name":"Lod3Ratio","type":"number","writable":true,"valueType":"float","storage":"structural"},
 				{"kind":"property","name":"LodBillboardTexture","type":"string","writable":true,"valueType":"Name","storage":"structural"},
 				{"kind":"property","name":"LodTargetQuadArea","type":"number","writable":true,"valueType":"float","storage":"structural"},
+				{"kind":"property","name":"MaterialParameters","type":"string","writable":true,"valueType":"String","storage":"field"},
+				{"kind":"property","name":"MaterialTexture0","type":"string","writable":true,"valueType":"Name","storage":"field"},
+				{"kind":"property","name":"MaterialTexture1","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"MeshId","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"MetalnessMap","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"NormalMap","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"OcclusionMap","type":"string","writable":true,"valueType":"Name","storage":"field"},
-				{"kind":"property","name":"PackedClearcoatChannel","type":"number","writable":true,"valueType":"int32","storage":"field"},
 				{"kind":"property","name":"PackedHeightChannel","type":"number","writable":true,"valueType":"int32","storage":"field"},
 				{"kind":"property","name":"PackedMetalnessChannel","type":"number","writable":true,"valueType":"int32","storage":"field"},
 				{"kind":"property","name":"PackedOcclusionChannel","type":"number","writable":true,"valueType":"int32","storage":"field"},
 				{"kind":"property","name":"PackedPbrMap","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"PackedRoughnessChannel","type":"number","writable":true,"valueType":"int32","storage":"field"},
-				{"kind":"property","name":"PackedSecondarySpecularChannel","type":"number","writable":true,"valueType":"int32","storage":"field"},
 				{"kind":"property","name":"RoughnessMap","type":"string","writable":true,"valueType":"Name","storage":"field"},
-				{"kind":"property","name":"ScatterRadius","type":"number","writable":true,"valueType":"float","storage":"field"},
-				{"kind":"property","name":"SecondaryRoughness","type":"number","writable":true,"valueType":"float","storage":"field"},
-				{"kind":"property","name":"SecondaryRoughnessMap","type":"string","writable":true,"valueType":"Name","storage":"field"},
-				{"kind":"property","name":"SecondarySpecular","type":"number","writable":true,"valueType":"float","storage":"field"},
-				{"kind":"property","name":"SkinShading","type":"boolean","writable":true,"valueType":"bool","storage":"field"},
-				{"kind":"property","name":"SkinShadingMode","type":"Enum.SkinShadingMode","writable":true,"valueType":"Enum.SkinShadingMode","storage":"field"},
 				{"kind":"property","name":"SpecularFactor","type":"number","writable":true,"valueType":"float","storage":"field"},
-				{"kind":"property","name":"SubsurfaceProfile","type":"number","writable":true,"valueType":"int32","storage":"field"},
 				{"kind":"property","name":"TextureID","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"Thickness","type":"number","writable":true,"valueType":"float","storage":"field"},
-				{"kind":"property","name":"ThicknessMap","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"TransmissionFactor","type":"number","writable":true,"valueType":"float","storage":"field"},
 				{"kind":"property","name":"TrianglesCount","type":"number","writable":false,"valueType":"int32","storage":"computed"}
 			]
@@ -2200,8 +2193,7 @@
 				{"kind":"property","name":"OutdoorAmbient","type":"Color3","writable":true,"valueType":"Color3","storage":"field"},
 				{"kind":"property","name":"PostProcessShader","type":"string","writable":true,"valueType":"Name","storage":"resource"},
 				{"kind":"property","name":"RenderFeatureDisableMask","type":"number","writable":true,"valueType":"int32","storage":"computed"},
-				{"kind":"property","name":"RenderFeatureEnableMask","type":"number","writable":true,"valueType":"int32","storage":"computed"},
-				{"kind":"property","name":"SubsurfaceQuality","type":"Enum.SubsurfaceQuality","writable":true,"valueType":"Enum.SubsurfaceQuality","storage":"computed"}
+				{"kind":"property","name":"RenderFeatureEnableMask","type":"number","writable":true,"valueType":"int32","storage":"computed"}
 			]
 		},
 		{
@@ -3855,13 +3847,6 @@
 			]
 		},
 		{
-			"name": "SkinShadingMode",
-			"items": [
-				{"name":"ScreenSpace","value":0},
-				{"name":"PreIntegrated","value":1}
-			]
-		},
-		{
 			"name": "SkyboxComputeShader",
 			"items": [
 				{"name":"Gradient","value":0},
@@ -3893,13 +3878,6 @@
 			"items": [
 				{"name":"FixedSize","value":0},
 				{"name":"ScaledSize","value":1}
-			]
-		},
-		{
-			"name": "SubsurfaceQuality",
-			"items": [
-				{"name":"Full","value":0},
-				{"name":"Half","value":1}
 			]
 		},
 		{

@@ -2,9 +2,12 @@
 
 #include <engine/render/SceneLight.hpp>
 #include <engine/render/resources/ShaderAssembly.hpp>
+#include <engine/scene/content/MaterialLayout.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <charconv>
 #include <unordered_set>
 #include <vector>
 
@@ -173,6 +176,37 @@ namespace engine::render {
 			}
 			return result;
 		}
+		// Declared names become globals read from the part's values. Only the
+		// script's own declarations count, which is what `SetMaterialParameter` reads.
+		const scene::MaterialLayout layout = scene::ParseMaterialLayout(source);
+		if (!layout.Error.empty()) {
+			result.Error = label + ":" + layout.Error;
+			return result;
+		}
+		std::string declared;
+		for (size_t slot = 0; slot < layout.Textures.size(); ++slot) {
+			const std::string &texture = layout.Textures[slot];
+			declared += "layout(set = 2, binding = " + std::to_string(11 + slot) + ") uniform sampler2D " +
+						texture + ";\n";
+			declared += "bool " + texture + "Bound() { return lighting.ParameterState." +
+						(slot == 0 ? "y" : "z") + " > 0.5; }\n";
+		}
+		for (const scene::MaterialParameter &parameter : layout.Parameters) {
+			static constexpr std::array<std::string_view, 4> TYPES{"float", "vec2", "vec3", "vec4"};
+			const std::string type(TYPES[parameter.Components - 1]);
+			std::string fallback = type + "(";
+			for (uint32_t index = 0; index < parameter.Components; ++index) {
+				char text[48];
+				const auto written = std::to_chars(
+					text, text + sizeof(text), parameter.Default[index], std::chars_format::scientific
+				);
+				fallback += (index == 0 ? "" : ", ") + std::string(text, written.ptr);
+			}
+			const std::string from = "lighting.Parameter" + std::to_string(parameter.Offset / 4) + "." +
+									 std::string("xyzw").substr(parameter.Offset % 4, parameter.Components);
+			declared += type + " " + parameter.Name + " = (int(lighting.ParameterState.x + 0.5) >> " +
+						std::to_string(parameter.Offset) + " & 1) != 0 ? " + from + " : " + fallback + ");\n";
+		}
 		const auto wrap = [&](bool gbuffer) {
 			std::string text = "#version 450\n#extension GL_GOOGLE_cpp_style_line_directive : require\n";
 			text += "#define AUTHORED_SURFACE\n#define MAX_LIGHTS " + std::to_string(MAX_SCENE_LIGHTS) + "\n";
@@ -184,6 +218,7 @@ namespace engine::render {
 			text += "\n#line 1 \"engine/surface\"\n";
 			text += ENGINE_SURFACE_GLSL;
 			text += '\n';
+			text += declared;
 			text += expansion.Out;
 			text += "\n#line 1 \"engine/surface-main\"\n";
 			text += ENGINE_SURFACE_MAIN_GLSL;

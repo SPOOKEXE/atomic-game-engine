@@ -77,6 +77,8 @@
 #include <engine/scene/characters/Characters.hpp>
 #include <engine/scene/characters/Controls.hpp>
 #include <engine/scene/characters/Skinning.hpp>
+#include <engine/scene/content/MaterialLayout.hpp>
+#include <engine/scene/content/Shaders.hpp>
 #include <engine/scene/content/TileSets.hpp>
 #include <engine/scene/editable/EditableImage.hpp>
 #include <engine/scene/editable/EditableMesh.hpp>
@@ -630,6 +632,26 @@ namespace engine::script {
 			call.ReturnBytes(image.Pixels);
 		}
 
+		// One slot value from a `{ [1001] = contentId }` table; empty clears.
+		Name ComposeTiles(ScriptCall &call, const ScriptValue &table, const std::string &method) {
+			if (table.Tag != ValueTag::Map && !(table.Tag == ValueTag::Array && table.Items.empty()))
+				call.Raise((method + " takes a table of tile numbers to content ids").c_str());
+			std::vector<scene::UdimTile> tiles;
+			for (const auto &[key, value] : table.Entries) {
+				uint32_t tile = 0;
+				const auto parsed = std::from_chars(key.data(), key.data() + key.size(), tile);
+				if (parsed.ec != std::errc{} || parsed.ptr != key.data() + key.size() ||
+					tile < scene::UDIM_FIRST_TILE || tile > scene::UDIM_LAST_TILE ||
+					value.Tag != ValueTag::String || value.Text.empty())
+					call.Raise((method + " needs tiles 1001 to 1100 mapped to content ids").c_str());
+				tiles.push_back({static_cast<uint16_t>(tile), Name(value.Text)});
+			}
+			const std::string composed = scene::ComposeTileSet(tiles);
+			if (!tiles.empty() && composed.empty())
+				call.Raise((method + " refused a content id holding '|'").c_str());
+			return Name(composed);
+		}
+
 		// `meshPart:SetTileTextures(slot, { [1001] = contentId, ... })`: writes a UDIM set
 		// into one texture slot (`TextureID`, `NormalMap`, ...) as the slot's value, so it
 		// replicates and saves like a single name. Nil or an empty table clears the slot.
@@ -643,8 +665,8 @@ namespace engine::script {
 				"HeightMap",
 				"EmissiveMap",
 				"PackedPbrMap",
-				"ThicknessMap",
-				"SecondaryRoughnessMap"
+				"MaterialTexture0",
+				"MaterialTexture1"
 			};
 			const std::string slot = call.AsString(0);
 			if (std::find(SLOTS.begin(), SLOTS.end(), slot) == SLOTS.end())
@@ -652,31 +674,131 @@ namespace engine::script {
 			const ecs::PropertyDescriptor *property = ScriptableProperty(call.World(), call.Subject(), slot);
 			if (property == nullptr || !property->Writable || property->Type != ecs::PropertyType::Name)
 				call.Raise("SetTileTextures needs a MeshPart");
-			std::vector<scene::UdimTile> tiles;
+			Name value;
 			if (!call.IsNil(1)) {
 				ScriptValue table;
 				CodecStatus why{};
-				if (!call.ReadValue(1, table, why) ||
-					(table.Tag != ValueTag::Map && !(table.Tag == ValueTag::Array && table.Items.empty())))
+				if (!call.ReadValue(1, table, why))
 					call.Raise("SetTileTextures takes a table of tile numbers to content ids");
-				for (const auto &[key, value] : table.Entries) {
-					uint32_t tile = 0;
-					const auto parsed = std::from_chars(key.data(), key.data() + key.size(), tile);
-					if (parsed.ec != std::errc{} || parsed.ptr != key.data() + key.size() ||
-						tile < scene::UDIM_FIRST_TILE || tile > scene::UDIM_LAST_TILE ||
-						value.Tag != ValueTag::String || value.Text.empty())
-						call.Raise("SetTileTextures needs tiles 1001 to 1100 mapped to content ids");
-					tiles.push_back({static_cast<uint16_t>(tile), Name(value.Text)});
-				}
+				value = ComposeTiles(call, table, "SetTileTextures");
 			}
-			const std::string composed = scene::ComposeTileSet(tiles);
-			if (!tiles.empty() && composed.empty())
-				call.Raise("SetTileTextures refused a content id holding '|'");
-			const Name value(composed);
 			if (!WriteInstanceProperty(
 					call.World(), call.Subject(), *property, &value, sizeof(value), ClientExecution(call)
 				))
 				call.Raise("SetTileTextures could not write the slot");
+		}
+
+		// The part a material method is about, the layout of the shader it wears.
+		// A `Material` stands for the part it is in.
+		std::pair<ecs::Entity, scene::MaterialLayout> MaterialSubject(ScriptCall &call) {
+			ecs::Store &world = call.World();
+			ecs::Entity part = call.Subject();
+			if (world.Get<scene::MaterialRef>(part) != nullptr) part = world.ParentOf(part);
+			if (part == ecs::NULL_ENTITY || world.Get<scene::SurfaceAppearance>(part) == nullptr)
+				call.Raise("a material value needs a part, or a Material inside one");
+			Name shader;
+			world.EachChild(part, [&](ecs::Entity child) {
+				const auto *material = world.Get<scene::MaterialRef>(child);
+				if (material != nullptr && material->Shader.IsValid()) shader = material->Shader;
+			});
+			if (!shader.IsValid()) call.Raise("the part has no Material with a Shader");
+			const scene::ShaderText text = scene::ShaderTextOf(world, shader);
+			if (!text.Found)
+				call.Raise(("no ShaderScript named '" + std::string(shader.Text()) + "'").c_str());
+			return {part, scene::ParseMaterialLayout(text.Code)};
+		}
+
+		// Writes one property of `part` the way a script's own assignment would.
+		void WriteMaterialProperty(
+			ScriptCall &call, ecs::Entity part, std::string_view name, const void *value, size_t size
+		) {
+			const ecs::PropertyDescriptor *property = ScriptableProperty(call.World(), part, name);
+			if (property == nullptr ||
+				!WriteInstanceProperty(call.World(), part, *property, value, size, ClientExecution(call)))
+				call.Raise("the part refused the material value");
+		}
+
+		// The numbers a script value carries, or zero of them.
+		size_t MaterialValueOf(const ecs::AttributeValue &value, std::array<float, 4> &out) {
+			switch (value.Type) {
+			case ecs::PropertyType::Int32:
+				out[0] = static_cast<float>(value.Int32);
+				return 1;
+			case ecs::PropertyType::Int64:
+				out[0] = static_cast<float>(value.Int64);
+				return 1;
+			case ecs::PropertyType::Float:
+				out[0] = value.Float;
+				return 1;
+			case ecs::PropertyType::Double:
+				out[0] = static_cast<float>(value.Double);
+				return 1;
+			case ecs::PropertyType::Bool:
+				out[0] = value.Bool ? 1.0f : 0.0f;
+				return 1;
+			case ecs::PropertyType::Vector2:
+				out = {value.Vector2.X, value.Vector2.Y};
+				return 2;
+			case ecs::PropertyType::Vector3:
+				out = {value.Vector3.X, value.Vector3.Y, value.Vector3.Z};
+				return 3;
+			case ecs::PropertyType::Color3:
+				out = {value.Color3.R, value.Color3.G, value.Color3.B};
+				return 3;
+			case ecs::PropertyType::Rect:
+				out = {value.Rect.Min.X, value.Rect.Min.Y, value.Rect.Max.X, value.Rect.Max.Y};
+				return 4;
+			default:
+				return 0;
+			}
+		}
+
+		// `part:SetMaterialParameter(name, value)`: one value its shader declared with
+		// `#pragma parameter`. Nil goes back to the shader's default.
+		void SetMaterialParameter(ScriptCall &call) {
+			const std::string name = call.AsString(0);
+			const auto [part, layout] = MaterialSubject(call);
+			const scene::MaterialParameter *parameter = layout.Find(name);
+			if (parameter == nullptr) call.Raise(("the shader declares no parameter '" + name + "'").c_str());
+			std::array<float, 4> values{};
+			size_t count = 0;
+			if (!call.IsNil(1)) {
+				ecs::AttributeValue value;
+				call.ReadAttribute(1, value);
+				count = MaterialValueOf(value, values);
+				if (count != parameter->Components)
+					call.Raise(("'" + name + "' takes " + std::to_string(parameter->Components) +
+								" number(s)")
+								   .c_str());
+			}
+			scene::SurfaceAppearance appearance = *call.World().Get<scene::SurfaceAppearance>(part);
+			scene::SetMaterialParameter(appearance, *parameter, values.data(), count);
+			const std::string encoded = scene::FormatMaterialParameters(appearance);
+			WriteMaterialProperty(call, part, "MaterialParameters", &encoded, sizeof(encoded));
+		}
+
+		// `part:SetMaterialTexture(name, content)`: a texture its shader declared with
+		// `#pragma texture`, as one content id or a `{ [1001] = id }` UDIM set.
+		void SetMaterialTexture(ScriptCall &call) {
+			const std::string name = call.AsString(0);
+			const auto [part, layout] = MaterialSubject(call);
+			const int slot = layout.FindTexture(name);
+			if (slot < 0) call.Raise(("the shader declares no texture '" + name + "'").c_str());
+			Name content;
+			if (!call.IsNil(1)) {
+				ScriptValue value;
+				CodecStatus why{};
+				if (!call.ReadValue(1, value, why))
+					call.Raise("SetMaterialTexture takes a content id or tiles");
+				if (value.Tag == ValueTag::String) {
+					content = Name(value.Text);
+				} else {
+					content = ComposeTiles(call, value, "SetMaterialTexture");
+				}
+			}
+			WriteMaterialProperty(
+				call, part, slot == 0 ? "MaterialTexture0" : "MaterialTexture1", &content, sizeof(content)
+			);
 		}
 
 		// --- the attributes ----------------------------------------------------
@@ -2032,7 +2154,7 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 92> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 94> SCRIPT_METHODS{{
 			{"Sample", SampleWeather},
 			{"SetSpawnSamples", SetSpawnSamples},
 			{"SetLayer", SetParticleLayer},
@@ -2043,6 +2165,8 @@ namespace engine::script {
 			{"GetGraphDocument", ImageGraphGetDocument},
 			{"ReadImage", ReadImage},
 			{"SetTileTextures", SetTileTextures},
+			{"SetMaterialParameter", SetMaterialParameter},
+			{"SetMaterialTexture", SetMaterialTexture},
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
 			{"BulkMoveTo", BulkMoveTo},

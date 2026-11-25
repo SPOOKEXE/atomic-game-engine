@@ -1084,101 +1084,7 @@ namespace engine::render {
 			);
 			return false;
 		}
-		// Separable screen-space subsurface scattering over the skin pixels the
-		// G-buffer drew this frame: a blur of lit into scratch (half size under
-		// `Lighting.SubsurfaceQuality = Half`), then the perpendicular blur
-		// composited back over lit. Frames with no skin skip both passes.
-		const auto applySubsurface = [&]() {
-			if (!State->SkinDrawn) return true;
-			State->SkinDrawn = false;
-			if (State->SubsurfaceBlurPipeline == nullptr || State->SubsurfaceCompositePipeline == nullptr ||
-				pbr.Lit == nullptr || pbr.LinearDepth == nullptr)
-				return true;
-			ENGINE_PROFILE_CAT("subsurface scattering", core::ProfileCategory::Render);
-			if (pbr.SubsurfaceScratch == nullptr) {
-				SDL_GPUTextureCreateInfo info{};
-				info.type = SDL_GPU_TEXTURETYPE_2D;
-				info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
-				info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
-				info.width = pbrDimensions.LitWidth;
-				info.height = pbrDimensions.LitHeight;
-				info.layer_count_or_depth = 1;
-				info.num_levels = 1;
-				info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-				pbr.SubsurfaceScratch = gpu::CreateTexture(State->Device, &info);
-				if (pbr.SubsurfaceScratch == nullptr) return true;
-			}
-			const bool half = recording.CurrentLighting.HalfResolutionSubsurface;
-			struct SubsurfaceUniforms {
-				glm::vec4 Step;
-				glm::vec4 Scale;
-				glm::vec4 Planes;
-			};
-			const float pixelsPerUnit =
-				static_cast<float>(pbrDimensions.LitHeight) * 0.5f * recording.Matrices.Projection[1][1];
-			SubsurfaceUniforms blur{
-				{1.0f / static_cast<float>(pbrDimensions.LitWidth), 0.0f, pixelsPerUnit, 0.0f},
-				{1.0f, 1.0f, uniforms.Target.z, uniforms.Target.w},
-				{uniforms.Planes.y, 0.0f, 0.0f, 0.0f}
-			};
-			const std::array blurBindings{
-				SDL_GPUTextureSamplerBinding{pbr.Lit, sampler},
-				SDL_GPUTextureSamplerBinding{pbr.LinearDepth, sampler},
-				SDL_GPUTextureSamplerBinding{pbr.Normal, sampler},
-				SDL_GPUTextureSamplerBinding{pbr.Albedo, sampler},
-				SDL_GPUTextureSamplerBinding{pbr.Emissive, sampler},
-			};
-			recording.Fullscreen(
-				context.Name,
-				State->SubsurfaceBlurPipeline,
-				pbr.SubsurfaceScratch,
-				half ? (pbrDimensions.LitWidth + 1) / 2 : pbrDimensions.LitWidth,
-				half ? (pbrDimensions.LitHeight + 1) / 2 : pbrDimensions.LitHeight,
-				blurBindings,
-				nullptr,
-				nullptr,
-				SDL_FColor{0.0f, 0.0f, 0.0f, 0.0f},
-				&blur,
-				sizeof(blur)
-			);
-			SubsurfaceUniforms composite = blur;
-			composite.Step = {0.0f, 1.0f / static_cast<float>(pbrDimensions.LitHeight), pixelsPerUnit, 1.0f};
-			if (half) {
-				composite.Scale.x = static_cast<float>((pbrDimensions.LitWidth + 1) / 2) /
-									static_cast<float>(pbrDimensions.LitWidth);
-				composite.Scale.y = static_cast<float>((pbrDimensions.LitHeight + 1) / 2) /
-									static_cast<float>(pbrDimensions.LitHeight);
-			}
-			std::array compositeBindings = blurBindings;
-			compositeBindings[0] = SDL_GPUTextureSamplerBinding{pbr.SubsurfaceScratch, sampler};
-			recording.EnterNamedPass(context.Name);
-			SDL_GPUColorTargetInfo colour{};
-			colour.texture = pbr.Lit;
-			colour.load_op = SDL_GPU_LOADOP_LOAD;
-			colour.store_op = SDL_GPU_STOREOP_STORE;
-			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(Command, &colour, 1, nullptr);
-			if (pass == nullptr) return false;
-			SDL_BindGPUGraphicsPipeline(pass, State->SubsurfaceCompositePipeline);
-			SDL_BindGPUFragmentSamplers(pass, 0, compositeBindings.data(), compositeBindings.size());
-			SDL_PushGPUFragmentUniformData(Command, 0, &composite, sizeof(composite));
-			const SDL_GPUViewport viewport{
-				0.0f,
-				0.0f,
-				static_cast<float>(pbrDimensions.LitWidth),
-				static_cast<float>(pbrDimensions.LitHeight),
-				0.0f,
-				1.0f
-			};
-			const SDL_Rect scissor{
-				0, 0, static_cast<int>(pbrDimensions.LitWidth), static_cast<int>(pbrDimensions.LitHeight)
-			};
-			SDL_SetGPUViewport(pass, &viewport);
-			SDL_SetGPUScissor(pass, &scissor);
-			SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
-			SDL_EndGPURenderPass(pass);
-			recording.Result.DrawCalls++;
-			return true;
-		};
+
 		const auto applyLocalShadowCorrections = [&]() {
 			bool anyShadow = false;
 			for (uint32_t index = 0; index < static_cast<uint32_t>(lightUniforms.Count.x); ++index)
@@ -1525,7 +1431,6 @@ namespace engine::render {
 				}
 			}
 			if (!emptyLighting && !applyLocalShadowCorrections()) return false;
-			if (!emptyLighting && !applySubsurface()) return false;
 			if (emptyLighting && blackSkyLit) recording.BlackSkyLit = pbr.Lit;
 			return true;
 		}
@@ -1559,7 +1464,7 @@ namespace engine::render {
 			SDL_FColor{State->FogColour.r, State->FogColour.g, State->FogColour.b, 1.0f},
 			&State->Beams
 		);
-		return applyLocalShadowCorrections() && applySubsurface();
+		return applyLocalShadowCorrections();
 	}
 
 	bool ViewRecording::RecordNodeWeatherResidency(const graph::RunContext &context) {

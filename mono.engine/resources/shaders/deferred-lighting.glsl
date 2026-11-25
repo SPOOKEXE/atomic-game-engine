@@ -2,7 +2,6 @@
 #include "projection.glsl"
 #include "ambient-lighting.glsl"
 #include "weather-shadow-lighting.glsl"
-#include "skin-gbuffer.glsl"
 
 layout(location = 0) in vec2 inUv;
 
@@ -86,16 +85,7 @@ float ShadowFactor(vec3 world, vec3 normal, vec3 toLight) {
     return DirectionalShadowVisibility(shadowImage, pass.LightViewProjection, pass.Shadow, world, normal, toLight);
 }
 
-// Back-lit transmission weight: light arriving from behind the surface, wrapped
-// so it fades in before the light is directly behind.
-float TransmissionWrap(vec3 normal, vec3 toLight) {
-	return clamp((dot(-normal, toLight) + 0.3) / 1.3, 0.0, 1.0);
-}
-
-// Diffuse local lights. transmitted is the skin colour that passes through thin
-// parts (zero off skin) and lights the side facing away from the light.
-// spread is the pre-integrated scatter angle, or negative for Lambert.
-vec3 LocalLight(vec3 world, vec3 normal, vec3 albedo, vec3 transmitted, float spread, vec3 scatter) {
+vec3 LocalLight(vec3 world, vec3 normal, vec3 albedo) {
 	vec3 total = vec3(0.0);
 	for (int index = 0; index < MAX_LIGHTS; index++) {
 		if (index >= int(lights.Count.x)) {
@@ -108,8 +98,7 @@ vec3 LocalLight(vec3 world, vec3 normal, vec3 albedo, vec3 transmitted, float sp
 			continue;
 		}
 		vec3 direction = offset / max(distanceToLight, 1e-4);
-		float cosine = dot(normal, direction);
-		vec3 lambert = spread < 0.0 ? vec3(max(cosine, 0.0)) : PreIntegratedDiffuse(cosine, spread, scatter);
+		float lambert = max(dot(normal, direction), 0.0);
 		float ratio = distanceToLight / range;
 		float window = max(1.0 - ratio * ratio, 0.0);
 		float falloff = window * window / (1.0 + distanceToLight * distanceToLight);
@@ -118,8 +107,7 @@ vec3 LocalLight(vec3 world, vec3 normal, vec3 albedo, vec3 transmitted, float sp
 			float aligned = dot(-direction, normalize(lights.Direction[index].xyz));
 			falloff *= smoothstep(cone, mix(cone, 1.0, 0.1), aligned);
 		}
-		total += (albedo * lambert + transmitted * TransmissionWrap(normal, direction)) *
-				 lights.Colour[index].rgb * falloff;
+		total += albedo * lights.Colour[index].rgb * lambert * falloff;
 	}
 	return total;
 }
@@ -192,79 +180,36 @@ vec4 ShadeDeferred(out vec4 directionalResponse) {
 
 	vec3 normal = normalize(packedNormal);
 	vec4 material = texture(materialImage, geometryUv);
-	bool skin = IsSkinPixel(packed.a);
 	vec3 emissive = texture(emissiveImage, geometryUv).rgb;
 	float occlusion = material.b * texture(occlusionImage, inUv).r;
 	float roughness = clamp(material.r, 0.045, 1.0);
-	float metalness = GBufferMetalness(material, packed.a);
+	float metalness = clamp(material.g, 0.0, 1.0);
 	vec3 toLight = -normalize(pass.Direction.xyz);
 	vec3 world = WorldAt(inUv, depth);
 	vec3 viewDirection = normalize(pass.Eye.xyz - world);
 	vec3 halfway = normalize(viewDirection + toLight);
 	float lambert = max(dot(normal, toLight), 0.0);
-	// Skin is a dielectric with a fixed reflectance; its specular byte holds the second lobe.
-	vec3 baseReflectance = skin ? vec3(0.028) : mix(vec3(0.04), albedo.rgb, metalness) * clamp(material.a, 0.0, 1.0);
+	vec3 baseReflectance = mix(vec3(0.04), albedo.rgb, metalness) * clamp(material.a, 0.0, 1.0);
 	vec3 fresnel = FresnelSchlick(max(dot(halfway, viewDirection), 0.0), baseReflectance);
 	float distribution = DistributionGGX(normal, halfway, roughness);
 	float geometry = GeometrySchlickGGX(max(dot(normal, viewDirection), 0.0), roughness) *
 					 GeometrySchlickGGX(lambert, roughness);
 	vec3 specular =
 		distribution * geometry * fresnel / max(4.0 * max(dot(normal, viewDirection), 0.0) * lambert, 1e-4);
-	vec3 transmitted = vec3(0.0);
-	if (skin) {
-		// Second, sharper lobe for the oily layer, mixed over the broad skin lobe.
-		float lobeByte = floor(material.a * 255.0 + 0.5);
-		float secondRoughness = clamp(floor(lobeByte / 16.0) / 15.0, 0.045, 1.0);
-		float secondWeight = mod(lobeByte, 16.0) / 15.0;
-		float secondGeometry = GeometrySchlickGGX(max(dot(normal, viewDirection), 0.0), secondRoughness) *
-							   GeometrySchlickGGX(lambert, secondRoughness);
-		vec3 second = DistributionGGX(normal, halfway, secondRoughness) * secondGeometry * fresnel /
-					  max(4.0 * max(dot(normal, viewDirection), 0.0) * lambert, 1e-4);
-		specular = mix(specular, second, secondWeight);
-		// Thin parts pass light through, reddened by the profile's falloff.
-		float thickness = material.g * 4.0;
-		// The byte saturates at four radii, which means opaque, so it fades out there.
-		transmitted = albedo.rgb * exp(-thickness / SkinProfileFalloff(albedo.a)) *
-					  (1.0 - smoothstep(0.75, 1.0, material.g));
-	}
 	vec3 diffuse = albedo.rgb * (1.0 - fresnel) * (1.0 - metalness);
 	vec3 ambient = AmbientRadiance(albedo.rgb, metalness, normal, pass.Ambient.rgb,
 		pass.OutdoorAmbient.rgb, occlusion);
-	vec3 falloff = SkinProfileFalloff(albedo.a);
-	float spread = skin && IsPreIntegrated(albedo.a) ? texture(emissiveImage, geometryUv).a : -1.0;
-	float cosine = dot(normal, toLight);
-	vec3 response = spread < 0.0 ? vec3(lambert) : PreIntegratedDiffuse(cosine, spread, falloff);
-	vec3 surfaceResponse = diffuse * response + specular;
-	if (skin) {
-		// A water-like coat (reflectance 0.02) takes its share of the light first.
-		vec2 coat = SkinCoat(albedo.a);
-		if (coat.x > 0.0) {
-			float coatFresnel = FresnelSchlick(max(dot(halfway, viewDirection), 0.0), vec3(0.02)).r * coat.x;
-			float coatGeometry = GeometrySchlickGGX(max(dot(normal, viewDirection), 0.0), coat.y) *
-								 GeometrySchlickGGX(lambert, coat.y);
-			float coatLobe = DistributionGGX(normal, halfway, coat.y) * coatGeometry * coatFresnel /
-							 max(4.0 * max(dot(normal, viewDirection), 0.0) * lambert, 1e-4);
-			surfaceResponse = surfaceResponse * (1.0 - coatFresnel) + vec3(coatLobe);
-		}
-	}
-	vec3 unshadowedDirect = surfaceResponse * pass.Direct.rgb;
-	float shadow = ShadowFactor(world, normal, toLight);
-	// The surface's own shadow begins at the terminator and would cut off the light
-	// scattered past it.
-	if (spread >= 0.0) shadow = mix(1.0, shadow, smoothstep(0.0, 0.1, cosine));
-	float shadowVisibility = min(shadow, PortalBeamFactor(world));
+	vec3 unshadowedDirect = (diffuse * lambert + specular) * pass.Direct.rgb;
+	float shadowVisibility = min(ShadowFactor(world, normal, toLight), PortalBeamFactor(world));
 	vec3 transmittedDirect = unshadowedDirect * WeatherShadowFactor(world);
 	vec3 direct = transmittedDirect * shadowVisibility;
-	// The surface's own shadow map would block light arriving from behind, so the
-	// back-lit term is weather-shadowed only and its strength comes from thickness.
-	direct += transmitted * TransmissionWrap(normal, toLight) * pass.Direct.rgb * WeatherShadowFactor(world);
-	vec3 lit = ambient + direct + LocalLight(world, normal, diffuse, transmitted, spread, falloff) + emissive +
+	vec3 lit = ambient + direct + LocalLight(world, normal, diffuse) + emissive +
 			   SeamSpill(0, world, normal, albedo.rgb) + SeamSpill(1, world, normal, albedo.rgb);
 	float fogRange = max(pass.Fog.y - pass.Fog.x, 0.0001);
 	float fog = clamp((distance(world, pass.Eye.xyz) - pass.Fog.x) / fogRange, 0.0, 1.0);
 	// Fog attenuates the directional term; its own colour does not change with shadows.
 	directionalResponse = vec4(transmittedDirect * (1.0 - fog), shadowVisibility);
-	return vec4(mix(lit, pass.FogColour.rgb, fog), skin ? 1.0 : albedo.a);
+	return vec4(mix(lit, pass.FogColour.rgb, fog), albedo.a);
 }
 
 vec4 ShadeDeferred() {

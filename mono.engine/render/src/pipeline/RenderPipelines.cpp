@@ -333,7 +333,7 @@ namespace engine::render {
 		SDL_GPUShader *overlayVertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		SDL_GPUShader *imageFragment = LoadShader("image.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *overlayFragment = LoadShader("overlay.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
-		SDL_GPUShader *gbufferFragment = LoadShader("gbuffer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 13, 1);
+		SDL_GPUShader *gbufferFragment = LoadShader("gbuffer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 1);
 		SDL_GPUShader *depthPeelFragment = LoadShader("depth-peel.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 2);
 		SDL_GPUShader *depthLinearFragment =
 			LoadShader("depth-linearise.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
@@ -342,8 +342,6 @@ namespace engine::render {
 		SDL_GPUShader *ssaoFragment = LoadShader("ssao.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
 		SDL_GPUShader *ssaoUpsampleFragment =
 			LoadShader("ssao-upsample.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
-		// Skin subsurface blur: lit or scratch, linear depth, normal, albedo, emissive.
-		SDL_GPUShader *subsurfaceFragment = LoadShader("subsurface.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 5, 1);
 		SDL_GPUShader *packChannelsFragment =
 			LoadShader("pack-channels.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 4, 1);
 		// Eleven samplers include G-buffer inputs, solid/portal shadows and
@@ -621,31 +619,6 @@ namespace engine::render {
 			SsaoPipeline = fullscreen("SsaoPipeline", ssaoFragment, SDL_GPU_TEXTUREFORMAT_R8_UNORM);
 			SsaoUpsamplePipeline =
 				fullscreen("SsaoUpsamplePipeline", ssaoUpsampleFragment, SDL_GPU_TEXTUREFORMAT_R8_UNORM);
-			if (subsurfaceFragment != nullptr) {
-				SubsurfaceBlurPipeline = fullscreen(
-					"SubsurfaceBlurPipeline", subsurfaceFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT
-				);
-				// The second pass writes skin pixels over lit with alpha 1 and
-				// leaves every other pixel, and lit's alpha, as they were.
-				SDL_GPUColorTargetDescription over{};
-				over.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
-				over.blend_state.enable_blend = true;
-				over.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
-				over.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
-				over.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
-				over.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-				over.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
-				over.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-				SDL_GPUGraphicsPipelineCreateInfo composite{};
-				composite.vertex_shader = overlayVertex;
-				composite.fragment_shader = subsurfaceFragment;
-				composite.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-				composite.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-				composite.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-				composite.target_info.color_target_descriptions = &over;
-				composite.target_info.num_color_targets = 1;
-				SubsurfaceCompositePipeline = graphics("SubsurfaceCompositePipeline", &composite);
-			}
 			if (packChannelsSupported)
 				PackChannelsPipeline = fullscreen(
 					"PackChannelsPipeline", packChannelsFragment, SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT
@@ -1225,7 +1198,6 @@ namespace engine::render {
 		releaseShader(Device, cameraMotionFragment);
 		releaseShader(Device, ssaoFragment);
 		releaseShader(Device, ssaoUpsampleFragment);
-		if (subsurfaceFragment) releaseShader(Device, subsurfaceFragment);
 		releaseShader(Device, packChannelsFragment);
 		releaseShader(Device, deferredLightingFragment);
 		releaseShader(Device, skyFragment);

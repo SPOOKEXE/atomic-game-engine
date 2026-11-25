@@ -530,12 +530,10 @@ declare namespace Enum {
 	interface ServiceScope extends EnumItem { readonly __enum: "ServiceScope"; }
 	interface ShapeKind extends EnumItem { readonly __enum: "ShapeKind"; }
 	interface SizeConstraint extends EnumItem { readonly __enum: "SizeConstraint"; }
-	interface SkinShadingMode extends EnumItem { readonly __enum: "SkinShadingMode"; }
 	interface SkyboxComputeShader extends EnumItem { readonly __enum: "SkyboxComputeShader"; }
 	interface SortOrder extends EnumItem { readonly __enum: "SortOrder"; }
 	interface StartCorner extends EnumItem { readonly __enum: "StartCorner"; }
 	interface StrokeSizingMode extends EnumItem { readonly __enum: "StrokeSizingMode"; }
-	interface SubsurfaceQuality extends EnumItem { readonly __enum: "SubsurfaceQuality"; }
 	interface SurfaceEffect extends EnumItem { readonly __enum: "SurfaceEffect"; }
 	interface SurfaceSizingMode extends EnumItem { readonly __enum: "SurfaceSizingMode"; }
 	interface TeleportRequestDecision extends EnumItem { readonly __enum: "TeleportRequestDecision"; }
@@ -946,10 +944,6 @@ declare namespace Enum {
 		readonly RelativeXX: SizeConstraint;
 		readonly RelativeYY: SizeConstraint;
 	};
-	const SkinShadingMode: {
-		readonly ScreenSpace: SkinShadingMode;
-		readonly PreIntegrated: SkinShadingMode;
-	};
 	const SkyboxComputeShader: {
 		readonly Gradient: SkyboxComputeShader;
 		readonly Sunset: SkyboxComputeShader;
@@ -971,10 +965,6 @@ declare namespace Enum {
 	const StrokeSizingMode: {
 		readonly FixedSize: StrokeSizingMode;
 		readonly ScaledSize: StrokeSizingMode;
-	};
-	const SubsurfaceQuality: {
-		readonly Full: SubsurfaceQuality;
-		readonly Half: SubsurfaceQuality;
 	};
 	const SurfaceEffect: {
 		readonly None: SurfaceEffect;
@@ -1514,6 +1504,10 @@ declare interface Instance {
 	ReadImage(output?: string): ArrayBuffer | null;
 	/** MeshPart UDIM set for one texture slot; null or {} clears it. */
 	SetTileTextures(slot: string, tiles: { [tile: number]: string } | null): void;
+	/** A value the part's shader declares with #pragma parameter; null restores its default. */
+	SetMaterialParameter(name: string, value: number | Vector2 | Vector3 | Color3 | Rect | null): void;
+	/** A texture it declares with #pragma texture: one content id or a UDIM set. */
+	SetMaterialTexture(name: string, content: string | { [tile: number]: string } | null): void;
 	GetAttributes(): { [name: string]: EngineAttribute };
 	GetAttributeChangedSignal(name: string): PropertyChangedSignal;
 	SetComponent(component: string, values?: { [field: string]: any }): void;
@@ -1668,8 +1662,6 @@ declare interface MeshPart extends BasePart {
 	AutoLodLevels: number;
 	AutoLodStrategy: Enum.AutoMeshLODStrategy;
 	AutoLodTargetQuadArea: number;
-	Clearcoat: number;
-	ClearcoatRoughness: number;
 	CustomLod1MeshId: string;
 	CustomLod1Ratio: number;
 	CustomLod2MeshId: string;
@@ -1693,29 +1685,22 @@ declare interface MeshPart extends BasePart {
 	Lod3Ratio: number;
 	LodBillboardTexture: string;
 	LodTargetQuadArea: number;
+	MaterialParameters: string;
+	MaterialTexture0: string;
+	MaterialTexture1: string;
 	MeshId: string;
 	MetalnessMap: string;
 	NormalMap: string;
 	OcclusionMap: string;
-	PackedClearcoatChannel: number;
 	PackedHeightChannel: number;
 	PackedMetalnessChannel: number;
 	PackedOcclusionChannel: number;
 	PackedPbrMap: string;
 	PackedRoughnessChannel: number;
-	PackedSecondarySpecularChannel: number;
 	RoughnessMap: string;
-	ScatterRadius: number;
-	SecondaryRoughness: number;
-	SecondaryRoughnessMap: string;
-	SecondarySpecular: number;
-	SkinShading: boolean;
-	SkinShadingMode: Enum.SkinShadingMode;
 	SpecularFactor: number;
-	SubsurfaceProfile: number;
 	TextureID: string;
 	Thickness: number;
-	ThicknessMap: string;
 	TransmissionFactor: number;
 	readonly TrianglesCount: number;
 }
@@ -2989,7 +2974,6 @@ declare interface Lighting extends Service {
 	PostProcessShader: string;
 	RenderFeatureDisableMask: number;
 	RenderFeatureEnableMask: number;
-	SubsurfaceQuality: Enum.SubsurfaceQuality;
 }
 
 declare interface ReplicatedFirst extends Service {

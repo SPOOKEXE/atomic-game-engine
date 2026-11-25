@@ -12,6 +12,7 @@
 #include <engine/render/resources/ShaderAssembly.hpp>
 #include <engine/render/resources/ShaderCompiler.hpp>
 #include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/content/MaterialLayout.hpp>
 #include <engine/scene/content/TileSets.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -1519,8 +1520,8 @@ TEST_CASE("a UDIM set draws each tile's texture on its own UV tile", "[render][g
 }
 
 namespace {
-	// One skin-shading plane facing the camera, captured after tonemapping.
-	struct SkinScene {
+	// One plane facing the camera, captured after tonemapping.
+	struct PlaneScene {
 		FixtureDevice Fixture;
 		render::SceneTarget Target{129, 65};
 		render::View View;
@@ -1528,12 +1529,11 @@ namespace {
 		scene::DrawInstance Surface;
 		std::vector<scene::DrawInstance> Drawn;
 
-		explicit SkinScene(core::Name texture) {
+		explicit PlaneScene(core::Name texture) {
 			Fixture.Initialise();
 			InstallFixture(Fixture.Render);
 			Surface = DrawPlanes(std::array{Plane{0, 0, 4, 2.5f, 2.5f, 0xFFFFFFFFu}}).front();
 			Surface.Texture = texture;
-			Surface.ScatterRadius = 0.4f;
 			View.World = 933;
 			View.WorldName = core::Name("world:skin");
 			View.Pipeline = core::Name("fixture.pbr");
@@ -1542,10 +1542,9 @@ namespace {
 			View.Camera.NearPlane = .25f;
 			View.Camera.FarPlane = 32;
 		}
-		// Drawn with the skin plane, such as a shadow caster.
+		// Drawn with the plane, such as a shadow caster.
 		std::vector<scene::DrawInstance> Others;
-		CapturedImage Capture(bool skin) {
-			Surface.SkinShading = skin;
+		CapturedImage Capture() {
 			Drawn = Others;
 			Drawn.push_back(Surface);
 			View.Instances = Drawn;
@@ -1716,203 +1715,10 @@ TEST_CASE("a body with seven UDIM tiles per slot shows each tile on its part", "
 	}
 }
 
-TEST_CASE("a point light behind an ear shows red transmission through it", "[render][gpu][skin][.]") {
-	SkinScene skin(core::Name("fixture.white"));
-	scene::WorldLighting dark;
-	dark.Direct = {0, 0, 0};
-	dark.Ambient = {0, 0, 0};
-	dark.OutdoorAmbient = {0, 0, 0};
-	skin.Fixture.Render.SetLighting(dark);
-	skin.View.Lighting = dark;
-	// A head seen from the side with its ear toward the camera: the ear is a thin
-	// curved flap off the head, and the light sits between them, behind the ear.
-	assets::MeshData head;
-	AppendPart(head, {0, 0, 0}, 0.5f, 0.0f, 1001);
-	const core::Vector3 headMiddle = Centre(head);
-	REQUIRE(skin.Fixture.Render.AddMesh(core::Name("fixture.head"), head));
-	scene::DrawInstance headRow = skin.Surface;
-	headRow.Source = 3;
-	headRow.Mesh = core::Name("fixture.head");
-	headRow.Frame.Position = core::Vector3{0, 0, -4.2f} + headMiddle;
-	headRow.HalfExtent = (head.Maximum - head.Minimum) * 0.5f;
-	headRow.SkinShading = true;
-	skin.Others = {headRow};
-	// The ear: 3 mm of cartilage and skin, 6 cm wide and 5 cm high, 15 cm in front of the head.
-	skin.Surface.Mesh = core::Name(assets::BuiltinName(assets::BuiltinMesh::Cube));
-	skin.Surface.Frame.Position = {0, 0, -3.55f};
-	skin.Surface.HalfExtent = {0.3f, 0.25f, 0.015f};
-	skin.Surface.Thickness = 0.03f;
-	skin.Surface.ScatterRadius = 0.04f;
-	render::SceneLight behind;
-	behind.Position = {0, 0, -3.65f};
-	behind.Range = 2;
-	behind.Colour = {0.6f, 0.6f, 0.6f};
-	skin.View.Lights = std::span(&behind, 1);
-	const auto plain = skin.Capture(false);
-	const auto ear = skin.Capture(true);
-	const uint32_t x = skin.Target.Width / 2, y = skin.Target.Height / 2;
-	const auto lit = skin.At(ear, x, y), unlit = skin.At(plain, x, y);
-	INFO("ear " << lit[0] << " " << lit[1] << " " << lit[2] << ", default " << unlit[0] << " " << unlit[1]);
-	CHECK(unlit[0] < 8);
-	CHECK(lit[0] > 40);
-	CHECK(lit[0] > lit[1] + 20);
-	CHECK(lit[1] >= lit[2]);
-}
-
-TEST_CASE("skin shading softens a cast shadow edge across a cheek", "[render][gpu][skin][.]") {
-	SkinScene cheek(core::Name("fixture.white"));
-	// Sun from the front left; an off-screen occluder shades the left of the cheek.
-	scene::WorldLighting sun;
-	sun.Direction = core::Vector3{0.6f, 0.0f, -0.8f};
-	sun.Direct = {0.8f, 0.8f, 0.8f};
-	sun.Ambient = {0.08f, 0.08f, 0.08f};
-	sun.OutdoorAmbient = {0, 0, 0};
-	cheek.Fixture.Render.SetLighting(sun);
-	cheek.View.Lighting = sun;
-	cheek.View.DirectionalShadowBounds = core::AABB{{-9, -5, -8}, {4, 5, 1}};
-	scene::DrawInstance occluder =
-		DrawPlanes(std::array{Plane{-5.7f, 0, 0.4f, 3.0f, 4.0f, 0xFFFFFFFFu}}).front();
-	occluder.Source = 2;
-	occluder.CastShadow = true;
-	// A box, so the caster has faces on both sides of the light.
-	occluder.Mesh = core::Name(assets::BuiltinName(assets::BuiltinMesh::Cube));
-	occluder.HalfExtent = {3.0f, 4.0f, 0.2f};
-	cheek.Others = {occluder};
-	cheek.Surface.ScatterRadius = 1.0f;
-	// The receiver is a head, 1.5 across, whose cheek faces the camera.
-	assets::MeshData head;
-	AppendPart(head, {0, 0, 0}, 1.5f, 0.0f, 1001);
-	const core::Vector3 headMiddle = Centre(head);
-	REQUIRE(cheek.Fixture.Render.AddMesh(core::Name("fixture.cheek"), head));
-	cheek.Surface.Mesh = core::Name("fixture.cheek");
-	cheek.Surface.Frame.Position = core::Vector3{0, 0, -5.5f} + headMiddle;
-	cheek.Surface.HalfExtent = (head.Maximum - head.Minimum) * 0.5f;
-	const auto plain = cheek.Capture(false);
-	const auto skin = cheek.Capture(true);
-	const uint32_t y = cheek.Target.Height / 2;
-	// Across the front of the cheek, inside the head's silhouette.
-	const auto profile = [&](const CapturedImage &image) {
-		int low = 255, high = 0;
-		for (uint32_t x = 55; x < 74; ++x) {
-			low = std::min(low, cheek.At(image, x, y)[0]);
-			high = std::max(high, cheek.At(image, x, y)[0]);
-		}
-		int between = 0;
-		for (uint32_t x = 55; x < 74; ++x) {
-			const int value = cheek.At(image, x, y)[0];
-			if (value > low + (high - low) / 5 && value < high - (high - low) / 5) ++between;
-		}
-		return std::array<int, 3>{low, high, between};
-	};
-	const auto hard = profile(plain), soft = profile(skin);
-	INFO(
-		"default " << hard[0] << ".." << hard[1] << " edge " << hard[2] << " px; skin " << soft[0] << ".."
-				   << soft[1] << " edge " << soft[2] << " px"
-	);
-	// The shadow is there on both, and wider in transition under skin.
-	REQUIRE(hard[1] - hard[0] > 60);
-	CHECK(soft[2] > hard[2] + 1);
-	// Half quality blurs into a half-size scratch first and must soften the same edge.
-	sun.HalfResolutionSubsurface = true;
-	cheek.Fixture.Render.SetLighting(sun);
-	cheek.View.Lighting = sun;
-	const auto half = profile(cheek.Capture(true));
-	INFO("half resolution skin edge " << half[2] << " px");
-	CHECK(half[2] > hard[2] + 1);
-}
-
-TEST_CASE(
-	"pre-integrated skin reddens a sphere's terminator without a subsurface pass", "[render][gpu][skin][.]"
-) {
-	SkinScene ball(core::Name("fixture.white"));
-	scene::WorldLighting sun;
-	sun.Direction = core::Vector3{1.0f, 0.0f, 0.0f};
-	sun.Direct = {0.8f, 0.8f, 0.8f};
-	sun.Ambient = {0, 0, 0};
-	sun.OutdoorAmbient = {0, 0, 0};
-	ball.Fixture.Render.SetLighting(sun);
-	ball.View.Lighting = sun;
-	assets::MeshData sphere;
-	AppendPart(sphere, {0, 0, 0}, 1.5f, 0.0f, 1001);
-	const core::Vector3 middle = Centre(sphere);
-	REQUIRE(ball.Fixture.Render.AddMesh(core::Name("fixture.ball"), sphere));
-	ball.Surface.Mesh = core::Name("fixture.ball");
-	ball.Surface.Frame.Position = core::Vector3{0, 0, -4.0f} + middle;
-	ball.Surface.HalfExtent = (sphere.Maximum - sphere.Minimum) * 0.5f;
-	ball.Surface.ScatterRadius = 0.4f;
-	ball.Surface.SkinMode = scene::SkinShadingMode::PreIntegrated;
-	const auto plain = ball.Capture(false);
-	const auto skin = ball.Capture(true);
-	// Lambert is unaffected by the mode while skin shading is off.
-	const uint32_t y = ball.Target.Height / 2;
-	int redder = 0, brighter = 0;
-	for (uint32_t x = 0; x < ball.Target.Width; ++x) {
-		const auto lit = ball.At(skin, x, y), hard = ball.At(plain, x, y);
-		redder += lit[0] > lit[2] + 15;
-		brighter += lit[0] > hard[0] + 15;
-	}
-	INFO("redder " << redder << " px, brighter " << brighter << " px");
-	CHECK(redder >= 3);
-	CHECK(brighter >= 3);
-	// The scattered light is in the lighting: half quality changes nothing.
-	sun.HalfResolutionSubsurface = true;
-	ball.Fixture.Render.SetLighting(sun);
-	ball.View.Lighting = sun;
-	CHECK(ball.Capture(true).Bytes == skin.Bytes);
-}
-
-TEST_CASE("a clear coat adds a sharp highlight over skin", "[render][gpu][skin][.]") {
-	// A plane facing the camera with the sun behind it: the highlight is centred.
-	SkinScene plane(core::Name("fixture.white"));
-	scene::WorldLighting sun;
-	sun.Direction = core::Vector3{0.0f, 0.0f, -1.0f};
-	sun.Direct = {0.2f, 0.2f, 0.2f};
-	sun.Ambient = {0, 0, 0};
-	sun.OutdoorAmbient = {0, 0, 0};
-	plane.Fixture.Render.SetLighting(sun);
-	plane.View.Lighting = sun;
-	plane.Surface.SecondarySpecular = 0.0f;
-	// Scatter in the lighting, so the subsurface blur does not soften the lobe.
-	plane.Surface.SkinMode = scene::SkinShadingMode::PreIntegrated;
-	plane.Surface.ScatterRadius = 0.05f;
-	const uint32_t x = plane.Target.Width / 2, y = plane.Target.Height / 2;
-	const auto bare = plane.Capture(true);
-	plane.Surface.Clearcoat = 1.0f;
-	plane.Surface.ClearcoatRoughness = 0.22f;
-	const auto coated = plane.Capture(true);
-	plane.Surface.Clearcoat = 0.5f;
-	const auto half = plane.Capture(true);
-	const auto gain = [&](const CapturedImage &image, uint32_t column) {
-		return plane.At(image, column, y)[1] - plane.At(bare, column, y)[1];
-	};
-	INFO(
-		"centre +" << gain(coated, x) << ", half weight +" << gain(half, x) << ", 12 px off +"
-				   << gain(coated, x + 12)
-	);
-	CHECK(gain(coated, x) > 20);
-	CHECK(gain(half, x) > 5);
-	CHECK(gain(half, x) < gain(coated, x));
-	// Sharp: away from the mirror direction the coat only takes its small share.
-	CHECK(gain(coated, x + 12) <= 2);
-	// The subsurface pass leaves the highlight visible.
-	plane.Surface.SkinMode = scene::SkinShadingMode::ScreenSpace;
-	plane.Surface.ScatterRadius = 0.4f;
-	plane.Surface.Clearcoat = 0.0f;
-	const auto scattered = plane.Capture(true);
-	plane.Surface.Clearcoat = 1.0f;
-	CHECK(plane.At(plane.Capture(true), x, y)[1] - plane.At(scattered, x, y)[1] > 10);
-	plane.Surface.SkinMode = scene::SkinShadingMode::PreIntegrated;
-	plane.Surface.ScatterRadius = 0.05f;
-	// No weight leaves the skin as it was, whatever the roughness.
-	plane.Surface.Clearcoat = 0.0f;
-	plane.Surface.ClearcoatRoughness = 0.35f;
-	CHECK(plane.Capture(true).Bytes == bare.Bytes);
-}
-
 TEST_CASE(
 	"authored surfaces draw in the G-buffer with their own normals and light", "[render][gpu][skin][.]"
 ) {
-	SkinScene plane(core::Name("fixture.white"));
+	PlaneScene plane(core::Name("fixture.white"));
 	scene::WorldLighting sun;
 	sun.Direction = core::Vector3{0.0f, 0.0f, -1.0f};
 	sun.Direct = {0.5f, 0.5f, 0.5f};
@@ -1942,18 +1748,18 @@ TEST_CASE(
 		"vec3 Light(SurfaceOutput s, LightSample l) { return vec3(0, l.IsSun ? 1.0 : 0.0, 0) * l.Colour; }"
 	);
 	const uint32_t x = plane.Target.Width / 2, y = plane.Target.Height / 2;
-	const auto plain = plane.At(plane.Capture(false), x, y);
+	const auto plain = plane.At(plane.Capture(), x, y);
 	CHECK(plain[0] == plain[1]);
 
 	// Surface only: the engine lights it.
 	plane.Surface.Shader = core::Name("surface.red");
-	const auto red = plane.At(plane.Capture(false), x, y);
+	const auto red = plane.At(plane.Capture(), x, y);
 	CHECK(red[0] > 60);
 	CHECK(red[1] < red[0] / 3);
 
 	// Surface and Light: the author lights it, and the G-buffer keeps the surface.
 	plane.Surface.Shader = core::Name("surface.flat");
-	const auto lit = plane.At(plane.Capture(false), x, y);
+	const auto lit = plane.At(plane.Capture(), x, y);
 	CHECK(lit[1] > 60);
 	CHECK(lit[0] < 10);
 	CHECK(lit[2] < 10);
@@ -1963,15 +1769,79 @@ TEST_CASE(
 	REQUIRE_FALSE(normal.Bytes.empty());
 }
 
+TEST_CASE("authored parameters and textures come from the part", "[render][gpu][material][.]") {
+	PlaneScene plane(core::Name("fixture.white"));
+	const std::string source =
+		"#pragma parameter vec3 tint = 0, 1, 0\n"
+		"#pragma parameter float gain = 1\n"
+		"#pragma texture mask\n"
+		"void Surface(SurfaceInput i, inout SurfaceOutput o) {}\n"
+		"vec3 Light(SurfaceOutput s, LightSample l) {\n"
+		"	if (!l.IsSun) return vec3(0);\n"
+		"	return tint * gain * (maskBound() ? texture(mask, vec2(0.5)).rgb : vec3(1));\n"
+		"}\n";
+	const auto assembled = render::AssembleShader("values", source, {});
+	REQUIRE(assembled.Error.empty());
+	render::ShaderCompiler compiler;
+	compiler.SetOptimise(true);
+	const auto forward = compiler.Compile(assembled.Forward, render::ShaderStage::Fragment, "values");
+	const auto gbuffer = compiler.Compile(assembled.GBuffer, render::ShaderStage::Fragment, "values");
+	INFO(forward.Error << gbuffer.Error);
+	REQUIRE_FALSE(gbuffer.Failed);
+	REQUIRE(plane.Fixture.Render.AddMaterialShader(core::Name("values"), forward.SpirV, {}, gbuffer.SpirV));
+	scene::WorldLighting dark;
+	dark.Ambient = {0, 0, 0};
+	dark.OutdoorAmbient = {0, 0, 0};
+	plane.Fixture.Render.SetLighting(dark);
+	plane.View.Lighting = dark;
+	plane.Surface.Shader = core::Name("values");
+	const uint32_t x = plane.Target.Width / 2, y = plane.Target.Height / 2;
+	const auto defaults = plane.At(plane.Capture(), x, y);
+	CHECK(defaults[1] > 100);
+	CHECK(defaults[0] < 10);
+
+	const auto layout = scene::ParseMaterialLayout(source);
+	scene::SurfaceAppearance appearance;
+	const auto set = [&](const char *name, std::vector<float> values) {
+		REQUIRE(scene::SetMaterialParameter(appearance, *layout.Find(name), values.data(), values.size()));
+		std::copy(
+			std::begin(appearance.MaterialParameters),
+			std::end(appearance.MaterialParameters),
+			std::begin(plane.Surface.MaterialParameters)
+		);
+		plane.Surface.MaterialParameterMask = appearance.MaterialParameterMask;
+	};
+	set("tint", {1, 0, 0});
+	const auto red = plane.At(plane.Capture(), x, y);
+	CHECK(red[0] > 100);
+	CHECK(red[1] < 10);
+	// A zero that was set is a zero, not the default.
+	set("gain", {0});
+	CHECK(plane.At(plane.Capture(), x, y)[0] < 10);
+	set("gain", {});
+	CHECK(plane.At(plane.Capture(), x, y)[0] > 100);
+
+	assets::TextureData blue;
+	blue.Width = blue.Height = 1;
+	blue.Format = assets::TextureFormat::RGBA8;
+	blue.Pixels = {std::byte{0}, std::byte{0}, std::byte{255}, std::byte{255}};
+	REQUIRE(plane.Fixture.Render.AddTexture(core::Name("values.blue"), blue));
+	plane.Surface.MaterialTexture0 = core::Name("values.blue");
+	set("tint", {1, 1, 1});
+	const auto masked = plane.At(plane.Capture(), x, y);
+	CHECK(masked[2] > 100);
+	CHECK(masked[0] < 10);
+}
+
 TEST_CASE("a UDIM tile whose graph output is not ready draws the default", "[render][gpu][udim][.]") {
-	SkinScene plane(core::Name("fixture.white"));
+	PlaneScene plane(core::Name("fixture.white"));
 	scene::WorldLighting bright;
 	bright.Ambient = {1, 1, 1};
 	bright.Direct = {0, 0, 0};
 	plane.Fixture.Render.SetLighting(bright);
 	plane.View.Lighting = bright;
 	plane.Surface.Texture = core::Name("udim:1001=imagegraph-instance://pending#albedo");
-	const auto image = plane.Capture(false);
+	const auto image = plane.Capture();
 	const auto centre = plane.At(image, plane.Target.Width / 2, plane.Target.Height / 2);
 	INFO(centre[0] << " " << centre[1] << " " << centre[2]);
 	// Neither the discarded background nor the magenta marker.
@@ -1979,8 +1849,8 @@ TEST_CASE("a UDIM tile whose graph output is not ready draws the default", "[ren
 	CHECK(std::abs(centre[0] - centre[1]) < 20);
 }
 
-TEST_CASE("a thickness set transmits through its thin tile only", "[render][gpu][skin][udim][.]") {
-	SkinScene body(core::Name("fixture.white"));
+TEST_CASE("a material texture takes a UDIM set", "[render][gpu][material][udim][.]") {
+	PlaneScene body(core::Name("fixture.white"));
 	scene::WorldLighting dark;
 	dark.Direct = {0, 0, 0};
 	dark.Ambient = {0, 0, 0};
@@ -2013,19 +1883,26 @@ TEST_CASE("a thickness set transmits through its thin tile only", "[render][gpu]
 	body.Surface.Mesh = core::Name("fixture.strip");
 	body.Surface.HalfExtent = {1, 1, 0.01f};
 	body.Surface.Frame.Position = {0, 0, -2};
-	body.Surface.Thickness = 1.0f;
-	body.Surface.ScatterRadius = 0.25f;
-	body.Surface.ThicknessMap = core::Name("udim:1001=thin|1002=thick");
-	render::SceneLight behind;
-	behind.Position = {0, 0, -3};
-	behind.Range = 4;
-	behind.Colour = {4, 4, 4};
-	body.View.Lights = std::span(&behind, 1);
-	const auto image = body.Capture(true);
+	const auto assembled = render::AssembleShader(
+		"tiled",
+		"#pragma texture amount\n"
+		"void Surface(SurfaceInput i, inout SurfaceOutput o) { o.Custom[0] = texture(amount, i.UV); }\n"
+		"vec3 Light(SurfaceOutput s, LightSample l) { return l.IsSun ? s.Custom[0].rrr : vec3(0); }\n",
+		{}
+	);
+	REQUIRE(assembled.Error.empty());
+	render::ShaderCompiler compiler;
+	compiler.SetOptimise(true);
+	const auto forward = compiler.Compile(assembled.Forward, render::ShaderStage::Fragment, "tiled");
+	const auto gbuffer = compiler.Compile(assembled.GBuffer, render::ShaderStage::Fragment, "tiled");
+	REQUIRE_FALSE(gbuffer.Failed);
+	REQUIRE(body.Fixture.Render.AddMaterialShader(core::Name("tiled"), forward.SpirV, {}, gbuffer.SpirV));
+	body.Surface.Shader = core::Name("tiled");
+	body.Surface.MaterialTexture0 = core::Name("udim:1001=thin|1002=thick");
+	const auto image = body.Capture();
 	const uint32_t y = body.Target.Height / 2, x = body.Target.Width / 2;
 	const auto thin = body.At(image, x - 8, y), thick = body.At(image, x + 8, y);
-	INFO("thin " << thin[0] << " " << thin[1] << " thick " << thick[0]);
-	CHECK(thin[0] > 40);
-	// Thickness past the channel's range lets nothing through, however strong the light.
-	CHECK(thick[0] == 0);
+	INFO("thin " << thin[0] << " thick " << thick[0]);
+	CHECK(thin[0] < 80);
+	CHECK(thick[0] > thin[0] + 60);
 }

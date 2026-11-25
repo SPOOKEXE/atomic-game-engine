@@ -723,9 +723,6 @@ end
 declare extern type Enum_SizeConstraint extends EnumItem with
 end
 
-declare extern type Enum_SkinShadingMode extends EnumItem with
-end
-
 declare extern type Enum_SkyboxComputeShader extends EnumItem with
 end
 
@@ -736,9 +733,6 @@ declare extern type Enum_StartCorner extends EnumItem with
 end
 
 declare extern type Enum_StrokeSizingMode extends EnumItem with
-end
-
-declare extern type Enum_SubsurfaceQuality extends EnumItem with
 end
 
 declare extern type Enum_SurfaceEffect extends EnumItem with
@@ -1195,10 +1189,6 @@ declare Enum: {
 		RelativeXX: Enum_SizeConstraint,
 		RelativeYY: Enum_SizeConstraint,
 	},
-	SkinShadingMode: {
-		ScreenSpace: Enum_SkinShadingMode,
-		PreIntegrated: Enum_SkinShadingMode,
-	},
 	SkyboxComputeShader: {
 		Gradient: Enum_SkyboxComputeShader,
 		Sunset: Enum_SkyboxComputeShader,
@@ -1220,10 +1210,6 @@ declare Enum: {
 	StrokeSizingMode: {
 		FixedSize: Enum_StrokeSizingMode,
 		ScaledSize: Enum_StrokeSizingMode,
-	},
-	SubsurfaceQuality: {
-		Full: Enum_SubsurfaceQuality,
-		Half: Enum_SubsurfaceQuality,
 	},
 	SurfaceEffect: {
 		None: Enum_SurfaceEffect,
@@ -1742,6 +1728,10 @@ declare extern type Instance with
 	function ReadImage(self, output: string?): buffer?
 	-- MeshPart UDIM set for one texture slot; nil or {} clears it.
 	function SetTileTextures(self, slot: string, tiles: { [number]: string }?): ()
+	-- A value the part's shader declares with #pragma parameter; nil restores its default.
+	function SetMaterialParameter(self, name: string, value: (number | Vector2 | Vector3 | Color3 | Rect)?): ()
+	-- A texture it declares with #pragma texture: one content id or a UDIM set.
+	function SetMaterialTexture(self, name: string, content: (string | { [number]: string })?): ()
 	function GetAttributes(self): { [string]: EngineAttribute }
 	function GetAttributeChangedSignal(self, name: string): PropertyChangedSignal
 	function SetComponent(self, component: string, values: { [string]: any }?): ()
@@ -1905,8 +1895,6 @@ declare extern type MeshPart extends BasePart with
 	AutoLodLevels: number
 	AutoLodStrategy: Enum_AutoMeshLODStrategy
 	AutoLodTargetQuadArea: number
-	Clearcoat: number
-	ClearcoatRoughness: number
 	read CustomLod1MeshId: string
 	write CustomLod1MeshId: string?
 	CustomLod1Ratio: number
@@ -1940,6 +1928,11 @@ declare extern type MeshPart extends BasePart with
 	read LodBillboardTexture: string
 	write LodBillboardTexture: string?
 	LodTargetQuadArea: number
+	MaterialParameters: string
+	read MaterialTexture0: string
+	write MaterialTexture0: string?
+	read MaterialTexture1: string
+	write MaterialTexture1: string?
 	read MeshId: string
 	write MeshId: string?
 	read MetalnessMap: string
@@ -1948,30 +1941,18 @@ declare extern type MeshPart extends BasePart with
 	write NormalMap: string?
 	read OcclusionMap: string
 	write OcclusionMap: string?
-	PackedClearcoatChannel: number
 	PackedHeightChannel: number
 	PackedMetalnessChannel: number
 	PackedOcclusionChannel: number
 	read PackedPbrMap: string
 	write PackedPbrMap: string?
 	PackedRoughnessChannel: number
-	PackedSecondarySpecularChannel: number
 	read RoughnessMap: string
 	write RoughnessMap: string?
-	ScatterRadius: number
-	SecondaryRoughness: number
-	read SecondaryRoughnessMap: string
-	write SecondaryRoughnessMap: string?
-	SecondarySpecular: number
-	SkinShading: boolean
-	SkinShadingMode: Enum_SkinShadingMode
 	SpecularFactor: number
-	SubsurfaceProfile: number
 	read TextureID: string
 	write TextureID: string?
 	Thickness: number
-	read ThicknessMap: string
-	write ThicknessMap: string?
 	TransmissionFactor: number
 	read TrianglesCount: number
 end
@@ -3314,7 +3295,6 @@ declare extern type Lighting extends Service with
 	write PostProcessShader: string?
 	RenderFeatureDisableMask: number
 	RenderFeatureEnableMask: number
-	SubsurfaceQuality: Enum_SubsurfaceQuality
 end
 
 declare extern type ReplicatedFirst extends Service with

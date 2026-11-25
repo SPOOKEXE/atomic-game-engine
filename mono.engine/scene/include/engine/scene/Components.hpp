@@ -960,31 +960,15 @@ namespace engine::scene {
 		float Thickness = 0.0f;
 		//@}
 
-		// Skin shading, read when `SkinShading` is set. The G-buffer records the
-		// subsurface profile and scatter radius, the deferred pass adds a second
-		// specular lobe and back-lit transmission, and a separable screen-space
-		// pass spreads the diffuse light by up to `ScatterRadius` world units.
-		// `SkinMode` `PreIntegrated` replaces that pass with a diffuse response
-		// looked up by N.L and `ScatterRadius` times the surface's curvature.
-		//
-		// `ThicknessMap` red scales `Thickness` (world units) for transmission;
-		// with neither, nothing transmits. `SecondaryRoughnessMap` red is the
-		// second lobe's roughness and green its weight, replacing the two
-		// scalars beside it; `SecondarySpecularChannel` takes the weight from a
-		// packed PBR channel instead.
-		//
-		// `Clearcoat` is the weight of a water-like lobe over both, for wet or
-		// glossed skin, with its own roughness; `ClearcoatChannel` takes the
-		// weight from a packed PBR channel. The G-buffer keeps four coat
-		// roughnesses: 0.05, 0.12, 0.22 and 0.35.
+		// What an authored shader declares and the engine does not interpret: two
+		// textures and sixteen floats. `MaterialLayout` gives them names;
+		// `MaterialParameterMask` has a bit per float that was set, and the
+		// shader's own default stands for the rest.
 		//@{
-		core::Name ThicknessMap = {};
-		core::Name SecondaryRoughnessMap = {};
-		float ScatterRadius = 0.012f;
-		float SecondaryRoughness = 0.3f;
-		float SecondarySpecular = 0.15f;
-		float Clearcoat = 0.0f;
-		float ClearcoatRoughness = 0.05f;
+		core::Name MaterialTexture0 = {};
+		core::Name MaterialTexture1 = {};
+		float MaterialParameters[16] = {};
+		uint16_t MaterialParameterMask = 0;
 		//@}
 
 		// Which shader this surface is drawn with, or invalid for the engine's.
@@ -1022,20 +1006,8 @@ namespace engine::scene {
 		// Texture filtering override for this surface.
 		SurfaceResampleMode Resample = SurfaceResampleMode::Default;
 
-		// Subsurface profile for skin shading: 1 skin, 2 deep skin, 3 wax. Zero
-		// and unknown ids use skin.
-		uint8_t SubsurfaceProfile = 1;
-		bool SkinShading = false;
-		// Channel of `PackedPbrMap` (0 red to 3 alpha) holding the second
-		// specular lobe's weight, or 255 for `SecondaryRoughnessMap` green or
-		// `SecondarySpecular`.
-		uint8_t SecondarySpecularChannel = 255;
-		// Channel of `PackedPbrMap` scaling `Clearcoat`, or 255 for none.
-		uint8_t ClearcoatChannel = 255;
-		SkinShadingMode SkinMode = SkinShadingMode::ScreenSpace;
-
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[1] = {};
+		uint8_t Reserved[2] = {};
 	};
 
 	// Which material an instance names.

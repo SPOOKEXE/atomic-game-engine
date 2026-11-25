@@ -38,7 +38,7 @@ void main() {
 	}
 	vec3 normal = normalize(packed.xyz * 2.0 - 1.0);
 	vec4 material = texture(materialImage, geometryUv);
-	float metalness = GBufferMetalness(material, packed.a);
+	float metalness = clamp(material.g, 0.0, 1.0);
 	vec3 world = WorldAt(inUv, depth);
 	vec3 viewDirection = normalize(pass.Eye.xyz - world);
 	vec3 toLight = -normalize(pass.Direction.xyz);

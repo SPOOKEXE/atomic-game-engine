@@ -305,42 +305,6 @@ namespace engine::scene::part_detail {
 		return property;
 	}
 
-	// `MeshPart.SkinShadingMode`: how a skin surface spreads its light.
-	PropertyDescriptor SkinShadingModeProperty() {
-		PropertyDescriptor property;
-		property.Name = core::Name("SkinShadingMode");
-		property.Type = PropertyType::Enum;
-		property.EnumName = SkinShadingModeEnum();
-		property.Size = sizeof(core::Name);
-		property.Kind = PropertyKind::Field;
-		property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceAppearance>()});
-		property.Writes = property.Reads;
-		property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) {
-			const auto *appearance = store.Get<SurfaceAppearance>(instance);
-			if (appearance == nullptr) {
-				return false;
-			}
-			*static_cast<core::Name *>(out) =
-				ecs::EnumTable::MemberAt(SkinShadingModeEnum(), static_cast<size_t>(appearance->SkinMode));
-			return true;
-		};
-		property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) {
-			auto *appearance = store.GetMutable<SurfaceAppearance>(instance);
-			if (appearance == nullptr) {
-				return false;
-			}
-			size_t ordinal = 0;
-			if (!ecs::EnumTable::OrdinalOf(
-					SkinShadingModeEnum(), *static_cast<const core::Name *>(value), ordinal
-				)) {
-				return false;
-			}
-			appearance->SkinMode = static_cast<SkinShadingMode>(ordinal);
-			return true;
-		};
-		return property;
-	}
-
 	// Which tags a surface camera draws, as a name a script writes.
 	//
 	// **The property is a name and the storage is a bit**, which is the

@@ -142,6 +142,13 @@ layout(set = 3, binding = 0) uniform Lighting {
 	// x: authored IOR. y: authored surface thickness in metres.
 	vec4 Transmission;
 	WeatherShadowState CloudShadow;
+	// An authored shader's own values; see engine-surface.glsl.
+	vec4 Parameter0;
+	vec4 Parameter1;
+	vec4 Parameter2;
+	vec4 Parameter3;
+	// x mask of the floats set. y, z whether texture 0 and 1 are bound.
+	vec4 ParameterState;
 } lighting;
 
 #define WEATHER_SHADOW_INLINE_STATE

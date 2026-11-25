@@ -476,20 +476,8 @@ namespace engine::scene::part_detail {
 			  "PackedHeightChannel",
 			  "PackedMetalnessChannel"})
 			TagProperty(meshPart, property, "PBR");
-		for (const std::string_view property :
-			 {"SkinShading",
-			  "SkinShadingMode",
-			  "SubsurfaceProfile",
-			  "ScatterRadius",
-			  "ThicknessMap",
-			  "SecondaryRoughnessMap",
-			  "SecondaryRoughness",
-			  "SecondarySpecular",
-			  "PackedSecondarySpecularChannel",
-			  "Clearcoat",
-			  "ClearcoatRoughness",
-			  "PackedClearcoatChannel"})
-			TagProperty(meshPart, property, "Skin");
+		for (const std::string_view property : {"MaterialTexture0", "MaterialTexture1", "MaterialParameters"})
+			TagProperty(meshPart, property, "Material");
 		for (const std::string_view property : {"MeshId", "TrianglesCount"})
 			TagProperty(meshPart, property, "Geometry");
 		for (const std::string_view property :

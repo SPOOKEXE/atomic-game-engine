@@ -190,3 +190,23 @@ TEST_CASE("editing a module recompiles the scripts that include it and no others
 	CHECK(library.Refresh(store) == 1);
 	CHECK(scene::ShaderErrorOf(store, user).empty());
 }
+
+TEST_CASE("declared values compile and bad declarations name their line", "[render][shader]") {
+	Compiles(AssembleShader(
+		"declared",
+		"#pragma parameter float a = 0.5 // half\n#pragma parameter vec4 b = 1, 2, 3, -4e-2\n"
+		"#pragma parameter vec3 c\n#pragma texture one\n#pragma texture two\n"
+		"void Surface(SurfaceInput i, inout SurfaceOutput o) {\n"
+		"	o.Albedo = c * a + b.rgb + texture(one, i.UV).rgb * texture(two, i.UV).rgb;\n}\n",
+		{}
+	));
+	const auto refused = [](const char *line) {
+		return AssembleShader("s", std::string("\n") + line + "\n" + PLAIN, {}).Error;
+	};
+	CHECK(refused("#pragma parameter vec5 a").starts_with("s:2: "));
+	CHECK(refused("#pragma parameter vec2 a = 1").starts_with("s:2: "));
+	CHECK(refused("#pragma parameter float a = 1, 2").starts_with("s:2: "));
+	CHECK(refused("#pragma texture").starts_with("s:2: "));
+	CHECK(refused("#pragma texture a\n#pragma texture b\n#pragma texture c").starts_with("s:4: "));
+	CHECK(refused("#pragma optimize(off)").empty());
+}

@@ -157,19 +157,18 @@ namespace engine::scene {
 			d = MixSignature(d, Pair(BitsOf(instance.SpecularFactor), BitsOf(instance.TransmissionFactor)));
 			d = MixSignature(d, Pair(BitsOf(instance.IndexOfRefraction), BitsOf(instance.Thickness)));
 			d = MixSignature(d, Pair(instance.SkinFirst, instance.SkinCount));
-			a = MixSignature(a, Pair(instance.ThicknessMap.Id(), instance.SecondaryRoughnessMap.Id()));
-			b = MixSignature(b, Pair(BitsOf(instance.ScatterRadius), BitsOf(instance.SecondaryRoughness)));
-			c = MixSignature(
-				c,
-				Pair(
-					BitsOf(instance.SecondarySpecular),
-					uint32_t(instance.SubsurfaceProfile) | uint32_t(instance.SkinShading) << 8u |
-						uint32_t(instance.SecondarySpecularChannel) << 16u |
-						uint32_t(instance.SkinMode) << 24u
-				)
-			);
-			d = MixSignature(d, Pair(BitsOf(instance.Clearcoat), BitsOf(instance.ClearcoatRoughness)));
-			d = MixSignature(d, Pair(instance.ClearcoatChannel, 0u));
+			a = MixSignature(a, Pair(instance.MaterialTexture0.Id(), instance.MaterialTexture1.Id()));
+			if (instance.MaterialParameterMask != 0) {
+				b = MixSignature(b, instance.MaterialParameterMask);
+				for (size_t index = 0; index < 16; index += 2)
+					c = MixSignature(
+						c,
+						Pair(
+							BitsOf(instance.MaterialParameters[index]),
+							BitsOf(instance.MaterialParameters[index + 1])
+						)
+					);
+			}
 			for (size_t level = 0; level < LOD_LEVELS - 1; ++level) {
 				a = MixSignature(a, Pair(instance.LodMeshes[level].Id(), BitsOf(instance.LodRatios[level])));
 				b = MixSignature(b, Pair(BitsOf(instance.LodMinimumDistances[level]), level));

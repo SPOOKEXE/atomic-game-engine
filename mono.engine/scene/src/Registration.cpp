@@ -1525,18 +1525,11 @@ namespace engine::scene {
 				writer.WriteFloat(appearances[index].TransmissionFactor);
 				writer.WriteFloat(appearances[index].IndexOfRefraction);
 				writer.WriteFloat(appearances[index].Thickness);
-				writer.WriteBool(appearances[index].SkinShading);
-				writer.WriteUInt8(appearances[index].SubsurfaceProfile);
-				writer.WriteFloat(appearances[index].ScatterRadius);
-				writer.WriteName(appearances[index].ThicknessMap);
-				writer.WriteName(appearances[index].SecondaryRoughnessMap);
-				writer.WriteFloat(appearances[index].SecondaryRoughness);
-				writer.WriteFloat(appearances[index].SecondarySpecular);
-				writer.WriteUInt8(appearances[index].SecondarySpecularChannel);
-				writer.WriteUInt8(static_cast<uint8_t>(appearances[index].SkinMode));
-				writer.WriteFloat(appearances[index].Clearcoat);
-				writer.WriteFloat(appearances[index].ClearcoatRoughness);
-				writer.WriteUInt8(appearances[index].ClearcoatChannel);
+				writer.WriteName(appearances[index].MaterialTexture0);
+				writer.WriteName(appearances[index].MaterialTexture1);
+				writer.WriteUInt16(appearances[index].MaterialParameterMask);
+				for (const float value : appearances[index].MaterialParameters)
+					writer.WriteFloat(value);
 			}
 		}
 
@@ -1621,21 +1614,11 @@ namespace engine::scene {
 				appearances[index].TransmissionFactor = reader.ReadFloat();
 				appearances[index].IndexOfRefraction = reader.ReadFloat();
 				appearances[index].Thickness = reader.ReadFloat();
-				appearances[index].SkinShading = reader.ReadBool();
-				appearances[index].SubsurfaceProfile = reader.ReadUInt8();
-				appearances[index].ScatterRadius = reader.ReadFloat();
-				appearances[index].ThicknessMap = reader.ReadName();
-				appearances[index].SecondaryRoughnessMap = reader.ReadName();
-				appearances[index].SecondaryRoughness = reader.ReadFloat();
-				appearances[index].SecondarySpecular = reader.ReadFloat();
-				appearances[index].SecondarySpecularChannel = channel();
-				appearances[index].SkinMode =
-					reader.ReadUInt8() == static_cast<uint8_t>(SkinShadingMode::PreIntegrated)
-						? SkinShadingMode::PreIntegrated
-						: SkinShadingMode::ScreenSpace;
-				appearances[index].Clearcoat = reader.ReadFloat();
-				appearances[index].ClearcoatRoughness = reader.ReadFloat();
-				appearances[index].ClearcoatChannel = channel();
+				appearances[index].MaterialTexture0 = reader.ReadName();
+				appearances[index].MaterialTexture1 = reader.ReadName();
+				appearances[index].MaterialParameterMask = reader.ReadUInt16();
+				for (float &value : appearances[index].MaterialParameters)
+					value = reader.ReadFloat();
 			}
 		}
 
@@ -2499,7 +2482,6 @@ namespace engine::scene {
 		RegisterUpdateCadenceComponents();
 		// Appended for the same reason as everything above it.
 		ecs::Components::Register<AmbientOcclusionSettings>("scene.AmbientOcclusionSettings");
-		ecs::Components::Register<SubsurfaceSettings>("scene.SubsurfaceSettings");
 		// Appended for the same reason; explicit padding keeps the generated form deterministic.
 		ecs::Components::Register<StarsEffect>("scene.StarsEffect");
 	}

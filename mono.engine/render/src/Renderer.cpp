@@ -1126,8 +1126,6 @@ namespace engine::render {
 			  State->InterfaceLayerColourPipeline,
 			  State->SsaoPipeline,
 			  State->SsaoUpsamplePipeline,
-			  State->SubsurfaceBlurPipeline,
-			  State->SubsurfaceCompositePipeline,
 			  State->PackChannelsPipeline,
 			  State->DeferredLightingPipeline,
 			  State->SkyPipeline,

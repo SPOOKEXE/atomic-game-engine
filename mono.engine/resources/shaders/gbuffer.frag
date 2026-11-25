@@ -37,9 +37,6 @@ layout(set = 2, binding = 7) uniform sampler2D emissiveMap;
 layout(set = 2, binding = 8) uniform sampler2D heightMap;
 layout(set = 2, binding = 9) uniform sampler2D metalnessMap;
 layout(set = 2, binding = 10) uniform sampler2D packedPbrMap;
-// Skin shading maps; DrawSlots binds them only on this pass.
-layout(set = 2, binding = 11) uniform sampler2D thicknessMap;
-layout(set = 2, binding = 12) uniform sampler2D secondaryRoughnessMap;
 
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
@@ -63,20 +60,9 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 MaterialExtra;
 	uvec4 RenderFeatures;
 	vec4 PackedPbrChannels;
-	vec4 Transmission;
-	// WeatherShadowState, unused here; it keeps Skin at its C++ offset.
-	vec4 CloudShadowReserved[7];
-	// x 1 screen-space or 2 pre-integrated, y profile id, z scatter radius, w thickness (world units).
-	vec4 Skin;
-	// x second lobe roughness, y its weight, z thickness map bound, w lobe map
-	// bound + 2 * (packed PBR weight channel + 1), zero channel part for none.
-	vec4 SkinLobe;
-	// x coat weight, y coat roughness, z packed PBR weight channel + 1, zero for none.
-	vec4 SkinCoat;
 } lighting;
 
 #include "seam-mask.glsl"
-#include "skin-gbuffer.glsl"
 
 float PackedPbrValue(vec2 uv, float channel) {
 	return texture(packedPbrMap, uv)[int(channel + 0.5)];
@@ -121,32 +107,6 @@ void main() {
 	outNormal = vec4(normal * 0.5 + 0.5, 1.0);
 	outMaterial = vec4(clamp(roughness, 0.045, 1.0), clamp(metalness, 0.0, 1.0), materialOcclusion, clamp(lighting.MaterialExtra.z, 0.0, 1.0));
 	outEmissive = vec4(emissive, clamp(lighting.MaterialExtra.w, 0.0, 1.0));
-	if (lighting.Skin.x > 0.5) {
-		// Skin pixels repack channels a skin surface does not use (see
-		// deferred-lighting.glsl `SkinSurface`): normal alpha 2/3 marks skin, albedo
-		// alpha holds the profile and clear coat, emissive alpha the scatter radius, metalness the
-		// thickness in quarters of the radius, and specular the second lobe as two
-		// nibbles.
-		float radius = max(lighting.Skin.z, 1e-4);
-		float thickness = lighting.Skin.w * (lighting.SkinLobe.z > 0.5 ? texture(thicknessMap, surface.cellUv).r : 1.0);
-		bool transmits = lighting.Skin.w > 0.0;
-		float lobeFlags = floor(lighting.SkinLobe.w + 0.5);
-		vec2 lobe = mod(lobeFlags, 2.0) > 0.5 ? texture(secondaryRoughnessMap, surface.cellUv).rg : lighting.SkinLobe.xy;
-		float weightChannel = floor(lobeFlags / 2.0) - 1.0;
-		if (weightChannel >= 0.0) lobe.y = PackedPbrValue(surface.cellUv, weightChannel);
-		lobe = floor(clamp(lobe, 0.0, 1.0) * 15.0 + 0.5);
-		bool preIntegrated = lighting.Skin.x > 1.5;
-		float coat = lighting.SkinCoat.x;
-		if (coat > 0.0 && lighting.SkinCoat.z > 0.5) coat *= PackedPbrValue(surface.cellUv, lighting.SkinCoat.z - 1.0);
-		outAlbedo.a = PackSkinByte(lighting.Skin.y, preIntegrated, coat, lighting.SkinCoat.y, gl_FragCoord.xy);
-		outNormal.a = 2.0 / 3.0;
-		// Geometric normal, so pores and wrinkles do not read as curvature.
-		vec3 across = fwidth(normalize(inNormal));
-		float curvature = length(across) / max(length(fwidth(inWorldPosition)), 1e-5);
-		outEmissive.a = preIntegrated ? min(radius * curvature, 1.0) : radius;
-		outMaterial.g = transmits ? clamp(thickness / radius * 0.25, 0.0, 1.0) : 1.0;
-		outMaterial.a = (lobe.x * 16.0 + lobe.y) / 255.0;
-	}
 	outObjectId = inLabels.x;
 	outSemanticId = inLabels.y;
 	outPartId = inLabels.z;

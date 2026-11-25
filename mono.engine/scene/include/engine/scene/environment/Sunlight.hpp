@@ -99,8 +99,6 @@ namespace engine::scene {
 		// Whether ambient occlusion traces at half resolution and upsamples by
 		// depth, from `Lighting.AmbientOcclusionQuality`.
 		bool HalfResolutionAmbientOcclusion = false;
-		// `Lighting.SubsurfaceQuality = Half`: the skin blur's first pass at half size.
-		bool HalfResolutionSubsurface = false;
 
 		// Where the distance fade starts and becomes complete, in metres. The
 		// far default range keeps a world without FogEffect clear in normal views.

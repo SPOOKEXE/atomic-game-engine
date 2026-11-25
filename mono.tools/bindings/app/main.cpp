@@ -3036,6 +3036,15 @@ declare task: {
 				out << "\tfunction ReadImage(self, output: string?): buffer?\n";
 				out << "\t-- MeshPart UDIM set for one texture slot; nil or {} clears it.\n";
 				out << "\tfunction SetTileTextures(self, slot: string, tiles: { [number]: string }?): ()\n";
+				out << "\t-- A value the part's shader declares with #pragma parameter; nil restores its "
+					   "default.\n";
+				out << "\tfunction SetMaterialParameter(self, name: string, value: (number | Vector2 | "
+					   "Vector3 | "
+					   "Color3 | Rect)?): ()\n";
+				out << "\t-- A texture it declares with #pragma texture: one content id or a UDIM set.\n";
+				out << "\tfunction SetMaterialTexture(self, name: string, content: (string | { [number]: "
+					   "string "
+					   "})?): ()\n";
 				out << "\tfunction GetAttributes(self): { [string]: EngineAttribute }\n";
 				out << "\tfunction GetAttributeChangedSignal(self, name: string): "
 					   "PropertyChangedSignal\n";
@@ -5328,6 +5337,15 @@ declare const task: {
 				out << "\tReadImage(output?: string): ArrayBuffer | null;\n";
 				out << "\t/** MeshPart UDIM set for one texture slot; null or {} clears it. */\n";
 				out << "\tSetTileTextures(slot: string, tiles: { [tile: number]: string } | null): void;\n";
+				out << "\t/** A value the part's shader declares with #pragma parameter; null restores its "
+					   "default. */\n";
+				out << "\tSetMaterialParameter(name: string, value: number | Vector2 | Vector3 | Color3 | "
+					   "Rect | null): "
+					   "void;\n";
+				out << "\t/** A texture it declares with #pragma texture: one content id or a UDIM set. */\n";
+				out << "\tSetMaterialTexture(name: string, content: string | { [tile: number]: string } | "
+					   "null): "
+					   "void;\n";
 				out << "\tGetAttributes(): { [name: string]: EngineAttribute };\n";
 				out << "\tGetAttributeChangedSignal(name: string): PropertyChangedSignal;\n";
 
