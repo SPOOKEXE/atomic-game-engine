@@ -5,9 +5,12 @@
 // renderer divides by the running count.
 //
 // Geometry: one node array holding the instance tree first and every mesh
-// tree after it, triangles in each mesh's leaf order, and instances in the
-// instance tree's leaf order, each carrying its transform, where its mesh's
-// tree and triangles start, and its material.
+// tree after it, triangles in each mesh's leaf order (with each corner's
+// texture coordinate), and instances in the instance tree's leaf order, each
+// carrying its transform, where its mesh's tree and triangles start, and its
+// material: colour, a colour texture cell and a material texture cell in two
+// atlases, roughness and metalness channels, and the specular factor.
+// Surfaces are diffuse plus a GGX specular lobe chosen by Fresnel.
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
@@ -21,11 +24,18 @@ struct Instance {
 	vec4 Scale;		// xyz, w the mesh's first triangle (bits)
 	vec4 Albedo;	// rgb, w 1 for a mirror
 	vec4 Emission;	// rgb radiance
+	vec4 Maps;		// x colour cell, y material cell (-1 none), z roughness channel, w metalness channel (-1 none)
+	vec4 Shading;	// x roughness without a map, y specular factor
 };
 
-layout(set = 0, binding = 0, std430) readonly buffer Nodes { Node Data[]; } nodes;
-layout(set = 0, binding = 1, std430) readonly buffer Triangles { vec4 Data[]; } corners;
-layout(set = 0, binding = 2, std430) readonly buffer Instances { Instance Data[]; } instances;
+const float ATLAS_CELLS_ACROSS = 16.0;
+
+layout(set = 0, binding = 0) uniform sampler2D colourAtlas;
+layout(set = 0, binding = 1) uniform sampler2D materialAtlas;
+layout(set = 0, binding = 2, std430) readonly buffer Nodes { Node Data[]; } nodes;
+layout(set = 0, binding = 3, std430) readonly buffer Triangles { vec4 Data[]; } corners;
+layout(set = 0, binding = 4, std430) readonly buffer Instances { Instance Data[]; } instances;
+layout(set = 0, binding = 5, std430) readonly buffer Uvs { vec2 Data[]; } uvs;
 layout(set = 1, binding = 0, rgba32f) uniform image2D accumulation;
 
 layout(set = 2, binding = 0) uniform TraceValues {
@@ -68,17 +78,20 @@ bool Box(vec3 origin, vec3 inverse, vec3 low, vec3 high, float limit) {
 	return entry <= exit;
 }
 
-bool Triangle(vec3 origin, vec3 direction, vec3 a, vec3 b, vec3 c, float limit, out float t) {
+bool Triangle(vec3 origin, vec3 direction, vec3 a, vec3 b, vec3 c, float limit, out float t, out float u, out float v) {
+	t = 0.0;
+	u = 0.0;
+	v = 0.0;
 	vec3 e1 = b - a, e2 = c - a;
 	vec3 p = cross(direction, e2);
 	float det = dot(e1, p);
 	if (abs(det) < 1e-12) return false;
 	float inverse = 1.0 / det;
 	vec3 s = origin - a;
-	float u = dot(s, p) * inverse;
+	u = dot(s, p) * inverse;
 	if (u < 0.0 || u > 1.0) return false;
 	vec3 q = cross(s, e1);
-	float v = dot(direction, q) * inverse;
+	v = dot(direction, q) * inverse;
 	if (v < 0.0 || u + v > 1.0) return false;
 	t = dot(e2, q) * inverse;
 	return t > 1e-4 && t < limit;
@@ -88,11 +101,13 @@ vec3 Safe(vec3 d) {
 	return vec3(abs(d.x) < 1e-20 ? 1e20 : 1.0 / d.x, abs(d.y) < 1e-20 ? 1e20 : 1.0 / d.y, abs(d.z) < 1e-20 ? 1e20 : 1.0 / d.z);
 }
 
-// Closest (or any, with `shadow`) hit: distance, instance and world normal.
-bool Trace(vec3 origin, vec3 direction, float limit, bool shadow, out float distance, out uint hitInstance, out vec3 normal) {
+// Closest (or any, with `shadow`) hit: distance, instance, world normal, and
+// the hit's texture coordinate.
+bool Trace(vec3 origin, vec3 direction, float limit, bool shadow, out float distance, out uint hitInstance, out vec3 normal, out vec2 uv) {
 	distance = limit;
 	hitInstance = 0u;
 	normal = vec3(0.0, 1.0, 0.0);
+	uv = vec2(0.0);
 	bool found = false;
 	vec3 inverse = Safe(direction);
 	uint stack[48];
@@ -132,12 +147,13 @@ bool Trace(vec3 origin, vec3 direction, float limit, bool shadow, out float dist
 				for (uint tri = meshFirst; tri < meshFirst + meshCount; ++tri) {
 					uint at = (triangles + tri) * 3u;
 					vec3 a = corners.Data[at].xyz, b = corners.Data[at + 1u].xyz, c = corners.Data[at + 2u].xyz;
-					float t;
-					if (!Triangle(localOrigin, localDirection, a, b, c, distance, t)) continue;
+					float t, u, v;
+					if (!Triangle(localOrigin, localDirection, a, b, c, distance, t, u, v)) continue;
 					found = true;
 					distance = t;
 					hitInstance = item;
 					normal = normalize(Rotate(instance.Rotation, cross(b - a, c - a) / instance.Scale.xyz));
+					uv = uvs.Data[at] * (1.0 - u - v) + uvs.Data[at + 1u] * u + uvs.Data[at + 2u] * v;
 					if (shadow) return true;
 				}
 			}
@@ -150,7 +166,59 @@ bool Occluded(vec3 origin, vec3 direction, float limit) {
 	float d;
 	uint i;
 	vec3 n;
-	return Trace(origin, direction, limit, true, d, i, n);
+	vec2 t;
+	return Trace(origin, direction, limit, true, d, i, n, t);
+}
+
+// A cell of an atlas at `uv` (wrapped, kept half a texel inside the cell).
+vec4 Cell(sampler2D atlas, float cell, vec2 uv) {
+	float size = 1.0 / ATLAS_CELLS_ACROSS;
+	vec2 origin = vec2(mod(cell, ATLAS_CELLS_ACROSS), floor(cell / ATLAS_CELLS_ACROSS)) * size;
+	float inset = 0.5 / 4096.0;
+	vec2 inside = clamp(fract(uv), vec2(inset / size), vec2(1.0 - inset / size));
+	return textureLod(atlas, origin + inside * size, 0.0);
+}
+
+float Channel(vec4 v, float channel) {
+	return channel < 0.5 ? v.r : channel < 1.5 ? v.g : channel < 2.5 ? v.b : v.a;
+}
+
+// GGX: the distribution, Smith visibility and Schlick Fresnel.
+float GgxD(float nh, float a) {
+	float a2 = a * a;
+	float d = nh * nh * (a2 - 1.0) + 1.0;
+	return a2 / (3.14159265 * d * d);
+}
+float SmithG(float nv, float nl, float a) {
+	float k = a * 0.5;
+	return (nv / (nv * (1.0 - k) + k)) * (nl / (nl * (1.0 - k) + k));
+}
+vec3 Schlick(vec3 f0, float vh) {
+	return f0 + (1.0 - f0) * pow(1.0 - clamp(vh, 0.0, 1.0), 5.0);
+}
+
+// Diffuse plus specular for light from `l`, cosine included.
+vec3 Brdf(vec3 albedo, float roughness, float metalness, float specular, vec3 n, vec3 v, vec3 l) {
+	float nl = dot(n, l), nv = max(dot(n, v), 1e-4);
+	if (nl <= 0.0) return vec3(0.0);
+	vec3 h = normalize(v + l);
+	float a = max(roughness * roughness, 0.002);
+	vec3 f0 = mix(vec3(0.04 * specular), albedo, metalness);
+	vec3 f = Schlick(f0, dot(v, h));
+	vec3 spec = f * GgxD(max(dot(n, h), 0.0), a) * SmithG(nv, nl, a) / (4.0 * nv * nl);
+	vec3 diffuse = (1.0 - f) * (1.0 - metalness) * albedo / 3.14159265;
+	return (diffuse + spec) * nl * 3.14159265;
+}
+
+// A GGX half vector about `n`.
+vec3 GgxHalf(vec3 n, float a) {
+	float r1 = Random(), r2 = Random();
+	float phi = 6.2831853 * r1;
+	float cosTheta = sqrt((1.0 - r2) / (1.0 + (a * a - 1.0) * r2));
+	float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+	vec3 tangent = normalize(abs(n.y) < 0.99 ? cross(n, vec3(0, 1, 0)) : cross(n, vec3(1, 0, 0)));
+	vec3 bitangent = cross(n, tangent);
+	return normalize(tangent * cos(phi) * sinTheta + bitangent * sin(phi) * sinTheta + n * cosTheta);
 }
 
 vec3 CosineSample(vec3 normal) {
@@ -178,7 +246,8 @@ void main() {
 			float distance;
 			uint which;
 			vec3 normal;
-			if (!Trace(origin, direction, 1e30, false, distance, which, normal)) {
+			vec2 uv;
+			if (!Trace(origin, direction, 1e30, false, distance, which, normal, uv)) {
 				radiance += throughput * trace.Sky.rgb;
 				break;
 			}
@@ -196,10 +265,20 @@ void main() {
 				continue;
 			}
 			vec3 albedo = instance.Albedo.rgb;
+			if (instance.Maps.x >= 0.0) albedo *= Cell(colourAtlas, instance.Maps.x, uv).rgb;
+			float roughness = instance.Shading.x, metalness = 0.0;
+			if (instance.Maps.y >= 0.0) {
+				vec4 material = Cell(materialAtlas, instance.Maps.y, uv);
+				if (instance.Maps.z >= 0.0) roughness = Channel(material, instance.Maps.z);
+				if (instance.Maps.w >= 0.0) metalness = Channel(material, instance.Maps.w);
+			}
+			roughness = clamp(roughness, 0.045, 1.0);
+			float specularFactor = instance.Shading.y;
+			vec3 view = -direction;
 			// The sun and every light, through shadow rays.
 			float facing = dot(normal, trace.SunDirection.xyz);
 			if (facing > 0.0 && !Occluded(point, trace.SunDirection.xyz, 1e30))
-				radiance += throughput * albedo * trace.SunColour.rgb * facing;
+				radiance += throughput * Brdf(albedo, roughness, metalness, specularFactor, normal, view, trace.SunDirection.xyz) * trace.SunColour.rgb;
 			for (int light = 0; light < lights && light < 8; ++light) {
 				vec3 offset = trace.LightPosition[light].xyz - point;
 				float length2 = dot(offset, offset), range = trace.LightPosition[light].w;
@@ -208,18 +287,39 @@ void main() {
 				vec3 towards = offset / lengthTo;
 				float cosine = dot(normal, towards);
 				if (cosine <= 0.0 || Occluded(point, towards, lengthTo)) continue;
-				radiance += throughput * albedo * trace.LightColour[light].rgb * cosine / max(length2, 1e-4);
+				radiance += throughput * Brdf(albedo, roughness, metalness, specularFactor, normal, view, towards) * trace.LightColour[light].rgb / max(length2, 1e-4);
 			}
-			throughput *= albedo;
+			// The next direction: the specular lobe with the Fresnel weight's
+			// share, otherwise diffuse.
+			float a = max(roughness * roughness, 0.002);
+			vec3 f0 = mix(vec3(0.04 * specularFactor), albedo, metalness);
+			vec3 fresnel = Schlick(f0, max(dot(normal, view), 0.0));
+			float pickSpecular = clamp(max(fresnel.r, max(fresnel.g, fresnel.b)), 0.05, 0.95);
 			origin = point;
-			direction = CosineSample(normal);
-			specular = false;
-			// Indirect light from emitters: counted when a diffuse bounce hits one.
-			float d2;
-			uint w2;
-			vec3 n2;
-			if (Trace(origin, direction, 1e30, false, d2, w2, n2)) {
-				radiance += throughput * instances.Data[w2].Emission.rgb;
+			if (Random() < pickSpecular) {
+				vec3 h = GgxHalf(normal, a);
+				direction = reflect(-view, h);
+				float nl = dot(normal, direction);
+				if (nl <= 0.0) break;
+				float nv = max(dot(normal, view), 1e-4), nh = max(dot(normal, h), 1e-4), vh = max(dot(view, h), 1e-4);
+				// Sampling the half vector by D: the weight is F G vh / (nh nv).
+				throughput *= Schlick(f0, vh) * SmithG(nv, nl, a) * vh / (nh * nv) / pickSpecular;
+				// Sharp lobes see emitters directly, as a mirror does.
+				specular = roughness < 0.2;
+			} else {
+				throughput *= (1.0 - fresnel) * (1.0 - metalness) * albedo / (1.0 - pickSpecular);
+				direction = CosineSample(normal);
+				specular = false;
+			}
+			if (!specular) {
+				// Indirect light from emitters: counted when a bounce hits one.
+				float d2;
+				uint w2;
+				vec3 n2;
+				vec2 t2;
+				if (Trace(origin, direction, 1e30, false, d2, w2, n2, t2)) {
+					radiance += throughput * instances.Data[w2].Emission.rgb;
+				}
 			}
 			if (max(throughput.r, max(throughput.g, throughput.b)) < 1e-3) break;
 		}

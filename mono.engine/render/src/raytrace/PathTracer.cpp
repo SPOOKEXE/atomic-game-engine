@@ -17,6 +17,12 @@ namespace engine::render {
 		// Most mesh trees one call builds: the update budget.
 		constexpr uint32_t MESH_BUILD_BUDGET = 8;
 		constexpr uint32_t MAXIMUM_LIGHTS = 8;
+		// Texture atlases: cells of `ATLAS_CELL` texels, `ATLAS_SIDE` across.
+		constexpr uint32_t ATLAS_CELL = 256;
+		constexpr uint32_t ATLAS_SIDE = 4096;
+		constexpr uint32_t ATLAS_CELLS = (ATLAS_SIDE / ATLAS_CELL) * (ATLAS_SIDE / ATLAS_CELL);
+		// The rasteriser's roughness when nothing gives one.
+		constexpr float DEFAULT_ROUGHNESS = 0.65f;
 
 		struct TracedNode {
 			float Low[3];
@@ -32,6 +38,12 @@ namespace engine::render {
 			uint32_t Triangles;
 			float Albedo[4];
 			float Emission[4];
+			// x the colour cell, y the material cell (-1 for none), z the
+			// material cell's roughness channel and w its metalness channel
+			// (-1 for none).
+			float Maps[4];
+			// x roughness without a map, y specular factor.
+			float Shading[4];
 		};
 		struct TraceUniforms {
 			float Eye[4], Right[4], Up[4], Forward[4];
@@ -50,6 +62,20 @@ namespace engine::render {
 			uint32_t bits = 0;
 			std::memcpy(&bits, &value, sizeof(bits));
 			return bits;
+		}
+
+		// An RGBA8 atlas the tracer samples and blits draw into.
+		SDL_GPUTexture *Atlas(SDL_GPUDevice *device) {
+			SDL_GPUTextureCreateInfo info{};
+			info.type = SDL_GPU_TEXTURETYPE_2D;
+			info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+			info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+			info.width = ATLAS_SIDE;
+			info.height = ATLAS_SIDE;
+			info.layer_count_or_depth = 1;
+			info.num_levels = 1;
+			info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+			return gpu::CreateTexture(device, &info);
 		}
 
 		// A storage buffer holding `bytes`, filled through one transfer.
@@ -89,9 +115,12 @@ namespace engine::render {
 		auto &trace = State->Reference;
 		SDL_GPUDevice *device = State->Device;
 		if (trace.Pipeline == nullptr) {
-			trace.Pipeline = State->LoadComputePipeline("path-trace.comp", 0, 3, 1, 0, 8, 8);
+			trace.Pipeline = State->LoadComputePipeline("path-trace.comp", 2, 4, 1, 0, 8, 8);
 			if (trace.Pipeline == nullptr) return false;
 		}
+		if (trace.ColourAtlas == nullptr) trace.ColourAtlas = Atlas(device);
+		if (trace.MaterialAtlas == nullptr) trace.MaterialAtlas = Atlas(device);
+		if (trace.ColourAtlas == nullptr || trace.MaterialAtlas == nullptr || !State->EnsureSurfaceSampler()) return false;
 		const uint32_t width = view.Target->Width, height = view.Target->Height;
 
 		// Mesh trees, within the build budget.
@@ -117,6 +146,13 @@ namespace engine::render {
 				tree.Tree = std::make_unique<MeshBvh>();
 				tree.Tree->Build(positions, data.Indices);
 				tree.Revision = revision;
+				tree.Uvs.clear();
+				tree.Uvs.reserve(tree.Tree->Order().size() * 3);
+				for (const uint32_t source : tree.Tree->Order())
+					for (uint32_t corner = 0; corner < 3; ++corner) {
+						const auto &vertex = data.Vertices[data.Indices[source * 3 + corner]];
+						tree.Uvs.emplace_back(vertex.TexCoord[0], vertex.TexCoord[1]);
+					}
 				++built;
 			}
 			// Unit meshes are scaled to the part's size.
@@ -133,6 +169,10 @@ namespace engine::render {
 		// One node array: the instance tree, then each mesh's tree.
 		std::vector<TracedNode> nodes;
 		std::vector<float> corners;
+		std::vector<float> uvs;
+		std::unordered_map<const MeshBvh *, const std::vector<glm::vec2> *> meshUvs;
+		for (const auto &[key, tree] : trace.Meshes)
+			if (tree.Tree) meshUvs[tree.Tree.get()] = &tree.Uvs;
 		std::unordered_map<const MeshBvh *, std::pair<uint32_t, uint32_t>> offsets;
 		const auto pushNodes = [&](const std::vector<BvhNode> &tree) {
 			for (const BvhNode &node : tree)
@@ -145,7 +185,46 @@ namespace engine::render {
 			pushNodes(instance.Mesh->Nodes());
 			for (const glm::vec3 &corner : instance.Mesh->Corners())
 				corners.insert(corners.end(), {corner.x, corner.y, corner.z, 0.0f});
+			const auto *meshUv = meshUvs[instance.Mesh];
+			for (size_t corner = 0; corner < instance.Mesh->Corners().size(); ++corner) {
+				const glm::vec2 uv = meshUv != nullptr && corner < meshUv->size() ? (*meshUv)[corner] : glm::vec2(0.0f);
+				uvs.insert(uvs.end(), {uv.x, uv.y});
+			}
 		}
+
+		// Textures: each distinct colour and material texture gets an atlas
+		// cell, filled by a blit from its resident top level.
+		struct Cell {
+			SDL_GPUTexture *Texture = nullptr;
+			uint32_t Width = 0, Height = 0;
+		};
+		std::vector<Cell> colourCells, materialCells;
+		std::unordered_map<uint64_t, int32_t> colourIndex, materialIndex;
+		const auto cellFor = [&](core::Name name, core::Name owner, std::vector<Cell> &cells, std::unordered_map<uint64_t, int32_t> &index) {
+			if (!name.IsValid()) return -1;
+			const uint64_t key = (uint64_t(owner.Id()) << 32) | name.Id();
+			if (const auto found = index.find(key); found != index.end()) return found->second;
+			SDL_GPUTexture *texture = State->Textures.Find(name, owner);
+			uint32_t width = 0, height = 0;
+			// The name counts whether or not it is here yet, so the picture
+			// restarts when it arrives.
+			signature = Mix(signature, key ^ (texture != nullptr ? 1u : 0u));
+			if (texture == nullptr || !State->Textures.SizeOf(name, width, height, owner) || cells.size() >= ATLAS_CELLS) {
+				index[key] = -1;
+				return -1;
+			}
+			// A streamed texture's handle starts at its resident level.
+			const TextureTable::StreamState stream = State->Textures.StreamingState(name, owner);
+			if (stream.Streamed) {
+				width = std::max(width >> stream.Resident, 1u);
+				height = std::max(height >> stream.Resident, 1u);
+			}
+			const int32_t cell = int32_t(cells.size());
+			cells.push_back({texture, width, height});
+			index[key] = cell;
+			signature = Mix(signature, key ^ State->Textures.RevisionOf(name, owner));
+			return cell;
+		};
 		// Instances in the instance tree's leaf order, so a leaf names them directly.
 		std::vector<TracedInstance> instances;
 		for (const uint32_t which : scene.Order()) {
@@ -154,6 +233,23 @@ namespace engine::render {
 			const glm::quat rotation = instance.Frame.Rotation();
 			const auto [root, triangles] = offsets[instance.Mesh];
 			const bool mirror = source.Surface >= 0;
+			const core::Name owner = view.ContentOwnerOf(source.SourceWorld);
+			const float colourCell = float(cellFor(source.Texture, owner, colourCells, colourIndex));
+			// One material texture: a packed map with its channels, else a
+			// roughness map (red), else a metalness map (red).
+			float materialCell = -1.0f, roughnessChannel = -1.0f, metalnessChannel = -1.0f;
+			if (source.PackedPbrMap.IsValid()) {
+				materialCell = float(cellFor(source.PackedPbrMap, owner, materialCells, materialIndex));
+				roughnessChannel = source.RoughnessChannel < 4 ? float(source.RoughnessChannel) : -1.0f;
+				metalnessChannel = source.MetalnessChannel < 4 ? float(source.MetalnessChannel) : -1.0f;
+			} else if (source.RoughnessMap.IsValid()) {
+				materialCell = float(cellFor(source.RoughnessMap, owner, materialCells, materialIndex));
+				roughnessChannel = 0.0f;
+			} else if (source.MetalnessMap.IsValid()) {
+				materialCell = float(cellFor(source.MetalnessMap, owner, materialCells, materialIndex));
+				metalnessChannel = 0.0f;
+			}
+			signature = Mix(signature, Bits(source.SpecularFactor));
 			instances.push_back({
 				{rotation.x, rotation.y, rotation.z, rotation.w},
 				{instance.Frame.Position.X, instance.Frame.Position.Y, instance.Frame.Position.Z},
@@ -162,6 +258,8 @@ namespace engine::render {
 				triangles,
 				{source.Tint.R * source.SurfaceColour.R, source.Tint.G * source.SurfaceColour.G, source.Tint.B * source.SurfaceColour.B, mirror ? 1.0f : 0.0f},
 				{source.EmissiveTint.R * source.EmissiveStrength, source.EmissiveTint.G * source.EmissiveStrength, source.EmissiveTint.B * source.EmissiveStrength, 0.0f},
+				{colourCell, materialCell, roughnessChannel, metalnessChannel},
+				{DEFAULT_ROUGHNESS, source.SpecularFactor, 0.0f, 0.0f},
 			});
 		}
 
@@ -227,18 +325,44 @@ namespace engine::render {
 			clear.store_op = SDL_GPU_STOREOP_STORE;
 			SDL_EndGPURenderPass(SDL_BeginGPURenderPass(command, &clear, 1, nullptr));
 		}
+		// The atlas cells, linear-filtered down (or up) to the cell size.
+		const auto blitCells = [&](const std::vector<Cell> &cells, SDL_GPUTexture *atlas) {
+			const uint32_t across = ATLAS_SIDE / ATLAS_CELL;
+			for (size_t cell = 0; cell < cells.size(); ++cell) {
+				SDL_GPUBlitInfo blit{};
+				blit.source.texture = cells[cell].Texture;
+				blit.source.w = cells[cell].Width;
+				blit.source.h = cells[cell].Height;
+				blit.destination.texture = atlas;
+				blit.destination.x = uint32_t(cell % across) * ATLAS_CELL;
+				blit.destination.y = uint32_t(cell / across) * ATLAS_CELL;
+				blit.destination.w = ATLAS_CELL;
+				blit.destination.h = ATLAS_CELL;
+				blit.load_op = SDL_GPU_LOADOP_LOAD;
+				blit.filter = SDL_GPU_FILTER_LINEAR;
+				SDL_BlitGPUTexture(command, &blit);
+			}
+		};
+		blitCells(colourCells, trace.ColourAtlas);
+		blitCells(materialCells, trace.MaterialAtlas);
 		std::vector<SDL_GPUTransferBuffer *> transfers;
 		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
-		SDL_GPUBuffer *buffers[3] = {
+		SDL_GPUBuffer *buffers[4] = {
 			Storage(device, copy, transfers, nodes.data(), nodes.size() * sizeof(TracedNode)),
 			Storage(device, copy, transfers, corners.data(), corners.size() * sizeof(float)),
 			Storage(device, copy, transfers, instances.data(), instances.size() * sizeof(TracedInstance)),
+			Storage(device, copy, transfers, uvs.data(), uvs.size() * sizeof(float)),
 		};
 		SDL_EndGPUCopyPass(copy);
 		const SDL_GPUStorageTextureReadWriteBinding target{.texture = trace.Accumulation};
 		SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, &target, 1, nullptr, 0);
 		SDL_BindGPUComputePipeline(pass, trace.Pipeline);
-		SDL_BindGPUComputeStorageBuffers(pass, 0, buffers, 3);
+		const SDL_GPUTextureSamplerBinding atlases[2] = {
+			{trace.ColourAtlas, State->SurfaceSampler},
+			{trace.MaterialAtlas, State->SurfaceSampler},
+		};
+		SDL_BindGPUComputeSamplers(pass, 0, atlases, 2);
+		SDL_BindGPUComputeStorageBuffers(pass, 0, buffers, 4);
 		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
 		if (!instances.empty()) SDL_DispatchGPUCompute(pass, (width + 7) / 8, (height + 7) / 8, 1);
 		SDL_EndGPUComputePass(pass);

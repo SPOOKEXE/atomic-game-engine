@@ -2487,6 +2487,68 @@ TEST_CASE("path tracing carries a red wall's colour onto a white floor", "[rende
 	CHECK(glm::length(latest - later) <= glm::length(later - early) + 1e-3f);
 }
 
+TEST_CASE("path tracing reads a part's colour texture", "[render][gpu][raytrace][.]") {
+	PlaneScene plane(core::Name("fixture.white"));
+	plane.Target = render::SceneTarget{64, 64};
+	plane.View.Lighting.Ambient = {1, 1, 1};
+	plane.View.Lighting.Direct = {0, 0, 0};
+	// Left half red, right half blue.
+	assets::TextureData halves;
+	halves.Width = 2;
+	halves.Height = 1;
+	halves.Format = assets::TextureFormat::RGBA8_LINEAR;
+	for (const uint8_t value : {230, 10, 10, 255, 10, 10, 230, 255})
+		halves.Pixels.push_back(std::byte{value});
+	REQUIRE(plane.Fixture.Render.AddTexture(core::Name("halves"), halves));
+	(void)plane.Capture();
+	auto panel = Panel({0, 0, -4}, {4, 4}, glm::quat(1, 0, 0, 0), {1, 1, 1}, 1);
+	panel.Texture = core::Name("halves");
+	const auto traced = Trace(plane, {panel}, 32);
+	const auto left = traced.Around(20, 32), right = traced.Around(44, 32);
+	INFO("left " << left.r << "," << left.b << " right " << right.r << "," << right.b);
+	CHECK(left.r > 4.0f * left.b);
+	CHECK(right.b > 4.0f * right.r);
+}
+
+TEST_CASE("path tracing reflects sharply off a smooth surface and broadly off a rough one", "[render][gpu][raytrace][.]") {
+	PlaneScene plane(core::Name("fixture.white"));
+	plane.Target = render::SceneTarget{64, 64};
+	plane.View.Lighting.Ambient = {0, 0, 0};
+	plane.View.Lighting.Direct = {0, 0, 0};
+	// Packed maps: red roughness, green metalness.
+	const auto packed = [](uint8_t roughness) {
+		assets::TextureData map;
+		map.Width = map.Height = 1;
+		map.Format = assets::TextureFormat::RGBA8_LINEAR;
+		for (const uint8_t value : {roughness, uint8_t(255), uint8_t(0), uint8_t(255)})
+			map.Pixels.push_back(std::byte{value});
+		return map;
+	};
+	REQUIRE(plane.Fixture.Render.AddTexture(core::Name("smooth"), packed(13)));
+	REQUIRE(plane.Fixture.Render.AddTexture(core::Name("rough"), packed(255)));
+	// Uploads land with a frame.
+	(void)plane.Capture();
+	const glm::quat up = glm::angleAxis(-1.5707963f, glm::vec3(1, 0, 0));
+	const glm::quat down = glm::angleAxis(1.5707963f, glm::vec3(1, 0, 0));
+	auto light = Panel({0, 3, -8}, {3, 3}, down, {0, 0, 0}, 2);
+	light.EmissiveTint = {1, 1, 1};
+	light.EmissiveStrength = 5;
+	const auto floorWith = [&](const char *map) {
+		auto floor = Panel({0, -1, -10}, {30, 30}, up, {0.9f, 0.9f, 0.9f}, 1);
+		floor.PackedPbrMap = core::Name(map);
+		floor.RoughnessChannel = 0;
+		floor.MetalnessChannel = 1;
+		return floor;
+	};
+	// Where the floor mirrors the light: towards (0, -1, -1.6) from the eye.
+	const uint32_t x = 32, y = uint32_t((1.0f + 1.0f / 1.6f) * 0.5f * 64.0f);
+	const auto smooth = Trace(plane, {floorWith("smooth"), light}, 64).Around(x, y, 1);
+	const auto rough = Trace(plane, {floorWith("rough"), light}, 64).Around(x, y, 1);
+	INFO("smooth " << smooth.r << " rough " << rough.r);
+	CHECK(smooth.r > 3.0f * rough.r);
+	CHECK(rough.r > 0.0f);
+}
+
 TEST_CASE("a UDIM tile whose graph output is not ready draws the default", "[render][gpu][udim][.]") {
 	PlaneScene plane(core::Name("fixture.white"));
 	scene::WorldLighting bright;

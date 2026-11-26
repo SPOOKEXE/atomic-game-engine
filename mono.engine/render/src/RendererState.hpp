@@ -3460,9 +3460,15 @@ namespace engine::render {
 			struct MeshTree {
 				uint64_t Revision = 0;
 				std::unique_ptr<MeshBvh> Tree;
+				// Texture coordinates of each corner, in the tree's leaf order.
+				std::vector<glm::vec2> Uvs;
 			};
 			std::unordered_map<uint64_t, MeshTree> Meshes;
 			SDL_GPUComputePipeline *Pipeline = nullptr;
+			// Colour and material (roughness, metalness) textures, each blitted
+			// into a cell of an atlas the tracer samples.
+			SDL_GPUTexture *ColourAtlas = nullptr;
+			SDL_GPUTexture *MaterialAtlas = nullptr;
 			SDL_GPUTexture *Accumulation = nullptr;
 			uint32_t Width = 0, Height = 0;
 			uint64_t Signature = 0;
