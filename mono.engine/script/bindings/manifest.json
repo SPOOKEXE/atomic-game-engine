@@ -1720,6 +1720,20 @@
 			]
 		},
 		{
+			"name": "MaterialGraph",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.ShaderSource"],
+			"properties": [
+				{"name": "CompileError", "type": "String", "kind": "field", "bytes": 32, "writable": false, "nullable": false, "reads": ["scene.ShaderSource"], "writes": []},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
+				{"name": "Revision", "type": "int32", "kind": "field", "bytes": 4, "writable": false, "nullable": false, "reads": ["scene.ShaderSource"], "writes": []},
+				{"name": "Source", "type": "String", "kind": "field", "bytes": 32, "writable": true, "nullable": false, "reads": ["scene.ShaderSource"], "writes": ["scene.ShaderSource"]}
+			]
+		},
+		{
 			"name": "RenderPass",
 			"parent": "Instance",
 			"constructible": true,

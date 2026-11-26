@@ -2475,6 +2475,12 @@ declare extern type MaterialLayer extends Instance with
 	write Shader: string?
 end
 
+declare extern type MaterialGraph extends Instance with
+	read CompileError: string
+	read Revision: number
+	Source: string
+end
+
 declare extern type RenderPass extends Instance with
 	Composite: boolean
 	read Demand: string
@@ -4530,6 +4536,7 @@ type CreatableInstances = {
 	ShaderScript: ShaderScript,
 	ShaderModule: ShaderModule,
 	MaterialLayer: MaterialLayer,
+	MaterialGraph: MaterialGraph,
 	RenderPass: RenderPass,
 	LensShader: LensShader,
 	EditableMesh: EditableMesh,

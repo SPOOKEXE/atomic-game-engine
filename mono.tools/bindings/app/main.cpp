@@ -22,6 +22,7 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/scene/content/MaterialGraphs.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/content/MaterialLayers.hpp>
@@ -5859,6 +5860,7 @@ int main(int argc, char **argv) {
 	(void)engine::scene::ShaderScriptClass();
 	(void)engine::scene::ShaderModuleClass();
 	(void)engine::scene::MaterialLayerClass();
+	(void)engine::scene::MaterialGraphClass();
 	(void)engine::scene::RenderPassClass();
 	(void)engine::scene::LensShaderClass();
 	(void)engine::scene::EditableMeshClass();
