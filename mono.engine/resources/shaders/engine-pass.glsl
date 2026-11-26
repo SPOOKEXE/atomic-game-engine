@@ -11,6 +11,11 @@ layout(set = 2, binding = 2) uniform sampler2D passDepth;
 layout(set = 2, binding = 3) uniform sampler2D passNormal;
 layout(set = 2, binding = 4) uniform sampler2D passAlbedo;
 layout(set = 2, binding = 5) uniform sampler2D passEmissive;
+// Named images from `#pragma image name`, in declaration order.
+layout(set = 2, binding = 6) uniform sampler2D passImage0;
+layout(set = 2, binding = 7) uniform sampler2D passImage1;
+layout(set = 2, binding = 8) uniform sampler2D passImage2;
+layout(set = 2, binding = 9) uniform sampler2D passImage3;
 
 layout(set = 3, binding = 0) uniform PassValues {
 	// xy lit size in pixels, zw its inverse.
@@ -24,6 +29,9 @@ layout(set = 3, binding = 0) uniform PassValues {
 	vec4 Parameter2;
 	vec4 Parameter3;
 	vec4 ParameterState;
+	// What part of each named image was drawn: xy image 0, zw image 1, then 2 and 3.
+	vec4 ImageScale0;
+	vec4 ImageScale1;
 } lighting;
 
 struct PassInput {

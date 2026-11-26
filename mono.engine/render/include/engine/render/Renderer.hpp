@@ -1073,9 +1073,15 @@ namespace engine::render {
 		// @since v0.10
 		bool DropTexture(const core::Name &name, core::Name owner = {});
 
-		// Builds an authored `Pass` for drawing over the lit image. Same rules for
-		// replacing and refusing as `AddShader`.
-		bool AddPassShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner = {});
+		// Builds an authored `Pass` for drawing over the lit image, reading the
+		// named `images` in binding order. Same rules for replacing and refusing
+		// as `AddShader`.
+		bool AddPassShader(
+			const core::Name &name,
+			std::span<const uint32_t> spirv,
+			core::Name owner = {},
+			std::span<const core::Name> images = {}
+		);
 
 		// Whether a pass of that name is ready.
 		bool HasPassShader(const core::Name &name, core::Name owner = {}) const;

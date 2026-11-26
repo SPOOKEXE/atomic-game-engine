@@ -519,6 +519,8 @@ namespace engine::render {
 				gpu::ReleaseTexture(Device, texture);
 			}
 		}
+		for (auto &[name, image] : slot.PassImages)
+			if (image.Texture != nullptr) gpu::ReleaseTexture(Device, image.Texture);
 		// A resized or released target must not lend its old producer frame to
 		// the next allocation.
 		slot.OcclusionProvenance = {};

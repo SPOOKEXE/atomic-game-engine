@@ -1075,9 +1075,11 @@
 				{"kind":"property","name":"Demand","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"Enabled","type":"boolean","writable":true,"valueType":"bool","storage":"field"},
 				{"kind":"property","name":"Order","type":"number","writable":true,"valueType":"int32","storage":"field"},
+				{"kind":"property","name":"Output","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"Parameters","type":"string","writable":true,"valueType":"String","storage":"computed"},
 				{"kind":"property","name":"Scale","type":"number","writable":true,"valueType":"float","storage":"field"},
-				{"kind":"property","name":"Shader","type":"string","writable":true,"valueType":"Name","storage":"field"}
+				{"kind":"property","name":"Shader","type":"string","writable":true,"valueType":"Name","storage":"field"},
+				{"kind":"property","name":"Stage","type":"Enum.PassStage","writable":true,"valueType":"Enum.PassStage","storage":"computed"}
 			]
 		},
 		{
@@ -3801,6 +3803,13 @@
 				{"name":"Bounce","value":0},
 				{"name":"Stick","value":1},
 				{"name":"Die","value":2}
+			]
+		},
+		{
+			"name": "PassStage",
+			"items": [
+				{"name":"Lighting","value":0},
+				{"name":"Transparent","value":1}
 			]
 		},
 		{

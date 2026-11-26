@@ -1,4 +1,5 @@
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
@@ -7,6 +8,8 @@
 #include <engine/scene/content/RenderPasses.hpp>
 
 #include <algorithm>
+#include <array>
+#include <string_view>
 
 namespace engine::scene {
 	namespace {
@@ -49,6 +52,37 @@ namespace engine::scene {
 			return property;
 		}
 
+		constexpr std::array<std::string_view, 2> STAGES{"Lighting", "Transparent"};
+
+		// `RenderPass.Stage`, the `PassStage` enum by name.
+		ecs::PropertyDescriptor PassStageProperty() {
+			ecs::PropertyDescriptor property;
+			property.Name = core::Name("Stage");
+			property.Type = ecs::PropertyType::Enum;
+			property.EnumName = core::Name("PassStage");
+			property.Size = sizeof(core::Name);
+			property.Kind = ecs::PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<RenderPass>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const auto *pass = store.Get<RenderPass>(instance);
+				if (pass == nullptr) return false;
+				*static_cast<core::Name *>(out) = core::Name(STAGES[static_cast<size_t>(pass->Stage)]);
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				auto *pass = store.GetMutable<RenderPass>(instance);
+				const core::Name named = *static_cast<const core::Name *>(value);
+				for (size_t index = 0; pass != nullptr && index < STAGES.size(); ++index) {
+					if (named != core::Name(STAGES[index])) continue;
+					pass->Stage = static_cast<PassStage>(index);
+					return true;
+				}
+				return false;
+			};
+			return property;
+		}
+
 		ecs::ClassId RegisterRenderPassClass() {
 			EnsureClassTree();
 			const ecs::ClassId instance = ecs::Classes::Find(core::Name("Instance"));
@@ -56,13 +90,16 @@ namespace engine::scene {
 			const ecs::ClassId pass = ecs::Classes::Register("RenderPass", instance, held);
 			ecs::Classes::Property<&RenderPass::Shader>(pass, "Shader");
 			ecs::Classes::Property<&RenderPass::Demand>(pass, "Demand");
+			ecs::Classes::Property<&RenderPass::Output>(pass, "Output");
+			ecs::EnumTable::Register("PassStage", STAGES);
+			ecs::Classes::Computed(pass, PassStageProperty());
 			ecs::Classes::ClampedProperty<&RenderPass::Scale, 0.125f, 1.0f>(pass, "Scale");
 			ecs::Classes::Property<&RenderPass::Order>(pass, "Order");
 			ecs::Classes::Property<&RenderPass::Composite>(pass, "Composite");
 			ecs::Classes::Property<&RenderPass::Enabled>(pass, "Enabled");
 			ecs::Classes::Computed(pass, PassParametersProperty());
 			for (const std::string_view property :
-				 {"Shader", "Demand", "Scale", "Order", "Composite", "Enabled", "Parameters"})
+				 {"Shader", "Demand", "Output", "Stage", "Scale", "Order", "Composite", "Enabled", "Parameters"})
 				(void)ecs::Classes::SetPropertiesTag(pass, property, core::Name("Rendering"));
 			return pass;
 		}
@@ -94,7 +131,11 @@ namespace engine::scene {
 		for (size_t index = 0; index < count; ++index) {
 			const RenderPass &pass = rows[index].Pass;
 			out[index] = {
-				.Shader = pass.Shader, .Demand = pass.Demand, .Scale = pass.Scale, .Composite = pass.Composite
+				.Shader = pass.Shader,
+				.Demand = pass.Demand,
+				.Output = pass.Output,
+				.Stage = pass.Stage,
+				.Scale = pass.Scale, .Composite = pass.Composite
 			};
 			std::copy(std::begin(pass.Parameters), std::end(pass.Parameters), out[index].Parameters.begin());
 			out[index].ParameterMask = pass.ParameterMask;

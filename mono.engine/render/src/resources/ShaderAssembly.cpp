@@ -189,6 +189,11 @@ namespace engine::render {
 			result.Error = label + ": a pass has no textures of its own";
 			return result;
 		}
+		if (!result.Pass && !layout.Images.empty()) {
+			result.Error = label + ": only a pass reads named images";
+			return result;
+		}
+		result.Images = layout.Images;
 		std::string declared;
 		for (size_t slot = 0; slot < layout.Textures.size(); ++slot) {
 			const std::string &texture = layout.Textures[slot];
@@ -196,6 +201,14 @@ namespace engine::render {
 						texture + ";\n";
 			declared += "bool " + texture + "Bound() { return lighting.ParameterState." +
 						(slot == 0 ? "y" : "z") + " > 0.5; }\n";
+		}
+		for (size_t slot = 0; slot < layout.Images.size(); ++slot) {
+			const std::string scale = std::string("lighting.ImageScale") + (slot < 2 ? "0." : "1.") +
+									  (slot % 2 == 0 ? "xy" : "zw");
+			// An image no pass drew this frame reads as zero.
+			declared += "vec4 " + layout.Images[slot] + "(vec2 uv) { return " + scale +
+						".x > 0.0 ? texture(passImage" + std::to_string(slot) + ", uv * " + scale +
+						") : vec4(0.0); }\n";
 		}
 		for (const scene::MaterialParameter &parameter : layout.Parameters) {
 			static constexpr std::array<std::string_view, 4> TYPES{"float", "vec2", "vec3", "vec4"};

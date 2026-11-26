@@ -1245,6 +1245,19 @@ namespace engine::render {
 	}
 
 	bool ViewRecording::RecordNodeTransparent(const graph::RunContext &context) {
+		if (!RecordTransparentDraws(context)) return false;
+		// Passes staged after transparent draws go over what this node wrote.
+		for (const graph::ResourceId resource : context.Writes) {
+			const auto written = GraphTexture(resource, context, false);
+			if (!written.IsValid()) continue;
+			return RunAuthoredPasses(
+				scene::PassStage::Transparent, written.Texture, written.Width, written.Height, context.Name
+			);
+		}
+		return true;
+	}
+
+	bool ViewRecording::RecordTransparentDraws(const graph::RunContext &context) {
 		ViewRecording &recording = *this;
 		Impl *const State = recording.State;
 		FrameResult &result = recording.Result;

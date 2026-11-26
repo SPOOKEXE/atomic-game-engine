@@ -23,6 +23,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace engine::render {
 	// Largest assembled author text, include depth and module count.
@@ -53,6 +54,8 @@ namespace engine::render {
 		bool Pass = false;
 		// Whether it declared a Light as well.
 		bool Lit = false;
+		// The named images a pass reads, in binding order.
+		std::vector<std::string> Images;
 		// Why there is no text; empty on success.
 		std::string Error;
 	};

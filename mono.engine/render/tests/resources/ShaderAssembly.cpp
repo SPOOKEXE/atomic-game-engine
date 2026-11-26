@@ -235,3 +235,31 @@ TEST_CASE("a composed layer stack compiles over maps, a Surface and a Light", "[
 		Compiles(assembled);
 	}
 }
+
+TEST_CASE("a pass names the images it reads and nothing else may", "[render][shader]") {
+	const auto pass = AssembleShader(
+		"reader",
+		"#pragma image blur\n#pragma image mask\n"
+		"vec4 Pass(PassInput i) { return blur(i.UV) * mask(i.UV).a; }\n",
+		{}
+	);
+	REQUIRE(pass.Error.empty());
+	CHECK(pass.Images == std::vector<std::string>{"blur", "mask"});
+	ShaderCompiler compiler;
+	const auto compiled = compiler.Compile(pass.Forward, ShaderStage::Fragment, "reader");
+	INFO(compiled.Error);
+	CHECK_FALSE(compiled.Failed);
+	CHECK_FALSE(AssembleShader(
+					"surface",
+					"#pragma image blur\nvoid Surface(SurfaceInput i, inout SurfaceOutput o) {}\n",
+					{}
+	)
+					.Error.empty());
+	CHECK_FALSE(AssembleShader(
+					"many",
+					"#pragma image a\n#pragma image b\n#pragma image c\n#pragma image d\n#pragma image e\n"
+					"vec4 Pass(PassInput i) { return vec4(0); }\n",
+					{}
+	)
+					.Error.empty());
+}

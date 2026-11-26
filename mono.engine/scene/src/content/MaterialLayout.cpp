@@ -66,12 +66,26 @@ namespace engine::scene {
 			text.remove_prefix(1);
 			if (Word(text) != "pragma") continue;
 			const std::string_view kind = Word(text);
-			if (kind != "parameter" && kind != "texture") continue;
+			if (kind != "parameter" && kind != "texture" && kind != "image") continue;
 			const auto fail = [&](std::string_view reason) {
 				if (layout.Error.empty()) layout.Error = std::to_string(line) + ": " + std::string(reason);
 			};
 			const size_t comment = text.find("//");
 			if (comment != std::string_view::npos) text = text.substr(0, comment);
+			if (kind == "image") {
+				const std::string_view name = Word(text);
+				if (!Identifier(name) || !Trim(text).empty()) {
+					fail("an image is `#pragma image name`");
+				} else if (layout.Find(name) != nullptr || layout.FindTexture(name) >= 0 ||
+						   std::find(layout.Images.begin(), layout.Images.end(), name) != layout.Images.end()) {
+					fail("'" + std::string(name) + "' is declared twice");
+				} else if (layout.Images.size() >= MAX_PASS_IMAGES) {
+					fail("a pass reads at most four named images");
+				} else {
+					layout.Images.emplace_back(name);
+				}
+				continue;
+			}
 			if (kind == "texture") {
 				const std::string_view name = Word(text);
 				if (!Identifier(name) || !Trim(text).empty()) {

@@ -25,6 +25,8 @@ namespace engine::scene {
 
 	inline constexpr size_t MAX_MATERIAL_FLOATS = 16;
 	inline constexpr size_t MAX_MATERIAL_TEXTURES = 2;
+	// Most named images one pass reads.
+	inline constexpr size_t MAX_PASS_IMAGES = 4;
 
 	// One declared parameter.
 	struct MaterialParameter {
@@ -40,6 +42,8 @@ namespace engine::scene {
 	struct MaterialLayout {
 		std::vector<MaterialParameter> Parameters;
 		std::vector<std::string> Textures;
+		// Named images a pass reads, from `#pragma image name`, in binding order.
+		std::vector<std::string> Images;
 		// The first declaration that is wrong, as `line: reason`; empty when none.
 		std::string Error;
 

@@ -85,6 +85,9 @@ namespace engine::render {
 		// Whether this is a `Pass`, which `Renderer::AddPassShader` takes.
 		bool Pass = false;
 
+		// The named images a pass reads, in binding order.
+		std::vector<core::Name> Images;
+
 		// Identity of accepted words, independent of source identity and revision.
 		// Zero when no program is accepted; failed edits preserve this with SpirV.
 		assets::ContentHash CodeHash;

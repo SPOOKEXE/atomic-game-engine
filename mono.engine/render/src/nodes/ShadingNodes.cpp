@@ -13,6 +13,7 @@
 #include "presentation/GpuCommandIdentity.hpp"
 #include "weather/WeatherFallback.hpp"
 
+#include <engine/scene/content/MaterialLayout.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
@@ -1166,131 +1167,9 @@ namespace engine::render {
 			return true;
 		}; // Passes scripts added, over the lit image.
 		const auto applyPasses = [&]() {
-			const auto &lighting = recording.CurrentLighting;
-			const size_t count = std::min(lighting.PassCount, lighting.Passes.size());
-			if (count == 0 || pbr.Lit == nullptr || pbr.LinearDepth == nullptr) return true;
-			const core::Name owner = State->ShaderOwnerOf(*recording.Request.Source, {});
-			const auto drawn = [&](core::Name shader) {
-				if (!shader.IsValid()) return true;
-				// A layer stack is named for the base it covers.
-				const std::string stack = "layers/" + std::string(shader.Text()) + "/";
-				for (uint32_t slot = recording.SceneCount;
-					 slot < recording.SceneCount + recording.PlainOpaque && slot < State->SlotShader.size();
-					 ++slot) {
-					const core::Name held = State->SlotShader[slot];
-					if (held == shader || (held.IsValid() && held.Text().starts_with(stack))) return true;
-				}
-				return false;
-			};
-			struct Run {
-				const scene::ResolvedPass *Pass;
-				const Impl::PassVariant *Variant;
-			};
-			std::vector<Run> runs;
-			for (size_t index = 0; index < count; ++index) {
-				const auto found =
-					State->PassPipelines.find(Impl::ShaderVariantKey(lighting.Passes[index].Shader, owner));
-				if (found != State->PassPipelines.end() && drawn(lighting.Passes[index].Demand))
-					runs.push_back({&lighting.Passes[index], &found->second});
-			}
-			if (runs.empty()) return true;
-			ENGINE_PROFILE_CAT("authored passes", core::ProfileCategory::Render);
-			const uint32_t width = pbrDimensions.LitWidth, height = pbrDimensions.LitHeight;
-			for (SDL_GPUTexture **texture : {&pbr.PassColour, &pbr.PassScratch[0], &pbr.PassScratch[1]}) {
-				if (*texture != nullptr) continue;
-				SDL_GPUTextureCreateInfo info{};
-				info.type = SDL_GPU_TEXTURETYPE_2D;
-				info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
-				info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
-				info.width = width;
-				info.height = height;
-				info.layer_count_or_depth = 1;
-				info.num_levels = 1;
-				info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-				*texture = gpu::CreateTexture(State->Device, &info);
-				if (*texture == nullptr) return true;
-			}
-			struct PassUniforms {
-				glm::vec4 Target;
-				glm::vec4 Scale;
-				glm::vec4 View;
-				glm::vec4 Parameters[4];
-				glm::vec4 ParameterState;
-			} values{};
-			values.Target = {float(width), float(height), 1.0f / float(width), 1.0f / float(height)};
-			values.Scale = {1.0f, 1.0f, uniforms.Target.z, uniforms.Target.w};
-			values.View = {
-				static_cast<float>(std::fmod(State->AnimationSeconds, 1000.0)),
-				float(height) * 0.5f * recording.Matrices.Projection[1][1],
-				uniforms.Planes.y,
-				0.0f
-			};
-			bool colourCurrent = false;
-			size_t previous = 0;
-			bool havePrevious = false;
-			for (const Run &run : runs) {
-				if (!colourCurrent) {
-					SDL_GPUBlitInfo copy{};
-					copy.source.texture = pbr.Lit;
-					copy.source.w = width;
-					copy.source.h = height;
-					copy.destination.texture = pbr.PassColour;
-					copy.destination.w = width;
-					copy.destination.h = height;
-					copy.load_op = SDL_GPU_LOADOP_DONT_CARE;
-					copy.filter = SDL_GPU_FILTER_NEAREST;
-					SDL_BlitGPUTexture(Command, &copy);
-					colourCurrent = true;
-				}
-				const scene::ResolvedPass &pass = *run.Pass;
-				const float scale = pass.Composite ? 1.0f : std::clamp(pass.Scale, 0.125f, 1.0f);
-				const uint32_t drawWidth = std::max(1u, uint32_t(std::ceil(float(width) * scale)));
-				const uint32_t drawHeight = std::max(1u, uint32_t(std::ceil(float(height) * scale)));
-				std::copy(
-					pass.Parameters.begin(),
-					pass.Parameters.end(),
-					reinterpret_cast<float *>(values.Parameters)
-				);
-				values.ParameterState.x = static_cast<float>(pass.ParameterMask);
-				const size_t next = havePrevious ? 1 - previous : 0;
-				SDL_GPUTexture *const target = pass.Composite ? pbr.Lit : pbr.PassScratch[next];
-				const SDL_GPUTextureSamplerBinding bindings[]{
-					{pbr.PassColour, sampler},
-					{havePrevious ? pbr.PassScratch[previous] : State->FallbackTexture, sampler},
-					{pbr.LinearDepth, sampler},
-					{pbr.Normal, sampler},
-					{pbr.Albedo, sampler},
-					{pbr.Emissive, sampler},
-				};
-				recording.EnterNamedPass(context.Name);
-				SDL_GPUColorTargetInfo colour{};
-				colour.texture = target;
-				colour.load_op = pass.Composite ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
-				colour.store_op = SDL_GPU_STOREOP_STORE;
-				SDL_GPURenderPass *draw = SDL_BeginGPURenderPass(Command, &colour, 1, nullptr);
-				if (draw == nullptr) return false;
-				SDL_BindGPUGraphicsPipeline(
-					draw, pass.Composite ? run.Variant->Composite : run.Variant->Scratch
-				);
-				SDL_BindGPUFragmentSamplers(draw, 0, bindings, std::size(bindings));
-				SDL_PushGPUFragmentUniformData(Command, 0, &values, sizeof(values));
-				const SDL_GPUViewport viewport{0.0f, 0.0f, float(drawWidth), float(drawHeight), 0.0f, 1.0f};
-				const SDL_Rect scissor{0, 0, int(drawWidth), int(drawHeight)};
-				SDL_SetGPUViewport(draw, &viewport);
-				SDL_SetGPUScissor(draw, &scissor);
-				SDL_DrawGPUPrimitives(draw, 3, 1, 0, 0);
-				SDL_EndGPURenderPass(draw);
-				core::Metrics::Count("render.authored_passes", 1);
-				if (pass.Composite) {
-					colourCurrent = false;
-				} else {
-					previous = next;
-					havePrevious = true;
-					values.Scale.x = float(drawWidth) / float(width);
-					values.Scale.y = float(drawHeight) / float(height);
-				}
-			}
-			return true;
+			return recording.RunAuthoredPasses(
+				scene::PassStage::Lighting, pbr.Lit, pbrDimensions.LitWidth, pbrDimensions.LitHeight, context.Name
+			);
 		};
 
 		if (baselinePort != node->WritePorts.end()) {
@@ -2820,6 +2699,179 @@ namespace engine::render {
 		// Cycling selects fresh backing storage, which cannot contain the depth
 		// this pass explicitly loads from the G-buffer pass.
 		depthTarget.cycle = false;
+		return true;
+	}
+	bool ViewRecording::RunAuthoredPasses(
+		scene::PassStage stage, SDL_GPUTexture *colourImage, uint32_t width, uint32_t height, core::Name node
+	) {
+		ViewRecording &recording = *this;
+		Impl *const State = recording.State;
+		if (recording.Pbr == nullptr || colourImage == nullptr || width == 0 || height == 0) return true;
+		Impl::PbrSlot &pbr = *recording.Pbr;
+		const Impl::PbrDimensions &pbrDimensions = recording.PbrDimensions;
+		const PbrUniforms &uniforms = recording.Uniforms;
+		SDL_GPUSampler *const sampler = recording.Sampler;
+		const auto &lighting = recording.CurrentLighting;
+		const size_t count = std::min(lighting.PassCount, lighting.Passes.size());
+		if (count == 0 || pbr.LinearDepth == nullptr) return true;
+		// Named images belong to the frame: the first stage starts them over.
+		if (stage == scene::PassStage::Lighting)
+			for (auto &[name, image] : pbr.PassImages) image.Scale = {0.0f, 0.0f};
+		const core::Name owner = State->ShaderOwnerOf(*recording.Request.Source, {});
+		const auto drawn = [&](core::Name shader) {
+			if (!shader.IsValid()) return true;
+			// A layer stack is named for the base it covers.
+			const std::string stack = "layers/" + std::string(shader.Text()) + "/";
+			for (uint32_t slot = recording.SceneCount;
+				 slot < recording.SceneCount + recording.PlainOpaque && slot < State->SlotShader.size();
+				 ++slot) {
+				const core::Name held = State->SlotShader[slot];
+				if (held == shader || (held.IsValid() && held.Text().starts_with(stack))) return true;
+			}
+			return false;
+		};
+		struct Run {
+			const scene::ResolvedPass *Pass;
+			const Impl::PassVariant *Variant;
+		};
+		std::vector<Run> runs;
+		for (size_t index = 0; index < count; ++index) {
+			const scene::ResolvedPass &pass = lighting.Passes[index];
+			if (pass.Stage != stage) continue;
+			const auto found = State->PassPipelines.find(Impl::ShaderVariantKey(pass.Shader, owner));
+			if (found != State->PassPipelines.end() && drawn(pass.Demand)) runs.push_back({&pass, &found->second});
+		}
+		if (runs.empty()) return true;
+		ENGINE_PROFILE_CAT("authored passes", core::ProfileCategory::Render);
+		// Pass images are kept at the lit size; a stage over a larger scene
+		// image is sampled into them.
+		const uint32_t litWidth = pbrDimensions.LitWidth, litHeight = pbrDimensions.LitHeight;
+		const auto make = [&](SDL_GPUTexture *&texture) {
+			if (texture != nullptr) return true;
+			SDL_GPUTextureCreateInfo info{};
+			info.type = SDL_GPU_TEXTURETYPE_2D;
+			info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+			info.width = litWidth;
+			info.height = litHeight;
+			info.layer_count_or_depth = 1;
+			info.num_levels = 1;
+			info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+			texture = gpu::CreateTexture(State->Device, &info);
+			return texture != nullptr;
+		};
+		for (SDL_GPUTexture **texture : {&pbr.PassColour, &pbr.PassScratch[0], &pbr.PassScratch[1]})
+			if (!make(*texture)) return true;
+		struct PassUniforms {
+			glm::vec4 Target;
+			glm::vec4 Scale;
+			glm::vec4 View;
+			glm::vec4 Parameters[4];
+			glm::vec4 ParameterState;
+			glm::vec4 ImageScale[2];
+		} values{};
+		values.Target = {float(width), float(height), 1.0f / float(width), 1.0f / float(height)};
+		values.Scale = {1.0f, 1.0f, uniforms.Target.z, uniforms.Target.w};
+		values.View = {
+			static_cast<float>(std::fmod(State->AnimationSeconds, 1000.0)),
+			float(height) * 0.5f * recording.Matrices.Projection[1][1],
+			uniforms.Planes.y,
+			0.0f
+		};
+		bool colourCurrent = false;
+		size_t previous = 0;
+		bool havePrevious = false;
+		for (const Run &run : runs) {
+			if (!colourCurrent) {
+				SDL_GPUBlitInfo copy{};
+				copy.source.texture = colourImage;
+				copy.source.w = width;
+				copy.source.h = height;
+				copy.destination.texture = pbr.PassColour;
+				copy.destination.w = litWidth;
+				copy.destination.h = litHeight;
+				copy.load_op = SDL_GPU_LOADOP_DONT_CARE;
+				copy.filter = width == litWidth && height == litHeight ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
+				SDL_BlitGPUTexture(recording.Command, &copy);
+				colourCurrent = true;
+			}
+			const scene::ResolvedPass &pass = *run.Pass;
+			const float scale = pass.Composite ? 1.0f : std::clamp(pass.Scale, 0.125f, 1.0f);
+			const uint32_t outWidth = pass.Composite ? width : litWidth;
+			const uint32_t outHeight = pass.Composite ? height : litHeight;
+			const uint32_t drawWidth = std::max(1u, uint32_t(std::ceil(float(outWidth) * scale)));
+			const uint32_t drawHeight = std::max(1u, uint32_t(std::ceil(float(outHeight) * scale)));
+			std::copy(pass.Parameters.begin(), pass.Parameters.end(), reinterpret_cast<float *>(values.Parameters));
+			values.ParameterState.x = static_cast<float>(pass.ParameterMask);
+			std::array<SDL_GPUTexture *, scene::MAX_PASS_IMAGES> images{};
+			for (size_t index = 0; index < images.size(); ++index) {
+				images[index] = State->FallbackTexture;
+				glm::vec2 drawnPart{0.0f};
+				if (index < run.Variant->Images.size()) {
+					const auto held = pbr.PassImages.find(run.Variant->Images[index].Id());
+					if (held != pbr.PassImages.end() && held->second.Texture != nullptr &&
+						held->second.Scale.x > 0.0f) {
+						images[index] = held->second.Texture;
+						drawnPart = held->second.Scale;
+					}
+				}
+				float *const into = reinterpret_cast<float *>(values.ImageScale) + index * 2;
+				into[0] = drawnPart.x;
+				into[1] = drawnPart.y;
+			}
+			// An output image is drawn into; it cannot be read in the same pass.
+			Impl::PbrSlot::PassImage *output = nullptr;
+			if (!pass.Composite && pass.Output.IsValid()) {
+				output = &pbr.PassImages[pass.Output.Id()];
+				if (!make(output->Texture)) return true;
+				for (size_t index = 0; index < images.size(); ++index)
+					if (images[index] == output->Texture) images[index] = State->FallbackTexture;
+			}
+			const size_t next = havePrevious ? 1 - previous : 0;
+			SDL_GPUTexture *const target = pass.Composite ? colourImage
+										   : output != nullptr ? output->Texture
+															   : pbr.PassScratch[next];
+			const SDL_GPUTextureSamplerBinding bindings[]{
+				{pbr.PassColour, sampler},
+				{havePrevious ? pbr.PassScratch[previous] : State->FallbackTexture, sampler},
+				{pbr.LinearDepth, sampler},
+				{pbr.Normal, sampler},
+				{pbr.Albedo, sampler},
+				{pbr.Emissive, sampler},
+				{images[0], sampler},
+				{images[1], sampler},
+				{images[2], sampler},
+				{images[3], sampler},
+			};
+			recording.EnterNamedPass(node);
+			SDL_GPUColorTargetInfo colour{};
+			colour.texture = target;
+			colour.load_op = pass.Composite ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
+			colour.store_op = SDL_GPU_STOREOP_STORE;
+			SDL_GPURenderPass *draw = SDL_BeginGPURenderPass(recording.Command, &colour, 1, nullptr);
+			if (draw == nullptr) return false;
+			SDL_BindGPUGraphicsPipeline(draw, pass.Composite ? run.Variant->Composite : run.Variant->Scratch);
+			SDL_BindGPUFragmentSamplers(draw, 0, bindings, std::size(bindings));
+			SDL_PushGPUFragmentUniformData(recording.Command, 0, &values, sizeof(values));
+			const SDL_GPUViewport viewport{0.0f, 0.0f, float(drawWidth), float(drawHeight), 0.0f, 1.0f};
+			const SDL_Rect scissor{0, 0, int(drawWidth), int(drawHeight)};
+			SDL_SetGPUViewport(draw, &viewport);
+			SDL_SetGPUScissor(draw, &scissor);
+			SDL_DrawGPUPrimitives(draw, 3, 1, 0, 0);
+			SDL_EndGPURenderPass(draw);
+			core::Metrics::Count("render.authored_passes", 1);
+			const glm::vec2 drawnPart{float(drawWidth) / float(litWidth), float(drawHeight) / float(litHeight)};
+			if (pass.Composite) {
+				colourCurrent = false;
+			} else if (output != nullptr) {
+				output->Scale = drawnPart;
+			} else {
+				previous = next;
+				havePrevious = true;
+				values.Scale.x = drawnPart.x;
+				values.Scale.y = drawnPart.y;
+			}
+		}
 		return true;
 	}
 }

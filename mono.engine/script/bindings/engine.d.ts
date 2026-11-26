@@ -522,6 +522,7 @@ declare namespace Enum {
 	interface ParticleFlipbookMode extends EnumItem { readonly __enum: "ParticleFlipbookMode"; }
 	interface ParticleOrientation extends EnumItem { readonly __enum: "ParticleOrientation"; }
 	interface ParticleResponse extends EnumItem { readonly __enum: "ParticleResponse"; }
+	interface PassStage extends EnumItem { readonly __enum: "PassStage"; }
 	interface ResamplerMode extends EnumItem { readonly __enum: "ResamplerMode"; }
 	interface RibbonTool extends EnumItem { readonly __enum: "RibbonTool"; }
 	interface ScaleType extends EnumItem { readonly __enum: "ScaleType"; }
@@ -896,6 +897,10 @@ declare namespace Enum {
 		readonly Bounce: ParticleResponse;
 		readonly Stick: ParticleResponse;
 		readonly Die: ParticleResponse;
+	};
+	const PassStage: {
+		readonly Lighting: PassStage;
+		readonly Transparent: PassStage;
 	};
 	const ResamplerMode: {
 		readonly Default: ResamplerMode;
@@ -2194,9 +2199,11 @@ declare interface RenderPass extends Instance {
 	Demand: string;
 	Enabled: boolean;
 	Order: number;
+	Output: string;
 	Parameters: string;
 	Scale: number;
 	Shader: string;
+	Stage: Enum.PassStage;
 }
 
 declare interface LensShader extends Instance {

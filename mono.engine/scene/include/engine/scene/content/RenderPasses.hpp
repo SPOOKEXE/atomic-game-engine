@@ -3,11 +3,14 @@
 // Passes a script adds over the lit image.
 //
 // A `RenderPass` under `Lighting` names a `ShaderScript` that defines
-// `vec4 Pass(PassInput i)`. Passes run after deferred lighting, sorted by
-// `Order`. One that is not `Composite` draws into a scratch image at `Scale`,
-// which the next pass reads as `Previous`; a composite pass draws over the lit
-// image by its alpha. A pass with a `Demand` runs only on frames that draw that
-// surface shader.
+// `vec4 Pass(PassInput i)`. `Stage` picks where in the frame it runs: after
+// deferred lighting, or after transparent draws, over the scene before tone
+// mapping. Within a stage passes run by `Order`. One that is not `Composite`
+// draws into a scratch image at `Scale`, which the next pass reads as
+// `Previous`; with an `Output` name it draws into that image instead, which any
+// later pass in the frame reads through `#pragma image name`. A composite pass
+// draws over the scene by its alpha. A pass with a `Demand` runs only on frames
+// that draw that surface shader.
 //
 // @tier L7 · shared
 
@@ -28,11 +31,22 @@ namespace engine::scene {
 	// Most passes one world runs; later ones are left out.
 	inline constexpr size_t MAX_RENDER_PASSES = 8;
 
+	// Where in the frame a pass runs.
+	enum class PassStage : uint8_t {
+		// Over the lit image, after deferred lighting.
+		Lighting,
+		// Over the scene after transparent draws, before tone mapping.
+		Transparent,
+	};
+
 	// A `RenderPass` instance.
 	struct RenderPass {
 		core::Name Shader = {};
 		// A surface shader whose draws ask for this pass, or nothing for always.
 		core::Name Demand = {};
+		// A named image a non-composite pass draws into, or nothing for `Previous`.
+		core::Name Output = {};
+		PassStage Stage = PassStage::Lighting;
 		float Scale = 1.0f;
 		int32_t Order = 0;
 		float Parameters[16] = {};
@@ -45,6 +59,8 @@ namespace engine::scene {
 	struct ResolvedPass {
 		core::Name Shader;
 		core::Name Demand;
+		core::Name Output;
+		PassStage Stage = PassStage::Lighting;
 		float Scale = 1.0f;
 		bool Composite = true;
 		std::array<float, 16> Parameters{};

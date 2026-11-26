@@ -59,6 +59,7 @@
 #include <SDL3/SDL_gpu.h>
 #include <SDL3/SDL_video.h>
 #include <glm/mat4x4.hpp>
+#include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
@@ -757,6 +758,8 @@ namespace engine::render {
 			assets::ContentHash CodeHash;
 			SDL_GPUGraphicsPipeline *Scratch = nullptr;
 			SDL_GPUGraphicsPipeline *Composite = nullptr;
+			// The named images the pass reads, bound after the G-buffer.
+			std::vector<core::Name> Images;
 		};
 		std::unordered_map<uint64_t, PassVariant> PassPipelines;
 		void ReleasePass(PassVariant &variant);
@@ -798,6 +801,12 @@ namespace engine::render {
 			// next, at Lit size, made on the first frame that runs one.
 			SDL_GPUTexture *PassColour = nullptr;
 			std::array<SDL_GPUTexture *, 2> PassScratch{};
+			// Images passes drew by `Output` name, and the part of each drawn.
+			struct PassImage {
+				SDL_GPUTexture *Texture = nullptr;
+				glm::vec2 Scale{1.0f};
+			};
+			std::unordered_map<uint32_t, PassImage> PassImages;
 			SDL_GPUTexture *LinearDepth = nullptr;
 			SDL_GPUTexture *FirstSurfaceValidity = nullptr;
 			SDL_GPUTexture *CameraMotionVectors = nullptr;

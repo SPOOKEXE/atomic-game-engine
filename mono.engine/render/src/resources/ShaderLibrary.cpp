@@ -317,6 +317,8 @@ namespace engine::render {
 				if (changed && module.Error.empty()) {
 					module.GBufferSpirV = std::move(gbuffer.SpirV);
 					module.Pass = assembled.Pass;
+					module.Images.clear();
+					for (const std::string &image : assembled.Images) module.Images.emplace_back(image);
 				}
 				scene::SetShaderError(store, text.Source, module.AttemptError);
 				if (changed) State->Changed.push_back(name);

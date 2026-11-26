@@ -699,6 +699,9 @@ end
 declare extern type Enum_ParticleResponse extends EnumItem with
 end
 
+declare extern type Enum_PassStage extends EnumItem with
+end
+
 declare extern type Enum_ResamplerMode extends EnumItem with
 end
 
@@ -1143,6 +1146,10 @@ declare Enum: {
 		Bounce: Enum_ParticleResponse,
 		Stick: Enum_ParticleResponse,
 		Die: Enum_ParticleResponse,
+	},
+	PassStage: {
+		Lighting: Enum_PassStage,
+		Transparent: Enum_PassStage,
 	},
 	ResamplerMode: {
 		Default: Enum_ResamplerMode,
@@ -2469,10 +2476,13 @@ declare extern type RenderPass extends Instance with
 	write Demand: string?
 	Enabled: boolean
 	Order: number
+	read Output: string
+	write Output: string?
 	Parameters: string
 	Scale: number
 	read Shader: string
 	write Shader: string?
+	Stage: Enum_PassStage
 end
 
 declare extern type LensShader extends Instance with

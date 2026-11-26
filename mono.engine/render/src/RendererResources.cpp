@@ -14,6 +14,8 @@
 #include "resources/ShaderBinary.hpp"
 #include "resources/StartupCompilation.hpp"
 
+#include <engine/scene/content/MaterialLayout.hpp>
+#include <algorithm>
 #include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -981,7 +983,7 @@ namespace engine::render {
 			const auto key = Impl::ShaderVariantKey(name, owner);
 			const auto refused = State->PassRefusals.find(key);
 			if (refused != State->PassRefusals.end() && refused->second == module->CodeHash) continue;
-			if (AddPassShader(name, module->SpirV, owner))
+			if (AddPassShader(name, module->SpirV, owner, module->Images))
 				State->PassRefusals.erase(key);
 			else
 				State->PassRefusals[key] = module->CodeHash;
@@ -999,12 +1001,20 @@ namespace engine::render {
 		return State != nullptr && State->PassPipelines.contains(Impl::ShaderVariantKey(name, owner));
 	}
 
-	bool Renderer::AddPassShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner) {
+	bool Renderer::AddPassShader(
+		const core::Name &name,
+		std::span<const uint32_t> spirv,
+		core::Name owner,
+		std::span<const core::Name> images
+	) {
 		if (State == nullptr || State->Device == nullptr || !name.IsValid() || spirv.empty()) return false;
 		const auto hash = assets::Hasher::Of(std::as_bytes(spirv));
 		const auto key = Impl::ShaderVariantKey(name, owner);
 		const auto held = State->PassPipelines.find(key);
-		if (held != State->PassPipelines.end() && held->second.CodeHash == hash) return true;
+		if (held != State->PassPipelines.end() && held->second.CodeHash == hash &&
+			std::ranges::equal(held->second.Images, images))
+			return true;
+		if (images.size() > scene::MAX_PASS_IMAGES) return false;
 		std::string translated;
 		const bool toMsl = State->Binary.Form == resources::ShaderForm::Msl;
 		if (toMsl) {
@@ -1022,11 +1032,11 @@ namespace engine::render {
 		info.entrypoint = State->Binary.EntryPoint;
 		info.format = State->Binary.Format;
 		info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-		info.num_samplers = 6;
+		info.num_samplers = 10;
 		info.num_uniform_buffers = 1;
 		SDL_GPUShader *fragment = SDL_CreateGPUShader(State->Device, &info);
 		SDL_GPUShader *vertex = State->LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-		Impl::PassVariant variant{.CodeHash = hash};
+		Impl::PassVariant variant{.CodeHash = hash, .Images = {images.begin(), images.end()}};
 		if (fragment != nullptr && vertex != nullptr) {
 			SDL_GPUColorTargetDescription target{};
 			target.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;

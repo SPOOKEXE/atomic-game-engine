@@ -1955,6 +1955,63 @@ TEST_CASE("authored passes chain, read the user tag and run on demand", "[render
 	CHECK(plane.At(plane.Capture(), x, y)[2] < 10);
 }
 
+TEST_CASE("authored passes share named images and run after transparent draws", "[render][gpu][material][.]") {
+	PlaneScene plane(core::Name("fixture.white"));
+	render::ShaderCompiler compiler;
+	compiler.SetOptimise(true);
+	const auto add = [&](const char *name, const char *source) {
+		const auto assembled = render::AssembleShader(name, source, {});
+		INFO(assembled.Error);
+		REQUIRE(assembled.Error.empty());
+		const auto compiled = compiler.Compile(assembled.Forward, render::ShaderStage::Fragment, name);
+		INFO(compiled.Error);
+		REQUIRE_FALSE(compiled.Failed);
+		std::vector<core::Name> images;
+		for (const auto &image : assembled.Images) images.emplace_back(image);
+		REQUIRE(plane.Fixture.Render.AddPassShader(core::Name(name), compiled.SpirV, {}, images));
+	};
+	add("mask.write", "vec4 Pass(PassInput i) { return vec4(1, 0, 0, 1); }");
+	// A pass between them leaves `Previous` holding something else.
+	add("mask.other", "vec4 Pass(PassInput i) { return vec4(0, 0, 1, 1); }");
+	add("mask.read",
+		"#pragma image mask\n"
+		"vec4 Pass(PassInput i) { return vec4(mask(i.UV).r, 0, Previous(i.UV).b * 0.0, 1); }");
+	add("late.green", "vec4 Pass(PassInput i) { return vec4(0, Colour(i.UV).r, 0, 1); }");
+	scene::WorldLighting lighting;
+	lighting.Ambient = lighting.OutdoorAmbient = {0, 0, 0};
+	lighting.Direct = {0, 0, 0};
+	lighting.Passes[0] = {
+		.Shader = core::Name("mask.write"), .Output = core::Name("mask"), .Scale = 0.5f, .Composite = false
+	};
+	lighting.Passes[1] = {.Shader = core::Name("mask.other"), .Composite = false};
+	lighting.Passes[2] = {.Shader = core::Name("mask.read")};
+	lighting.PassCount = 3;
+	const auto light = [&] {
+		plane.Fixture.Render.SetLighting(lighting);
+		plane.View.Lighting = lighting;
+	};
+	light();
+	const uint32_t x = plane.Target.Width / 2, y = plane.Target.Height / 2;
+	const auto red = plane.At(plane.Capture(), x, y);
+	INFO(int(red[0]) << " " << int(red[1]) << " " << int(red[2]));
+	CHECK(red[0] > 100);
+	CHECK(red[2] < 10);
+	// After transparent draws, the scene so far is what `Colour` reads.
+	lighting.Passes[3] = {.Shader = core::Name("late.green"), .Stage = scene::PassStage::Transparent};
+	lighting.PassCount = 4;
+	light();
+	const auto green = plane.At(plane.Capture(), x, y);
+	INFO(int(green[0]) << " " << int(green[1]) << " " << int(green[2]));
+	CHECK(green[1] > 100);
+	CHECK(green[0] < 10);
+	// Unwritten, an image reads as nothing.
+	lighting.Passes[0] = lighting.Passes[1];
+	lighting.Passes[1] = lighting.Passes[2];
+	lighting.PassCount = 2;
+	light();
+	CHECK(plane.At(plane.Capture(), x, y)[0] < 10);
+}
+
 TEST_CASE("a UDIM tile whose graph output is not ready draws the default", "[render][gpu][udim][.]") {
 	PlaneScene plane(core::Name("fixture.white"));
 	scene::WorldLighting bright;

@@ -767,6 +767,14 @@ namespace engine::render {
 		bool RecordNodeDepthPeel(const graph::RunContext &context);
 		bool RecordNodeTransparentLayer(const graph::RunContext &context);
 		bool RecordNodeTransparent(const graph::RunContext &context);
+		// The transparent node's draws, before any authored passes.
+		bool RecordTransparentDraws(const graph::RunContext &context);
+
+		// Draws the world's `RenderPass`es of `stage` over `colourImage`, a colour
+		// image of `width` by `height`.
+		bool RunAuthoredPasses(
+			scene::PassStage stage, SDL_GPUTexture *colourImage, uint32_t width, uint32_t height, core::Name node
+		);
 		bool RecordNodeMirrorCapture(const graph::RunContext &context);
 		bool RecordNodeMirrorOverlay(const graph::RunContext &context);
 		bool RecordNodeSpatialOverlay(const graph::RunContext &context);
