@@ -263,3 +263,19 @@ TEST_CASE("a pass names the images it reads and nothing else may", "[render][sha
 	)
 					.Error.empty());
 }
+
+TEST_CASE("a compute pass compiles for the compute stage", "[render][shader]") {
+	const auto pass = AssembleShader(
+		"scatter",
+		"#pragma image source\n"
+		"void Compute(PassInput i, ivec2 pixel) { Store(pixel.yx, source(i.UV) + Colour(i.UV)); }\n",
+		{}
+	);
+	REQUIRE(pass.Error.empty());
+	CHECK(pass.Pass);
+	CHECK(pass.Compute);
+	ShaderCompiler compiler;
+	const auto compiled = compiler.Compile(pass.Forward, ShaderStage::Compute, "scatter");
+	INFO(compiled.Error);
+	CHECK_FALSE(compiled.Failed);
+}

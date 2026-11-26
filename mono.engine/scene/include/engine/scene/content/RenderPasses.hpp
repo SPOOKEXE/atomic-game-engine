@@ -9,8 +9,10 @@
 // draws into a scratch image at `Scale`, which the next pass reads as
 // `Previous`; with an `Output` name it draws into that image instead, which any
 // later pass in the frame reads through `#pragma image name`. A composite pass
-// draws over the scene by its alpha. A pass with a `Demand` runs only on frames
-// that draw that surface shader.
+// draws over the scene by its alpha. A shader that defines `void
+// Compute(PassInput i, ivec2 pixel)` instead runs as a compute dispatch over its
+// image and may `Store` to any pixel of it; it is never composite. A pass with a
+// `Demand` runs only on frames that draw that surface shader.
 //
 // @tier L7 · shared
 

@@ -153,7 +153,8 @@ namespace engine::render {
 		const std::string code = WithoutComments(source);
 		const bool main = Declares(code, "void", "main");
 		result.Surface = !main && Declares(code, "void", "Surface");
-		result.Pass = !main && !result.Surface && Declares(code, "vec4", "Pass");
+		result.Compute = !main && !result.Surface && Declares(code, "void", "Compute");
+		result.Pass = !main && !result.Surface && (result.Compute || Declares(code, "vec4", "Pass"));
 		result.Lit = result.Surface && Declares(code, "vec3", "Light");
 		Expansion expansion{.Modules = modules, .Surface = result.Surface || result.Pass};
 		const std::string label = name.empty() ? std::string("shader") : std::string(name);
@@ -228,14 +229,25 @@ namespace engine::render {
 		}
 		if (result.Pass) {
 			result.Forward = "#version 450\n#extension GL_GOOGLE_cpp_style_line_directive : require\n";
+			if (result.Compute) result.Forward += "#define PASS_COMPUTE\n";
 			result.Forward += ENGINE_PASS_GLSL;
 			result.Forward += declared;
 			result.Forward += expansion.Out;
-			result.Forward += "\n#line 1 \"engine/pass\"\nvoid main() {\n"
-							  "	PassInput i;\n	i.UV = inUv;\n	i.Texel = lighting.Target.zw;\n"
-							  "	i.Depth = Depth(inUv);\n"
-							  "	i.PixelsPerUnit = lighting.View.y / max(i.Depth, 1e-4);\n"
-							  "	i.Time = lighting.View.x;\n	outColour = Pass(i);\n}\n";
+			if (result.Compute) {
+				result.Forward += "\n#line 1 \"engine/pass\"\nvoid main() {\n"
+								  "	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);\n"
+								  "	if (any(greaterThanEqual(pixel, OutputSize()))) return;\n"
+								  "	PassInput i;\n	i.UV = (vec2(pixel) + 0.5) / lighting.Output.xy;\n"
+								  "	i.Texel = lighting.Target.zw;\n	i.Depth = Depth(i.UV);\n"
+								  "	i.PixelsPerUnit = lighting.View.y / max(i.Depth, 1e-4);\n"
+								  "	i.Time = lighting.View.x;\n	Compute(i, pixel);\n}\n";
+			} else {
+				result.Forward += "\n#line 1 \"engine/pass\"\nvoid main() {\n"
+								  "	PassInput i;\n	i.UV = inUv;\n	i.Texel = lighting.Target.zw;\n"
+								  "	i.Depth = Depth(inUv);\n"
+								  "	i.PixelsPerUnit = lighting.View.y / max(i.Depth, 1e-4);\n"
+								  "	i.Time = lighting.View.x;\n	outColour = Pass(i);\n}\n";
+			}
 			return result;
 		}
 		const auto wrap = [&](bool gbuffer) {

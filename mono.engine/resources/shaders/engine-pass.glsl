@@ -1,23 +1,34 @@
 // engine/pass: what an authored `vec4 Pass(PassInput i)` is written against.
 // Its rgb is drawn over the lit image by its alpha on a composite pass, and
-// kept for the next pass on any other.
+// kept for the next pass on any other. A `void Compute(PassInput i, ivec2
+// pixel)` runs once per pixel of its output instead, and writes any pixel of it
+// with `Store`.
 
+#ifdef PASS_COMPUTE
+#define PASS_SAMPLERS 0
+#define PASS_VALUES 2
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0, rgba16f) uniform writeonly image2D passOutput;
+#else
+#define PASS_SAMPLERS 2
+#define PASS_VALUES 3
 layout(location = 0) in vec2 inUv;
 layout(location = 0) out vec4 outColour;
+#endif
 
-layout(set = 2, binding = 0) uniform sampler2D passColour;
-layout(set = 2, binding = 1) uniform sampler2D passPrevious;
-layout(set = 2, binding = 2) uniform sampler2D passDepth;
-layout(set = 2, binding = 3) uniform sampler2D passNormal;
-layout(set = 2, binding = 4) uniform sampler2D passAlbedo;
-layout(set = 2, binding = 5) uniform sampler2D passEmissive;
+layout(set = PASS_SAMPLERS, binding = 0) uniform sampler2D passColour;
+layout(set = PASS_SAMPLERS, binding = 1) uniform sampler2D passPrevious;
+layout(set = PASS_SAMPLERS, binding = 2) uniform sampler2D passDepth;
+layout(set = PASS_SAMPLERS, binding = 3) uniform sampler2D passNormal;
+layout(set = PASS_SAMPLERS, binding = 4) uniform sampler2D passAlbedo;
+layout(set = PASS_SAMPLERS, binding = 5) uniform sampler2D passEmissive;
 // Named images from `#pragma image name`, in declaration order.
-layout(set = 2, binding = 6) uniform sampler2D passImage0;
-layout(set = 2, binding = 7) uniform sampler2D passImage1;
-layout(set = 2, binding = 8) uniform sampler2D passImage2;
-layout(set = 2, binding = 9) uniform sampler2D passImage3;
+layout(set = PASS_SAMPLERS, binding = 6) uniform sampler2D passImage0;
+layout(set = PASS_SAMPLERS, binding = 7) uniform sampler2D passImage1;
+layout(set = PASS_SAMPLERS, binding = 8) uniform sampler2D passImage2;
+layout(set = PASS_SAMPLERS, binding = 9) uniform sampler2D passImage3;
 
-layout(set = 3, binding = 0) uniform PassValues {
+layout(set = PASS_VALUES, binding = 0) uniform PassValues {
 	// xy lit size in pixels, zw its inverse.
 	vec4 Target;
 	// xy what part of the previous pass's image was drawn, zw of the G-buffer.
@@ -32,6 +43,8 @@ layout(set = 3, binding = 0) uniform PassValues {
 	// What part of each named image was drawn: xy image 0, zw image 1, then 2 and 3.
 	vec4 ImageScale0;
 	vec4 ImageScale1;
+	// xy the pixels this pass draws.
+	vec4 Output;
 } lighting;
 
 struct PassInput {
@@ -55,3 +68,13 @@ float User(vec2 uv) {
 	float marker = texture(passNormal, uv * lighting.Scale.zw).a;
 	return marker > 0.17 && marker < 0.5 ? texture(passEmissive, uv * lighting.Scale.zw).a : 0.0;
 }
+
+#ifdef PASS_COMPUTE
+// The pixels a compute pass covers.
+ivec2 OutputSize() { return ivec2(lighting.Output.xy); }
+// Writes one pixel of the output; outside it, nothing.
+void Store(ivec2 pixel, vec4 value) {
+	if (all(greaterThanEqual(pixel, ivec2(0))) && all(lessThan(pixel, OutputSize())))
+		imageStore(passOutput, pixel, value);
+}
+#endif

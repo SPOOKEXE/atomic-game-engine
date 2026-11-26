@@ -299,7 +299,11 @@ namespace engine::render {
 					result.Failed = true;
 					result.Error = std::move(assembled.Error);
 				} else {
-					result = State->Compiler.Compile(assembled.Forward, ShaderStage::Fragment, name.Text());
+					result = State->Compiler.Compile(
+						assembled.Forward,
+						assembled.Compute ? ShaderStage::Compute : ShaderStage::Fragment,
+						name.Text()
+					);
 					if (!result.Failed && assembled.Surface) {
 						gbuffer =
 							State->Compiler.Compile(assembled.GBuffer, ShaderStage::Fragment, name.Text());
@@ -317,6 +321,7 @@ namespace engine::render {
 				if (changed && module.Error.empty()) {
 					module.GBufferSpirV = std::move(gbuffer.SpirV);
 					module.Pass = assembled.Pass;
+					module.Compute = assembled.Compute;
 					module.Images.clear();
 					for (const std::string &image : assembled.Images) module.Images.emplace_back(image);
 				}

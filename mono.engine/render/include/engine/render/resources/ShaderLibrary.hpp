@@ -85,6 +85,9 @@ namespace engine::render {
 		// Whether this is a `Pass`, which `Renderer::AddPassShader` takes.
 		bool Pass = false;
 
+		// Whether the pass is compiled for the compute stage.
+		bool Compute = false;
+
 		// The named images a pass reads, in binding order.
 		std::vector<core::Name> Images;
 

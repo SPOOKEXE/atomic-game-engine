@@ -2751,7 +2751,8 @@ namespace engine::render {
 			SDL_GPUTextureCreateInfo info{};
 			info.type = SDL_GPU_TEXTURETYPE_2D;
 			info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
-			info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+			info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER |
+						 SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
 			info.width = litWidth;
 			info.height = litHeight;
 			info.layer_count_or_depth = 1;
@@ -2769,6 +2770,7 @@ namespace engine::render {
 			glm::vec4 Parameters[4];
 			glm::vec4 ParameterState;
 			glm::vec4 ImageScale[2];
+			glm::vec4 Output;
 		} values{};
 		values.Target = {float(width), float(height), 1.0f / float(width), 1.0f / float(height)};
 		values.Scale = {1.0f, 1.0f, uniforms.Target.z, uniforms.Target.w};
@@ -2796,9 +2798,12 @@ namespace engine::render {
 				colourCurrent = true;
 			}
 			const scene::ResolvedPass &pass = *run.Pass;
-			const float scale = pass.Composite ? 1.0f : std::clamp(pass.Scale, 0.125f, 1.0f);
-			const uint32_t outWidth = pass.Composite ? width : litWidth;
-			const uint32_t outHeight = pass.Composite ? height : litHeight;
+			// A compute pass writes its own image; it never draws over the scene.
+			const bool compute = run.Variant->Compute != nullptr;
+			const bool composite = pass.Composite && !compute;
+			const float scale = composite ? 1.0f : std::clamp(pass.Scale, 0.125f, 1.0f);
+			const uint32_t outWidth = composite ? width : litWidth;
+			const uint32_t outHeight = composite ? height : litHeight;
 			const uint32_t drawWidth = std::max(1u, uint32_t(std::ceil(float(outWidth) * scale)));
 			const uint32_t drawHeight = std::max(1u, uint32_t(std::ceil(float(outHeight) * scale)));
 			std::copy(pass.Parameters.begin(), pass.Parameters.end(), reinterpret_cast<float *>(values.Parameters));
@@ -2821,14 +2826,14 @@ namespace engine::render {
 			}
 			// An output image is drawn into; it cannot be read in the same pass.
 			Impl::PbrSlot::PassImage *output = nullptr;
-			if (!pass.Composite && pass.Output.IsValid()) {
+			if (!composite && pass.Output.IsValid()) {
 				output = &pbr.PassImages[pass.Output.Id()];
 				if (!make(output->Texture)) return true;
 				for (size_t index = 0; index < images.size(); ++index)
 					if (images[index] == output->Texture) images[index] = State->FallbackTexture;
 			}
 			const size_t next = havePrevious ? 1 - previous : 0;
-			SDL_GPUTexture *const target = pass.Composite ? colourImage
+			SDL_GPUTexture *const target = composite ? colourImage
 										   : output != nullptr ? output->Texture
 															   : pbr.PassScratch[next];
 			const SDL_GPUTextureSamplerBinding bindings[]{
@@ -2843,14 +2848,27 @@ namespace engine::render {
 				{images[2], sampler},
 				{images[3], sampler},
 			};
+			values.Output = {float(drawWidth), float(drawHeight), 0.0f, 0.0f};
 			recording.EnterNamedPass(node);
 			SDL_GPUColorTargetInfo colour{};
 			colour.texture = target;
-			colour.load_op = pass.Composite ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
+			colour.load_op = composite ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
 			colour.store_op = SDL_GPU_STOREOP_STORE;
 			SDL_GPURenderPass *draw = SDL_BeginGPURenderPass(recording.Command, &colour, 1, nullptr);
 			if (draw == nullptr) return false;
-			SDL_BindGPUGraphicsPipeline(draw, pass.Composite ? run.Variant->Composite : run.Variant->Scratch);
+			if (compute) {
+				// The clear above starts the image empty; the dispatch writes what it stores.
+				SDL_EndGPURenderPass(draw);
+				const SDL_GPUStorageTextureReadWriteBinding written{.texture = target};
+				SDL_GPUComputePass *dispatch = SDL_BeginGPUComputePass(recording.Command, &written, 1, nullptr, 0);
+				if (dispatch == nullptr) return false;
+				SDL_BindGPUComputePipeline(dispatch, run.Variant->Compute);
+				SDL_BindGPUComputeSamplers(dispatch, 0, bindings, std::size(bindings));
+				SDL_PushGPUComputeUniformData(recording.Command, 0, &values, sizeof(values));
+				SDL_DispatchGPUCompute(dispatch, (drawWidth + 7) / 8, (drawHeight + 7) / 8, 1);
+				SDL_EndGPUComputePass(dispatch);
+			} else {
+			SDL_BindGPUGraphicsPipeline(draw, composite ? run.Variant->Composite : run.Variant->Scratch);
 			SDL_BindGPUFragmentSamplers(draw, 0, bindings, std::size(bindings));
 			SDL_PushGPUFragmentUniformData(recording.Command, 0, &values, sizeof(values));
 			const SDL_GPUViewport viewport{0.0f, 0.0f, float(drawWidth), float(drawHeight), 0.0f, 1.0f};
@@ -2859,9 +2877,10 @@ namespace engine::render {
 			SDL_SetGPUScissor(draw, &scissor);
 			SDL_DrawGPUPrimitives(draw, 3, 1, 0, 0);
 			SDL_EndGPURenderPass(draw);
+			}
 			core::Metrics::Count("render.authored_passes", 1);
 			const glm::vec2 drawnPart{float(drawWidth) / float(litWidth), float(drawHeight) / float(litHeight)};
-			if (pass.Composite) {
+			if (composite) {
 				colourCurrent = false;
 			} else if (output != nullptr) {
 				output->Scale = drawnPart;

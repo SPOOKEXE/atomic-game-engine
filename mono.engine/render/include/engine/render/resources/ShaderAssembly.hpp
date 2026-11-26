@@ -11,8 +11,9 @@
 //
 //   engine/surface   SurfaceInput, SurfaceOutput, LightSample, DefaultSurface
 //                    (always present in a surface)
-//   engine/pass      PassInput and the images a `vec4 Pass(PassInput i)` reads
-//                    (always present in a pass)
+//   engine/pass      PassInput and the images a `vec4 Pass(PassInput i)` or a
+//                    `void Compute(PassInput i, ivec2 pixel)` reads, and
+//                    `Store` for the latter (always present in a pass)
 //   engine/brdf      lobes for a Light function (always present in a surface)
 //
 // Text in, text out: nothing here touches a device or a store.
@@ -52,6 +53,9 @@ namespace engine::render {
 		bool Surface = false;
 		// Whether it declared a Pass, which is drawn over the lit image.
 		bool Pass = false;
+		// Whether the pass is `void Compute(PassInput i, ivec2 pixel)`, compiled
+		// for the compute stage.
+		bool Compute = false;
 		// Whether it declared a Light as well.
 		bool Lit = false;
 		// The named images a pass reads, in binding order.

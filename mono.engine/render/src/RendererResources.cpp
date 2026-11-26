@@ -983,7 +983,7 @@ namespace engine::render {
 			const auto key = Impl::ShaderVariantKey(name, owner);
 			const auto refused = State->PassRefusals.find(key);
 			if (refused != State->PassRefusals.end() && refused->second == module->CodeHash) continue;
-			if (AddPassShader(name, module->SpirV, owner, module->Images))
+			if (AddPassShader(name, module->SpirV, owner, module->Images, module->Compute))
 				State->PassRefusals.erase(key);
 			else
 				State->PassRefusals[key] = module->CodeHash;
@@ -994,6 +994,7 @@ namespace engine::render {
 	void Renderer::Impl::ReleasePass(PassVariant &variant) {
 		if (variant.Scratch != nullptr) SDL_ReleaseGPUGraphicsPipeline(Device, variant.Scratch);
 		if (variant.Composite != nullptr) SDL_ReleaseGPUGraphicsPipeline(Device, variant.Composite);
+		if (variant.Compute != nullptr) SDL_ReleaseGPUComputePipeline(Device, variant.Compute);
 		variant = {};
 	}
 
@@ -1005,14 +1006,15 @@ namespace engine::render {
 		const core::Name &name,
 		std::span<const uint32_t> spirv,
 		core::Name owner,
-		std::span<const core::Name> images
+		std::span<const core::Name> images,
+		bool compute
 	) {
 		if (State == nullptr || State->Device == nullptr || !name.IsValid() || spirv.empty()) return false;
 		const auto hash = assets::Hasher::Of(std::as_bytes(spirv));
 		const auto key = Impl::ShaderVariantKey(name, owner);
 		const auto held = State->PassPipelines.find(key);
 		if (held != State->PassPipelines.end() && held->second.CodeHash == hash &&
-			std::ranges::equal(held->second.Images, images))
+			std::ranges::equal(held->second.Images, images) && (held->second.Compute != nullptr) == compute)
 			return true;
 		if (images.size() > scene::MAX_PASS_IMAGES) return false;
 		std::string translated;
@@ -1024,6 +1026,36 @@ namespace engine::render {
 				return false;
 			}
 			translated = std::move(result.Source);
+		}
+		if (compute) {
+			if (toMsl) {
+				ENGINE_ERROR("pass '{}': compute passes need SPIR-V", name.Text());
+				return false;
+			}
+			SDL_GPUComputePipelineCreateInfo info{};
+			info.code = reinterpret_cast<const Uint8 *>(spirv.data());
+			info.code_size = spirv.size() * sizeof(uint32_t);
+			info.entrypoint = State->Binary.EntryPoint;
+			info.format = State->Binary.Format;
+			info.num_samplers = 10;
+			info.num_readwrite_storage_textures = 1;
+			info.num_uniform_buffers = 1;
+			info.threadcount_x = 8;
+			info.threadcount_y = 8;
+			info.threadcount_z = 1;
+			Impl::PassVariant variant{.CodeHash = hash, .Images = {images.begin(), images.end()}};
+			variant.Compute = SDL_CreateGPUComputePipeline(State->Device, &info);
+			if (variant.Compute == nullptr) {
+				ENGINE_ERROR("pass '{}': {}", name.Text(), SDL_GetError());
+				return false;
+			}
+			if (held != State->PassPipelines.end()) {
+				(void)WaitForFrame();
+				State->ReleasePass(held->second);
+			}
+			State->PassPipelines[key] = std::move(variant);
+			++State->ResourceEpoch;
+			return true;
 		}
 		SDL_GPUShaderCreateInfo info{};
 		info.code = toMsl ? reinterpret_cast<const Uint8 *>(translated.data())

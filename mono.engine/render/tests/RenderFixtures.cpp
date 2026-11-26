@@ -2012,6 +2012,53 @@ TEST_CASE("authored passes share named images and run after transparent draws", 
 	CHECK(plane.At(plane.Capture(), x, y)[0] < 10);
 }
 
+TEST_CASE("a compute pass writes any pixel of its image", "[render][gpu][material][.]") {
+	PlaneScene plane(core::Name("fixture.white"));
+	render::ShaderCompiler compiler;
+	const auto add = [&](const char *name, const char *source) {
+		const auto assembled = render::AssembleShader(name, source, {});
+		INFO(assembled.Error);
+		REQUIRE(assembled.Error.empty());
+		const auto compiled = compiler.Compile(
+			assembled.Forward,
+			assembled.Compute ? render::ShaderStage::Compute : render::ShaderStage::Fragment,
+			name
+		);
+		INFO(compiled.Error);
+		REQUIRE_FALSE(compiled.Failed);
+		std::vector<core::Name> images;
+		for (const auto &image : assembled.Images) images.emplace_back(image);
+		REQUIRE(plane.Fixture.Render.AddPassShader(
+			core::Name(name), compiled.SpirV, {}, images, assembled.Compute
+		));
+	};
+	// Each pixel stores its own column at the mirrored one, so the image runs
+	// bright to dark from left to right.
+	add("mirror.compute",
+		"void Compute(PassInput i, ivec2 pixel) {\n"
+		"	Store(OutputSize() - 1 - pixel, vec4(i.UV.x, 0, 0, 1));\n}\n");
+	add("mirror.show",
+		"#pragma image mirrored\nvec4 Pass(PassInput i) { return vec4(mirrored(i.UV).r, 0, 0, 1); }");
+	scene::WorldLighting lighting;
+	lighting.Ambient = lighting.OutdoorAmbient = {0, 0, 0};
+	lighting.Direct = {0, 0, 0};
+	lighting.Passes[0] = {
+		.Shader = core::Name("mirror.compute"), .Output = core::Name("mirrored"), .Composite = false
+	};
+	lighting.Passes[1] = {.Shader = core::Name("mirror.show")};
+	lighting.PassCount = 2;
+	plane.Fixture.Render.SetLighting(lighting);
+	plane.View.Lighting = lighting;
+	const auto image = plane.Capture();
+	const uint32_t y = plane.Target.Height / 2;
+	// Both inside the plane, which is all the scene draws.
+	const auto left = plane.At(image, plane.Target.Width * 2 / 5, y);
+	const auto right = plane.At(image, plane.Target.Width * 3 / 5, y);
+	INFO(int(left[0]) << " " << int(right[0]));
+	CHECK(left[0] > right[0] + 10);
+	CHECK(left[1] < 10);
+}
+
 TEST_CASE("a UDIM tile whose graph output is not ready draws the default", "[render][gpu][udim][.]") {
 	PlaneScene plane(core::Name("fixture.white"));
 	scene::WorldLighting bright;

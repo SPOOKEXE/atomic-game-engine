@@ -758,6 +758,8 @@ namespace engine::render {
 			assets::ContentHash CodeHash;
 			SDL_GPUGraphicsPipeline *Scratch = nullptr;
 			SDL_GPUGraphicsPipeline *Composite = nullptr;
+			// Set instead of the two above for a compute pass.
+			SDL_GPUComputePipeline *Compute = nullptr;
 			// The named images the pass reads, bound after the G-buffer.
 			std::vector<core::Name> Images;
 		};
