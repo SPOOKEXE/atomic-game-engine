@@ -45,6 +45,7 @@
 //
 // @tier L12 · client
 
+#include <array>
 #include <engine/assets/ContentHash.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -81,6 +82,10 @@ namespace engine::render {
 		// The same surface written for the G-buffer pass, or empty for a whole
 		// program, which is drawn lit before that pass.
 		std::vector<uint32_t> GBufferSpirV;
+
+		// A surface's `Vertex` hook in each engine vertex stage, in
+		// `VertexStage` order; all empty without one.
+		std::array<std::vector<uint32_t>, 4> VertexSpirV;
 
 		// Whether this is a `Pass`, which `Renderer::AddPassShader` takes.
 		bool Pass = false;

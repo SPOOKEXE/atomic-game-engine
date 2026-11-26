@@ -61,6 +61,7 @@ namespace engine::render {
 			module.BuiltIn = false;
 			module.SpirV = std::move(result.SpirV);
 			module.GBufferSpirV.clear();
+			module.VertexSpirV = {};
 			module.CodeHash = assets::Hasher::Of(std::as_bytes(std::span(module.SpirV)));
 			module.Capabilities = std::move(result.Capabilities);
 			module.Optimizations = std::move(result.Optimizations);
@@ -295,6 +296,7 @@ namespace engine::render {
 				}
 
 				ShaderCompilation result, gbuffer;
+				std::array<std::vector<uint32_t>, 4> vertex;
 				if (!assembled.Error.empty()) {
 					result.Failed = true;
 					result.Error = std::move(assembled.Error);
@@ -312,6 +314,17 @@ namespace engine::render {
 							result.Error = std::move(gbuffer.Error);
 						}
 					}
+					for (size_t stage = 0; !result.Failed && stage < assembled.Vertex.size(); ++stage) {
+						if (assembled.Vertex[stage].empty()) continue;
+						auto compiled =
+							State->Compiler.Compile(assembled.Vertex[stage], ShaderStage::Vertex, name.Text());
+						if (compiled.Failed) {
+							result.Failed = true;
+							result.Error = std::move(compiled.Error);
+						} else {
+							vertex[stage] = std::move(compiled.SpirV);
+						}
+					}
 				}
 
 				ShaderModule &module = State->Modules[ModuleKey(name, owner)];
@@ -320,6 +333,12 @@ namespace engine::render {
 				module.AttemptModuleStamp = moduleStamp;
 				if (changed && module.Error.empty()) {
 					module.GBufferSpirV = std::move(gbuffer.SpirV);
+					module.VertexSpirV = std::move(vertex);
+					// A change to Vertex alone is a change to the module.
+					assets::Hasher hasher;
+					hasher.Update(std::as_bytes(std::span(module.SpirV)));
+					for (const auto &stage : module.VertexSpirV) hasher.Update(std::as_bytes(std::span(stage)));
+					module.CodeHash = hasher.Finish();
 					module.Pass = assembled.Pass;
 					module.Compute = assembled.Compute;
 					module.Images.clear();

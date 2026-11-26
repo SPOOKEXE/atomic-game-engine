@@ -536,13 +536,17 @@ namespace engine::render {
 		const core::Name &name,
 		std::span<const uint32_t> spirv,
 		core::Name owner,
-		std::span<const uint32_t> gbuffer
+		std::span<const uint32_t> gbuffer,
+		std::span<const std::vector<uint32_t>> vertex
 	) {
 		if (State == nullptr || State->Device == nullptr || !name.IsValid() || spirv.empty()) {
 			return false;
 		}
 
-		const auto hash = assets::Hasher::Of(std::as_bytes(spirv));
+		assets::Hasher hasher;
+		hasher.Update(std::as_bytes(spirv));
+		for (const auto &stage : vertex) hasher.Update(std::as_bytes(std::span(stage)));
+		const auto hash = vertex.empty() ? assets::Hasher::Of(std::as_bytes(spirv)) : hasher.Finish();
 		const auto held = State->ShaderVariants.find(Impl::ShaderVariantKey(name, owner));
 		if (held != State->ShaderVariants.end() && held->second.CodeHash == hash) return true;
 
@@ -559,7 +563,7 @@ namespace engine::render {
 		if (State->ShaderVariants.contains(Impl::ShaderVariantKey(name, owner))) {
 			(void)WaitForFrame();
 		}
-		if (!State->AddShaderVariant(name, spirv, owner, gbuffer)) return false;
+		if (!State->AddShaderVariant(name, spirv, owner, gbuffer, vertex)) return false;
 		++State->ResourceEpoch;
 		return true;
 	}
@@ -568,7 +572,8 @@ namespace engine::render {
 		const core::Name &name,
 		std::span<const uint32_t> spirv,
 		core::Name owner,
-		std::span<const uint32_t> gbuffer
+		std::span<const uint32_t> gbuffer,
+		std::span<const std::vector<uint32_t>> vertex
 	) {
 		for (const auto words : {spirv, gbuffer}) {
 			if (words.empty() && !spirv.empty()) continue;
@@ -577,7 +582,7 @@ namespace engine::render {
 				return false;
 			}
 		}
-		return AddShader(name, spirv, owner, gbuffer);
+		return AddShader(name, spirv, owner, gbuffer, vertex);
 	}
 
 	bool Renderer::DropShader(const core::Name &name, core::Name owner) {
@@ -955,7 +960,14 @@ namespace engine::render {
 				const auto refused = refusals.find(key);
 				if (refused != refusals.end() && refused->second == module->CodeHash) continue;
 				const bool installed =
-					family == 0	  ? AddMaterialShader(name, module->SpirV, owner, module->GBufferSpirV)
+					family == 0	  ? AddMaterialShader(
+								  name,
+								  module->SpirV,
+								  owner,
+								  module->GBufferSpirV,
+								  module->VertexSpirV[0].empty() ? std::span<const std::vector<uint32_t>>{}
+																 : std::span(module->VertexSpirV)
+							  )
 					: family == 1 ? AddLensShader(name, module->SpirV, owner)
 								  : SetPostProcessShader(name, module->SpirV, owner);
 				if (installed)

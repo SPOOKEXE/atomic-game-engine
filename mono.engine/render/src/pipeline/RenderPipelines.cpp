@@ -907,6 +907,11 @@ namespace engine::render {
 		VariantBlendedInfo.vertex_input_state.vertex_attributes = VariantAttributes;
 		VariantBlendedInfo.target_info.color_target_descriptions = &VariantBlendedTarget;
 
+		VariantShadowInfo = shadow;
+		VariantShadowInfo.vertex_input_state.vertex_buffer_descriptions = VariantBuffers;
+		VariantShadowInfo.vertex_input_state.vertex_attributes = VariantAttributes;
+		ShadowFragmentShader = shadowFragment;
+
 		// Authored variants borrow the same retained vertex stages as deferred built-ins.
 		OpaqueVertexShader = opaqueVertex;
 		PackedOpaqueVertexShader = packedOpaqueVertex;
@@ -1774,11 +1779,21 @@ namespace engine::render {
 		ActiveFamily = family;
 	}
 
+	void Renderer::Impl::ReleaseVariantVertex(ShaderVariant &variant) {
+		for (auto *pipeline : {variant.Shadow, variant.PackedShadow})
+			if (pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+		for (auto *shader : variant.Vertex)
+			if (shader != nullptr) SDL_ReleaseGPUShader(Device, shader);
+		variant.Shadow = variant.PackedShadow = nullptr;
+		variant.Vertex = {};
+	}
+
 	bool Renderer::Impl::AddShaderVariant(
 		const core::Name &name,
 		std::span<const uint32_t> spirv,
 		core::Name owner,
-		std::span<const uint32_t> gbufferWords
+		std::span<const uint32_t> gbufferWords,
+		std::span<const std::vector<uint32_t>> vertexWords
 	) {
 		if (!name.IsValid() || spirv.empty() || !VariantsReady || OpaqueVertexShader == nullptr ||
 			PackedOpaqueVertexShader == nullptr) {
@@ -1832,23 +1847,53 @@ namespace engine::render {
 		SDL_GPUShader *fragment = create(spirv);
 		if (fragment == nullptr) return false;
 
+		// A `Vertex` hook replaces the engine's vertex stages. Each keeps the
+		// storage it reads and adds the material's values after its own uniforms.
+		ShaderVariant variant;
+		if (!vertexWords.empty()) {
+			if (vertexWords.size() != variant.Vertex.size() || toMsl) {
+				ENGINE_ERROR("shader '{}': a Vertex hook needs all four SPIR-V stages", name.Text());
+				SDL_ReleaseGPUShader(Device, fragment);
+				return false;
+			}
+			constexpr std::array<uint32_t, 4> UNIFORMS{2, 3, 2, 3};
+			for (size_t stage = 0; stage < variant.Vertex.size(); ++stage) {
+				SDL_GPUShaderCreateInfo info{};
+				info.code = reinterpret_cast<const Uint8 *>(vertexWords[stage].data());
+				info.code_size = vertexWords[stage].size() * sizeof(uint32_t);
+				info.entrypoint = Binary.EntryPoint;
+				info.format = Binary.Format;
+				info.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+				info.num_storage_buffers = 5;
+				info.num_uniform_buffers = UNIFORMS[stage];
+				variant.Vertex[stage] = SDL_CreateGPUShader(Device, &info);
+				if (variant.Vertex[stage] == nullptr) {
+					ENGINE_ERROR("shader '{}' vertex stage: {}", name.Text(), SDL_GetError());
+					ReleaseVariantVertex(variant);
+					SDL_ReleaseGPUShader(Device, fragment);
+					return false;
+				}
+			}
+		}
+		SDL_GPUShader *const opaqueVertex = variant.Deformed() ? variant.Vertex[0] : OpaqueVertexShader;
+		SDL_GPUShader *const packedVertex = variant.Deformed() ? variant.Vertex[1] : PackedOpaqueVertexShader;
+
 		SDL_GPUGraphicsPipelineCreateInfo opaque = VariantOpaqueInfo;
-		opaque.vertex_shader = OpaqueVertexShader;
+		opaque.vertex_shader = opaqueVertex;
 		opaque.fragment_shader = fragment;
 
 		SDL_GPUGraphicsPipelineCreateInfo blended = VariantBlendedInfo;
-		blended.vertex_shader = OpaqueVertexShader;
+		blended.vertex_shader = opaqueVertex;
 		blended.fragment_shader = fragment;
 
-		ShaderVariant variant;
 		variant.Fragment = fragment;
 		variant.Opaque = SDL_CreateGPUGraphicsPipeline(Device, &opaque);
 		variant.Transparent = SDL_CreateGPUGraphicsPipeline(Device, &blended);
 		SDL_GPUGraphicsPipelineCreateInfo packedOpaque = opaque;
-		packedOpaque.vertex_shader = PackedOpaqueVertexShader;
+		packedOpaque.vertex_shader = packedVertex;
 		packedOpaque.vertex_input_state = SDL_GPUVertexInputState{};
 		SDL_GPUGraphicsPipelineCreateInfo packedBlended = blended;
-		packedBlended.vertex_shader = PackedOpaqueVertexShader;
+		packedBlended.vertex_shader = packedVertex;
 		packedBlended.vertex_input_state = SDL_GPUVertexInputState{};
 		variant.PackedOpaque = SDL_CreateGPUGraphicsPipeline(Device, &packedOpaque);
 		variant.PackedTransparent = SDL_CreateGPUGraphicsPipeline(Device, &packedBlended);
@@ -1871,23 +1916,34 @@ namespace engine::render {
 			variant.GBufferFragment = create(gbufferWords);
 			if (variant.GBufferFragment != nullptr) {
 				SDL_GPUGraphicsPipelineCreateInfo info = VariantOpaqueInfo;
-				info.vertex_shader = OpaqueVertexShader;
+				info.vertex_shader = opaqueVertex;
 				info.fragment_shader = variant.GBufferFragment;
 				info.target_info.color_target_descriptions = VariantGBufferTargets.data();
 				info.target_info.num_color_targets = static_cast<Uint32>(VariantGBufferTargets.size());
 				variant.GBuffer = SDL_CreateGPUGraphicsPipeline(Device, &info);
-				info.vertex_shader = PackedOpaqueVertexShader;
+				info.vertex_shader = packedVertex;
 				info.vertex_input_state = SDL_GPUVertexInputState{};
 				variant.PackedGBuffer = SDL_CreateGPUGraphicsPipeline(Device, &info);
 			}
 		}
+		if (variant.Deformed() && ShadowFragmentShader != nullptr) {
+			SDL_GPUGraphicsPipelineCreateInfo info = VariantShadowInfo;
+			info.vertex_shader = variant.Vertex[2];
+			info.fragment_shader = ShadowFragmentShader;
+			variant.Shadow = SDL_CreateGPUGraphicsPipeline(Device, &info);
+			info.vertex_shader = variant.Vertex[3];
+			info.vertex_input_state = SDL_GPUVertexInputState{};
+			variant.PackedShadow = SDL_CreateGPUGraphicsPipeline(Device, &info);
+		}
+		const bool shadowRefused =
+			variant.Deformed() && (variant.Shadow == nullptr || variant.PackedShadow == nullptr);
 		const bool gbufferRefused = !gbufferWords.empty() && GBufferPipeline != nullptr &&
 									(variant.GBuffer == nullptr || variant.PackedGBuffer == nullptr);
 
 		// All supported families or none: a partial variant would change the
 		// material when it becomes transparent or appears through a portal.
 		if (variant.Opaque == nullptr || variant.Transparent == nullptr || variant.PackedOpaque == nullptr ||
-			variant.PackedTransparent == nullptr || gbufferRefused ||
+			variant.PackedTransparent == nullptr || gbufferRefused || shadowRefused ||
 			(HdrOpaquePipeline != nullptr &&
 			 (variant.HdrOpaque == nullptr || variant.HdrTransparent == nullptr ||
 			  variant.PackedHdrOpaque == nullptr || variant.PackedHdrTransparent == nullptr))) {
@@ -1913,6 +1969,7 @@ namespace engine::render {
 				  variant.PackedGBuffer})
 				if (pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
 			if (variant.GBufferFragment != nullptr) SDL_ReleaseGPUShader(Device, variant.GBufferFragment);
+			ReleaseVariantVertex(variant);
 			SDL_ReleaseGPUShader(Device, fragment);
 			return false;
 		}
@@ -1921,7 +1978,11 @@ namespace engine::render {
 		// bumps its revision every keystroke that lands, and the library hands
 		// the new words straight back here.
 		DropShaderVariant(name, owner);
-		variant.CodeHash = assets::Hasher::Of(std::as_bytes(spirv));
+		// The same identity `Renderer::AddShader` compares against.
+		assets::Hasher hasher;
+		hasher.Update(std::as_bytes(spirv));
+		for (const auto &stage : vertexWords) hasher.Update(std::as_bytes(std::span(stage)));
+		variant.CodeHash = vertexWords.empty() ? assets::Hasher::Of(std::as_bytes(spirv)) : hasher.Finish();
 		ShaderVariants[ShaderVariantKey(name, owner)] = variant;
 		return true;
 	}
@@ -1955,6 +2016,7 @@ namespace engine::render {
 			SDL_ReleaseGPUGraphicsPipeline(Device, found->second.PackedGBuffer);
 		if (found->second.GBufferFragment != nullptr)
 			SDL_ReleaseGPUShader(Device, found->second.GBufferFragment);
+		ReleaseVariantVertex(found->second);
 		SDL_ReleaseGPUShader(Device, found->second.Fragment);
 		ShaderVariants.erase(found);
 	}
@@ -1980,12 +2042,14 @@ namespace engine::render {
 				SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.PackedGBuffer);
 			if (entry.second.GBufferFragment != nullptr)
 				SDL_ReleaseGPUShader(Device, entry.second.GBufferFragment);
+			ReleaseVariantVertex(entry.second);
 			SDL_ReleaseGPUShader(Device, entry.second.Fragment);
 		}
 		ShaderVariants.clear();
 
 		OpaqueVertexShader = nullptr;
 		PackedOpaqueVertexShader = nullptr;
+		ShadowFragmentShader = nullptr;
 		VariantsReady = false;
 	}
 
@@ -2016,6 +2080,9 @@ namespace engine::render {
 			return found->second.HdrTransparent;
 		case PipelineFamily::GBuffer:
 			return found->second.GBuffer;
+		case PipelineFamily::Shadow:
+			// Only a surface that moves its vertices casts with its own pipeline.
+			return found->second.Shadow;
 		case PipelineFamily::Other:
 		case PipelineFamily::DepthPeel:
 			break;
@@ -2039,6 +2106,8 @@ namespace engine::render {
 			return found->second.PackedHdrTransparent;
 		case PipelineFamily::GBuffer:
 			return found->second.PackedGBuffer;
+		case PipelineFamily::Shadow:
+			return found->second.PackedShadow;
 		case PipelineFamily::Other:
 		case PipelineFamily::DepthPeel:
 			return nullptr;

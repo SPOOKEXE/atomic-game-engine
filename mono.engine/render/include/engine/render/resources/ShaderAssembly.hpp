@@ -15,11 +15,16 @@
 //                    `void Compute(PassInput i, ivec2 pixel)` reads, and
 //                    `Store` for the latter (always present in a pass)
 //   engine/brdf      lobes for a Light function (always present in a surface)
+//   engine/vertex    VertexInput for an optional `void Vertex(inout VertexInput v)`,
+//                    which runs after skinning in world space in every pass the
+//                    surface draws through, shadows included
 //
 // Text in, text out: nothing here touches a device or a store.
 //
 // @tier L12 · client
 
+#include <array>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -43,6 +48,9 @@ namespace engine::render {
 		GBuffer,
 	};
 
+	// The engine vertex stages a surface's `Vertex` hook is placed in.
+	enum class VertexStage : uint8_t { Opaque, PackedOpaque, Shadow, PackedShadow };
+
 	// What assembly produced.
 	struct ShaderAssembly {
 		// GLSL for the forward pass, or the whole program.
@@ -53,6 +61,9 @@ namespace engine::render {
 		bool Surface = false;
 		// Whether it declared a Pass, which is drawn over the lit image.
 		bool Pass = false;
+		// A surface's `void Vertex(inout VertexInput v)` inside each engine vertex
+		// stage it draws through, in `VertexStage` order; empty without one.
+		std::array<std::string, 4> Vertex;
 		// Whether the pass is `void Compute(PassInput i, ivec2 pixel)`, compiled
 		// for the compute stage.
 		bool Compute = false;

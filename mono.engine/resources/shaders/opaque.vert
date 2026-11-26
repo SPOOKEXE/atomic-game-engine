@@ -76,6 +76,9 @@ void main() {
 	outAttribute3 = channels[3];
 
 	vec4 world = vec4(InstanceWorldPosition(rotation, scale, position, meshPosition), 1.0);
+#ifdef AUTHORED_VERTEX
+	EngineAuthoredVertex(world.xyz, outNormal, outTexCoord, channels, position);
+#endif
 	outWorldPosition = world.xyz;
 
 	// Divide in the fragment to preserve perspective-correct interpolation.

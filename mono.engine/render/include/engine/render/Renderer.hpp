@@ -1124,11 +1124,14 @@ namespace engine::render {
 		// @since v0.15
 		// Identical owner, name and words reuse the pipeline without a frame wait or invalidation.
 		// @param gbuffer The same surface for the G-buffer pass, or empty.
+		// @param vertex  The surface's `Vertex` hook in each engine vertex stage,
+		//                in `VertexStage` order, or empty for the engine's own.
 		bool AddShader(
 			const core::Name &name,
 			std::span<const uint32_t> spirv,
 			core::Name owner = {},
-			std::span<const uint32_t> gbuffer = {}
+			std::span<const uint32_t> gbuffer = {},
+			std::span<const std::vector<uint32_t>> vertex = {}
 		);
 
 		// Reflects and admits a material fragment against the renderer's named
@@ -1137,7 +1140,8 @@ namespace engine::render {
 			const core::Name &name,
 			std::span<const uint32_t> spirv,
 			core::Name owner = {},
-			std::span<const uint32_t> gbuffer = {}
+			std::span<const uint32_t> gbuffer = {},
+			std::span<const std::vector<uint32_t>> vertex = {}
 		);
 
 		// Forgets a registered shader and frees its pipelines.

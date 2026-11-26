@@ -61,6 +61,72 @@ namespace engine::render {
 			return text;
 		}
 
+		// The whole `type name(...) { ... }` definition in `text`, with a `#line`
+		// naming where it came from, or empty when it is not defined there.
+		std::string FunctionText(std::string_view text, std::string_view type, std::string_view name) {
+			const std::string code = WithoutComments(text);
+			for (size_t at = code.find(type); at != std::string::npos; at = code.find(type, at + 1)) {
+				if (at > 0 && IsWord(code[at - 1])) continue;
+				if (!Declares(std::string_view(code).substr(at), type, name)) break;
+				size_t next = at + type.size();
+				while (next < code.size() && std::isspace(static_cast<unsigned char>(code[next])))
+					++next;
+				if (code.compare(next, name.size(), name) != 0 ||
+					(next + name.size() < code.size() && IsWord(code[next + name.size()])))
+					continue;
+				const size_t open = code.find_first_of("{;", next);
+				if (open == std::string::npos || code[open] == ';') continue;
+				size_t depth = 0, close = open;
+				for (; close < code.size(); ++close) {
+					if (code[close] == '{') ++depth;
+					if (code[close] == '}' && --depth == 0) break;
+				}
+				if (close >= code.size()) return {};
+				// The nearest `#line` before it says which file and line it is.
+				std::string where = "#line 1 \"shader\"\n";
+				size_t line = 0;
+				for (size_t mark = code.rfind("#line", at); mark != std::string::npos;) {
+					const size_t end = code.find('\n', mark);
+					std::string_view directive = std::string_view(code).substr(mark + 5, end - mark - 5);
+					directive = Trim(directive);
+					const size_t space = directive.find(' ');
+					uint32_t number = 1;
+					std::from_chars(directive.data(), directive.data() + std::min(space, directive.size()), number);
+					const std::string file(space == std::string_view::npos ? "" : Trim(directive.substr(space)));
+					line = number;
+					for (size_t walk = end + 1; walk < at; ++walk)
+						if (code[walk] == '\n') ++line;
+					where = "#line " + std::to_string(line) + " " + (file.empty() ? "\"shader\"" : file) + "\n";
+					break;
+				}
+				if (line == 0) {
+					line = 1;
+					for (size_t walk = 0; walk < at; ++walk)
+						if (code[walk] == '\n') ++line;
+					where = "#line " + std::to_string(line) + " \"shader\"\n";
+				}
+				return where + std::string(text.substr(at, close + 1 - at)) + "\n";
+			}
+			return {};
+		}
+
+		// An engine vertex stage without its `#version` and `#extension` lines,
+		// which the wrapper states first.
+		std::string VertexBody(std::string_view stage) {
+			std::string out;
+			for (size_t at = 0; at < stage.size();) {
+				size_t end = stage.find('\n', at);
+				if (end == std::string_view::npos) end = stage.size();
+				const std::string_view line = Trim(stage.substr(at, end - at));
+				if (!line.starts_with("#version") && !line.starts_with("#extension")) {
+					out += stage.substr(at, end - at);
+					out += '\n';
+				}
+				at = end + 1;
+			}
+			return out;
+		}
+
 		struct Expansion {
 			const ShaderModuleResolver &Modules;
 			bool Surface = false;
@@ -226,6 +292,45 @@ namespace engine::render {
 									 std::string("xyzw").substr(parameter.Offset % 4, parameter.Components);
 			declared += type + " " + parameter.Name + " = (int(lighting.ParameterState.x + 0.5) >> " +
 						std::to_string(parameter.Offset) + " & 1) != 0 ? " + from + " : " + fallback + ");\n";
+		}
+		if (result.Surface && Declares(WithoutComments(expansion.Out), "void", "Vertex")) {
+			const std::string vertex = FunctionText(expansion.Out, "void", "Vertex");
+			if (vertex.empty()) {
+				result.Error = label + ": Vertex is declared but not defined";
+				return result;
+			}
+			// The fragment stages never see it; blanked so their lines still match.
+			const std::string body = vertex.substr(vertex.find('\n') + 1, vertex.size() - vertex.find('\n') - 2);
+			const size_t at = expansion.Out.find(body);
+			if (at != std::string::npos)
+				for (size_t index = at; index < at + body.size(); ++index)
+					if (expansion.Out[index] != '\n') expansion.Out[index] = ' ';
+			// Parameters only: a vertex stage samples no material texture.
+			std::string values;
+			for (const scene::MaterialParameter &parameter : layout.Parameters) {
+				const size_t at = declared.find(" " + parameter.Name + " = (int(lighting.ParameterState");
+				const size_t start = declared.rfind('\n', at);
+				const size_t end = declared.find('\n', at);
+				values += declared.substr(start == std::string::npos ? 0 : start + 1, end - (start == std::string::npos ? 0 : start + 1) + 1);
+			}
+			const std::array<std::pair<std::string_view, int>, 4> stages{{
+				{OPAQUE_VERTEX_GLSL, 1},
+				{PACKED_OPAQUE_VERTEX_GLSL, 2},
+				{SHADOW_VERTEX_GLSL, 1},
+				{PACKED_SHADOW_VERTEX_GLSL, 2},
+			}};
+			for (size_t index = 0; index < stages.size(); ++index) {
+				std::string text = "#version 450\n#extension GL_GOOGLE_cpp_style_line_directive : require\n";
+				text += "#define AUTHORED_VERTEX\n#define VERTEX_VALUES_BINDING " +
+						std::to_string(stages[index].second) + "\n#line 1 \"engine/vertex\"\n";
+				text += ENGINE_VERTEX_GLSL;
+				text += '\n';
+				text += values;
+				text += vertex;
+				text += "#line 1 \"engine/vertex-main\"\n";
+				text += VertexBody(stages[index].first);
+				result.Vertex[index] = std::move(text);
+			}
 		}
 		if (result.Pass) {
 			result.Forward = "#version 450\n#extension GL_GOOGLE_cpp_style_line_directive : require\n";

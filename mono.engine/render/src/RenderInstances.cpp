@@ -191,6 +191,8 @@ namespace engine::render {
 		bool slotFourPacked = false;
 		// Whether the pipeline `bindMesh` last chose is an authored shader's.
 		bool authoredPipeline = false;
+		// The vertex uniform slot a deforming surface's values go to, or -1.
+		int vertexValuesSlot = -1;
 		const auto bindMesh = [&](const MeshEntry &mesh,
 								  SDL_GPUGraphicsPipeline *native,
 								  const core::Name &shader,
@@ -220,6 +222,12 @@ namespace engine::render {
 				native == TransparentLayerPipeline || native == TransparentLayerColourPipeline;
 			authoredPipeline = authoredMaterial;
 			materialSamplerCount = authoredMaterial || surfaceShader ? 13u : 11u;
+			vertexValuesSlot = -1;
+			if (authoredMaterial && shader.IsValid()) {
+				const auto found = ShaderVariants.find(ShaderVariantKey(shader, owner));
+				// After the frame block, and after the packed descriptor on a packed mesh.
+				if (found != ShaderVariants.end() && found->second.Deformed()) vertexValuesSlot = mesh.Packed ? 2 : 1;
+			}
 			if (want != bound) {
 				encoder.Pipeline(want);
 				bound = want;
@@ -298,6 +306,19 @@ namespace engine::render {
 			if (lighting == nullptr && simpleShadow && shadowUniformsDirty) {
 				resetShadowUniforms();
 				shadowUniformsDirty = false;
+			}
+			if (vertexValuesSlot >= 0) {
+				// What `engine/vertex` reads: the material's values and the clock.
+				struct VertexValues {
+					glm::vec4 Parameters[4];
+					glm::vec4 ParameterState;
+					glm::vec4 View;
+				} values{};
+				const auto &material = SlotMaterialValues[slot];
+				std::memcpy(values.Parameters, material.Values, sizeof(material.Values));
+				values.ParameterState.x = static_cast<float>(material.Mask);
+				values.View.x = static_cast<float>(std::fmod(AnimationSeconds, 1000.0));
+				encoder.VertexUniform(static_cast<uint32_t>(vertexValuesSlot), &values, sizeof(values));
 			}
 			const core::Name &texture = names.Colour;
 

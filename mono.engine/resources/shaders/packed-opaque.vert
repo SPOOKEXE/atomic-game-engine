@@ -48,6 +48,10 @@ void main() {
 	outAttribute2 = vec4(0.0);
 	outAttribute3 = vec4(0.0);
 	vec4 world = vec4(InstanceWorldPosition(rotation, scale, position, meshPosition), 1.0);
+#ifdef AUTHORED_VERTEX
+	vec4 channels[4] = vec4[4](vec4(0.0), vec4(0.0), vec4(0.0), vec4(0.0));
+	EngineAuthoredVertex(world.xyz, outNormal, outTexCoord, channels, position);
+#endif
 	outWorldPosition = world.xyz;
 	outLightPosition = frame.LightViewProjection * world;
 	outSurfacePosition = frame.SurfaceViewProjection * world;

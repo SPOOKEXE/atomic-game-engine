@@ -2059,6 +2059,68 @@ TEST_CASE("a compute pass writes any pixel of its image", "[render][gpu][materia
 	CHECK(left[1] < 10);
 }
 
+TEST_CASE("a surface's Vertex moves what it draws and the shadow it casts", "[render][gpu][material][.]") {
+	PlaneScene plane(core::Name("fixture.white"));
+	scene::WorldLighting sun;
+	sun.Direction = core::Vector3{0.0f, 0.0f, -1.0f};
+	sun.Direct = {1, 1, 1};
+	sun.Ambient = sun.OutdoorAmbient = {0.05f, 0.05f, 0.05f};
+	plane.Fixture.Render.SetLighting(sun);
+	plane.View.Lighting = sun;
+	render::ShaderCompiler compiler;
+	const auto install = [&](const char *name, const std::string &source) {
+		const auto assembled = render::AssembleShader(name, source, {});
+		INFO(assembled.Error);
+		REQUIRE(assembled.Error.empty());
+		const auto forward = compiler.Compile(assembled.Forward, render::ShaderStage::Fragment, name);
+		const auto gbuffer = compiler.Compile(assembled.GBuffer, render::ShaderStage::Fragment, name);
+		std::vector<std::vector<uint32_t>> vertex;
+		for (const auto &stage : assembled.Vertex) {
+			if (stage.empty()) continue;
+			auto compiled = compiler.Compile(stage, render::ShaderStage::Vertex, name);
+			INFO(compiled.Error);
+			REQUIRE_FALSE(compiled.Failed);
+			vertex.push_back(std::move(compiled.SpirV));
+		}
+		REQUIRE(plane.Fixture.Render.AddMaterialShader(
+			core::Name(name), forward.SpirV, {}, gbuffer.SpirV, vertex
+		));
+	};
+	const std::string surface = "void Surface(SurfaceInput i, inout SurfaceOutput o) {}\n";
+	install("vertex.still", surface + "void Vertex(inout VertexInput v) {}\n");
+	install(
+		"vertex.away",
+		"#pragma parameter float shift = 100\n" + surface + "void Vertex(inout VertexInput v) { v.Position.x += shift; }\n"
+	);
+	// Facing away from the sun and the camera, so only its shadow is seen.
+	auto caster = DrawPlanes(std::array{Plane{0, 0, 3, 0.6f, 0.6f, 0xFFFFFFFFu}}).front();
+	caster.Source = 77;
+	caster.CastShadow = true;
+	caster.Frame = core::CFrame(caster.Frame.Position, glm::angleAxis(3.14159265f, glm::vec3(0, 1, 0)));
+	const uint32_t x = plane.Target.Width / 2, y = plane.Target.Height / 2;
+	const auto open = plane.At(plane.Capture(), x, y)[0];
+	plane.Others = {caster};
+	const auto shaded = plane.At(plane.Capture(), x, y)[0];
+	INFO("open " << open << " shaded " << shaded);
+	REQUIRE(shaded + 40 < open);
+	// A hook that moves nothing still casts the same shadow.
+	plane.Others[0].Shader = core::Name("vertex.still");
+	const auto still = plane.At(plane.Capture(), x, y)[0];
+	INFO("still " << still);
+	CHECK(still + 40 < open);
+	// Moved away, its shadow goes with it.
+	plane.Others[0].Shader = core::Name("vertex.away");
+	const auto away = plane.At(plane.Capture(), x, y)[0];
+	INFO("away " << away);
+	CHECK(std::abs(away - open) < 10);
+	// The plane itself moves out of view by its own hook.
+	plane.Others.clear();
+	plane.Surface.Shader = core::Name("vertex.away");
+	const auto gone = plane.At(plane.Capture(), x, y)[0];
+	INFO("gone " << gone);
+	CHECK(gone + 40 < open);
+}
+
 TEST_CASE("a UDIM tile whose graph output is not ready draws the default", "[render][gpu][udim][.]") {
 	PlaneScene plane(core::Name("fixture.white"));
 	scene::WorldLighting bright;

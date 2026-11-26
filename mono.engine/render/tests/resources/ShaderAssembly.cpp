@@ -279,3 +279,38 @@ TEST_CASE("a compute pass compiles for the compute stage", "[render][shader]") {
 	INFO(compiled.Error);
 	CHECK_FALSE(compiled.Failed);
 }
+
+TEST_CASE("a surface's Vertex runs in every engine vertex stage", "[render][shader]") {
+	const auto assembled = AssembleShader(
+		"swaying",
+		"#pragma parameter float sway = 0.1\n"
+		"void Vertex(inout VertexInput v) {\n"
+		"	v.Position.x += sin(v.Time + v.Origin.y) * sway * v.Attribute[0].x;\n"
+		"}\n"
+		"void Surface(SurfaceInput i, inout SurfaceOutput o) { o.Albedo = vec3(sway); }\n",
+		{}
+	);
+	REQUIRE(assembled.Error.empty());
+	ShaderCompiler compiler;
+	for (const std::string &stage : assembled.Vertex) {
+		REQUIRE_FALSE(stage.empty());
+		const auto compiled = compiler.Compile(stage, ShaderStage::Vertex, "swaying");
+		INFO(compiled.Error);
+		CHECK_FALSE(compiled.Failed);
+	}
+	// The fragment stages are untouched by it.
+	Compiles(assembled);
+	// A mistake in Vertex names the author's line.
+	const auto broken = AssembleShader(
+		"broken",
+		"void Surface(SurfaceInput i, inout SurfaceOutput o) {}\n\n"
+		"void Vertex(inout VertexInput v) {\n	v.Position += nothing;\n}\n",
+		{}
+	);
+	REQUIRE(broken.Error.empty());
+	const auto failed = compiler.Compile(broken.Vertex[0], ShaderStage::Vertex, "broken");
+	CHECK(failed.Failed);
+	CHECK(failed.Error.find("broken:4") != std::string::npos);
+	// Without one there is nothing to place.
+	CHECK(AssembleShader("plain", "void Surface(SurfaceInput i, inout SurfaceOutput o) {}", {}).Vertex[0].empty());
+}

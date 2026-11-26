@@ -1256,6 +1256,14 @@ namespace engine::render {
 			SDL_GPUShader *GBufferFragment = nullptr;
 			SDL_GPUGraphicsPipeline *GBuffer = nullptr;
 			SDL_GPUGraphicsPipeline *PackedGBuffer = nullptr;
+			// A surface with a `Vertex` hook: its own vertex stages, in
+			// `VertexStage` order, and shadow pipelines that move with it.
+			std::array<SDL_GPUShader *, 4> Vertex{};
+			SDL_GPUGraphicsPipeline *Shadow = nullptr;
+			SDL_GPUGraphicsPipeline *PackedShadow = nullptr;
+			bool Deformed() const {
+				return Vertex[0] != nullptr;
+			}
 			// Drawn ahead of the G-buffer rather than in it.
 			bool DrawnAhead() const {
 				return HdrOpaque != nullptr && GBuffer == nullptr;
@@ -1313,6 +1321,10 @@ namespace engine::render {
 		SDL_GPUColorTargetDescription VariantBlendedTarget{};
 		std::array<SDL_GPUColorTargetDescription, 8> VariantGBufferTargets{};
 		SDL_GPUGraphicsPipelineCreateInfo VariantOpaqueInfo{};
+		// The shadow pipeline's description and fragment stage, for a surface
+		// whose `Vertex` hook moves its shadow.
+		SDL_GPUGraphicsPipelineCreateInfo VariantShadowInfo{};
+		SDL_GPUShader *ShadowFragmentShader = nullptr;
 		SDL_GPUGraphicsPipelineCreateInfo VariantBlendedInfo{};
 		bool VariantsReady = false;
 		//@}
@@ -1323,6 +1335,8 @@ namespace engine::render {
 			// Anything with no variants: the shadow, overlay, particle and
 			// ribbon passes. A slot's shader is ignored while one is bound.
 			Other,
+			// The shadow map: the engine's pipeline, or a deforming surface's own.
+			Shadow,
 			GBuffer,
 			DepthPeel,
 			Opaque,
@@ -3477,11 +3491,15 @@ namespace engine::render {
 		// @param spirv The module. Must declare the sampler and uniform slots
 		//              `opaque.frag` does - see `Renderer::AddShader`.
 		// @return `false` when the shader or either pipeline could not be built.
+		// Frees a variant's own vertex stages and shadow pipelines.
+		void ReleaseVariantVertex(ShaderVariant &variant);
+
 		bool AddShaderVariant(
 			const core::Name &name,
 			std::span<const uint32_t> spirv,
 			core::Name owner,
-			std::span<const uint32_t> gbuffer = {}
+			std::span<const uint32_t> gbuffer = {},
+			std::span<const std::vector<uint32_t>> vertex = {}
 		);
 
 		// Releases one variant's shader and pipelines.

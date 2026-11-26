@@ -33,7 +33,7 @@ namespace engine::render {
 		target.cycle = true;
 		auto *pass = SDL_BeginGPURenderPass(Command, nullptr, 0, &target);
 		if (pass == nullptr) return false;
-		State->BindPipeline(pass, State->ShadowPipeline, Impl::PipelineFamily::Other);
+		State->BindPipeline(pass, State->ShadowPipeline, Impl::PipelineFamily::Shadow);
 		State->BindInstanceBuffers(pass);
 		const SDL_GPUBufferBinding indices{State->Meshes.Indices(), 0};
 		SDL_BindGPUIndexBuffer(pass, &indices, SDL_GPU_INDEXELEMENTSIZE_32BIT);
@@ -145,7 +145,7 @@ namespace engine::render {
 				if (!seeded) core::Metrics::Count("render.shadow.clears", 1);
 				// Empty source captures need a clear without nonexistent instance buffers.
 				if (reflectedCasters > 0 || surfaceCasters > 0) {
-					State->BindPipeline(pass, State->ShadowPipeline, Impl::PipelineFamily::Other);
+					State->BindPipeline(pass, State->ShadowPipeline, Impl::PipelineFamily::Shadow);
 					State->BindInstanceBuffers(pass);
 					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
 					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
@@ -341,7 +341,7 @@ namespace engine::render {
 				beamTarget.cycle = false;
 
 				SDL_GPURenderPass *beamPass = SDL_BeginGPURenderPass(command, nullptr, 0, &beamTarget);
-				State->BindPipeline(beamPass, State->ShadowPipeline, Impl::PipelineFamily::Other);
+				State->BindPipeline(beamPass, State->ShadowPipeline, Impl::PipelineFamily::Shadow);
 
 				const SDL_GPUViewport beamViewport{
 					quadrant.X, quadrant.Y, quadrant.Width, quadrant.Height, 0.0f, 1.0f

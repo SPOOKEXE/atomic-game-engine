@@ -21,8 +21,13 @@ void main() {
 		InstanceWorldPosition(rotation, InstanceScale(instance), InstancePosition(instance), meshPosition),
 		1.0
 	);
-	outWorldPosition = world.xyz;
 	outTexCoord = PackedUV(uint(gl_VertexIndex));
+#ifdef AUTHORED_VERTEX
+	vec4 channels[4] = vec4[4](vec4(0.0), vec4(0.0), vec4(0.0), vec4(0.0));
+	vec3 normal = InstanceWorldNormal(rotation, InstanceScale(instance), PackedNormal(uint(gl_VertexIndex)));
+	EngineAuthoredVertex(world.xyz, normal, outTexCoord, channels, InstancePosition(instance));
+#endif
+	outWorldPosition = world.xyz;
 	outAppearance = InstanceAppearance(instance);
 	outInstanceAlpha = InstanceColour(instance).a;
 	gl_Position = light.ViewProjection * world;

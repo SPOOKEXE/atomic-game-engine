@@ -13,6 +13,9 @@ layout(location = 4) in vec4 inWeights;
 // and the day one of them was edited and the other was not is the day a shadow
 // stopped matching the body casting it.
 #include "instance.glsl"
+#ifdef AUTHORED_VERTEX
+#include "editable-attributes.glsl"
+#endif
 
 layout(set = 1, binding = 0) uniform Light {
 	mat4 ViewProjection;
@@ -41,8 +44,15 @@ void main() {
 		1.0
 	);
 
-	outWorldPosition = world.xyz;
 	outTexCoord = inTexCoord;
+#ifdef AUTHORED_VERTEX
+	// The colour pass's displacement, so the shadow follows the surface.
+	vec4 channels[4];
+	LoadEditableAttributes(uint(gl_VertexIndex), channels);
+	vec3 normal = InstanceWorldNormal(rotation, InstanceScale(instance), meshNormal);
+	EngineAuthoredVertex(world.xyz, normal, outTexCoord, channels, InstancePosition(instance));
+#endif
+	outWorldPosition = world.xyz;
 	outAppearance = InstanceAppearance(instance);
 	outInstanceAlpha = InstanceColour(instance).a;
 	gl_Position = light.ViewProjection * world;

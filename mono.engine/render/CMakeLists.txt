@@ -85,13 +85,13 @@ mono_add_library(render
 # The text an authored surface is wrapped in, from the files the build compiles.
 set(embedded_shader_dir "${CMAKE_SOURCE_DIR}/mono.engine/resources/shaders")
 set(embedded_shaders "${CMAKE_CURRENT_BINARY_DIR}/EngineShaderSources.cpp")
-file(GLOB embedded_shader_inputs CONFIGURE_DEPENDS "${embedded_shader_dir}/*.glsl")
+file(GLOB embedded_shader_inputs CONFIGURE_DEPENDS "${embedded_shader_dir}/*.glsl" "${embedded_shader_dir}/*.vert")
 add_custom_command(
 	OUTPUT "${embedded_shaders}"
 	COMMAND "${CMAKE_COMMAND}"
 		"-DSOURCE_DIR=${embedded_shader_dir}"
 		"-DOUTPUT=${embedded_shaders}"
-		"-DENTRIES=SURFACE_SHADING_GLSL=surface-shading.glsl,ENGINE_BRDF_GLSL=engine-brdf.glsl,ENGINE_SURFACE_GLSL=engine-surface.glsl,ENGINE_SURFACE_MAIN_GLSL=engine-surface-main.glsl,ENGINE_PASS_GLSL=engine-pass.glsl"
+		"-DENTRIES=SURFACE_SHADING_GLSL=surface-shading.glsl,ENGINE_BRDF_GLSL=engine-brdf.glsl,ENGINE_SURFACE_GLSL=engine-surface.glsl,ENGINE_SURFACE_MAIN_GLSL=engine-surface-main.glsl,ENGINE_PASS_GLSL=engine-pass.glsl,ENGINE_VERTEX_GLSL=engine-vertex.glsl,OPAQUE_VERTEX_GLSL=opaque.vert,PACKED_OPAQUE_VERTEX_GLSL=packed-opaque.vert,SHADOW_VERTEX_GLSL=shadow.vert,PACKED_SHADOW_VERTEX_GLSL=packed-shadow.vert"
 		-P "${CMAKE_SOURCE_DIR}/mono.build/EmbedShaders.cmake"
 	DEPENDS ${embedded_shader_inputs} "${CMAKE_SOURCE_DIR}/mono.build/EmbedShaders.cmake"
 	COMMENT "Embedding authored surface GLSL"
