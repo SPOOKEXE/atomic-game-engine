@@ -7,8 +7,11 @@
 #include <engine/scene/content/MaterialLayers.hpp>
 #include <engine/scene/content/MaterialLayout.hpp>
 #include <engine/scene/content/Shaders.hpp>
+#include <engine/scene/content/TileSets.hpp>
 
 #include <algorithm>
+#include <cstring>
+#include <regex>
 #include <array>
 #include <cctype>
 #include <charconv>
@@ -89,8 +92,9 @@ namespace engine::scene {
 		}
 	}
 
-	LayeredSurface
-	ComposeLayers(std::string_view base, std::span<const LayerSource> layers, std::string_view keywords) {
+	LayeredSurface ComposeLayers(
+		std::string_view base, std::span<const LayerSource> layers, std::string_view keywords, bool constantOpacity
+	) {
 		LayeredSurface result;
 		std::string defines;
 		const std::vector<std::string> switches = Keywords(base);
@@ -126,7 +130,7 @@ namespace engine::scene {
 		for (size_t index = 0; index < layers.size(); ++index) {
 			const std::string name = "engineLayerOpacity" + std::to_string(index);
 			const std::string line = "#pragma parameter float " + name + " = 1\n";
-			if (ParseMaterialLayout(head + line).Error.empty()) {
+			if (!constantOpacity && ParseMaterialLayout(head + line).Error.empty()) {
 				head += line;
 				result.Opacities.push_back(name);
 			} else {
@@ -363,6 +367,36 @@ namespace engine::scene {
 		}
 	}
 
+	std::string BakedBase(std::string_view base) {
+		// The base's own Surface stays, renamed, for the frames before the bake.
+		static const std::regex surface(R"((\bvoid\s+)Surface(\s*\())");
+		std::string out = std::regex_replace(std::string(base), surface, "$1EngineUnbakedSurface$2");
+		out += "\n#pragma texture engineBaked[5]\n";
+		out += "void Surface(SurfaceInput i, inout SurfaceOutput o) {\n";
+		out += base.empty() ? "\tif (!engineBakedBound()) { DefaultSurface(i, o); return; }\n"
+							: "\tif (!engineBakedBound()) { EngineUnbakedSurface(i, o); return; }\n";
+		out += "\tvec2 uv = i.MeshUV;\n";
+		for (int layer = 0; layer < 5; ++layer)
+			out += "\tvec4 baked" + std::to_string(layer) + " = texture(engineBaked, vec3(uv, " +
+				   std::to_string(layer) + ".0));\n";
+		out += "\to.Albedo = baked0.rgb;\n\to.Roughness = baked0.a;\n"
+			   "\to.Normal = ApplyNormalMap(i.Normal, uv, baked1.xyz);\n\to.Metalness = baked1.a;\n"
+			   "\to.Emissive = baked2.rgb;\n\to.Occlusion = baked2.a;\n"
+			   "\to.Custom[0] = baked3;\n\to.Custom[1] = baked4;\n}\n";
+		return out;
+	}
+
+	void LayerBakesOf(const ecs::Store &store, std::vector<LayerBake> &out) {
+		out.clear();
+		const LayeredShaders *held = store.Resource<LayeredShaders>();
+		if (held == nullptr) return;
+		for (const auto &[id, part] : held->Parts)
+			if (part.BakeShader.IsValid())
+				out.push_back(
+					{ecs::Entity{id}, part.BakeShader, part.BakeOutput, part.BakeRevision, part.BakeValueMask}
+				);
+	}
+
 	ecs::ClassId MaterialLayerClass() {
 		static const ecs::ClassId layer = RegisterMaterialLayerClass();
 		return layer;
@@ -408,8 +442,10 @@ namespace engine::scene {
 			if (auto *appearance = store.GetMutable<SurfaceAppearance>(ecs::Entity{entry->first})) {
 				ClearOpacities(*held, entry->second, *appearance);
 				if (appearance->Shader == entry->second.Shader) appearance->Shader = core::Name{};
+				appearance->BakedTexture = core::Name{};
 			}
 			release(entry->second.Shader);
+			if (entry->second.BakeShader.IsValid()) release(entry->second.BakeShader);
 			entry = held->Parts.erase(entry);
 		}
 		for (auto &[id, rows] : parts) {
@@ -419,7 +455,13 @@ namespace engine::scene {
 				return left.Layer.Order != right.Layer.Order ? left.Layer.Order < right.Layer.Order
 															 : left.Entity.Id < right.Entity.Id;
 			});
-			if (rows.size() > MAX_MATERIAL_LAYERS) rows.resize(MAX_MATERIAL_LAYERS);
+			// Past the live limit, everything under the top seven is baked.
+			std::vector<Row> baked;
+			if (rows.size() > MAX_MATERIAL_LAYERS) {
+				const auto cut = rows.begin() + static_cast<std::ptrdiff_t>(rows.size() - (MAX_MATERIAL_LAYERS - 1));
+				baked.assign(rows.begin(), cut);
+				rows.erase(rows.begin(), cut);
+			}
 			core::Name base, keywords;
 			store.EachChild(part, [&](ecs::Entity child) {
 				const auto *material = store.Get<MaterialRef>(child);
@@ -431,6 +473,19 @@ namespace engine::scene {
 			uint64_t signature = Fold(0, (uint64_t(base.Id()) << 32) | baseText.Revision);
 			signature = Fold(signature, baseText.Source.Id);
 			signature = Fold(signature, keywords.Id());
+			std::vector<ShaderText> bakedModules;
+			for (const Row &row : baked) {
+				bakedModules.push_back(ShaderModuleTextOf(store, row.Layer.Shader));
+				signature = Fold(signature, (uint64_t(row.Layer.Shader.Id()) << 32) | bakedModules.back().Revision);
+				signature = Fold(signature, bakedModules.back().Source.Id);
+				signature = Fold(
+					signature,
+					(uint64_t(row.Layer.Mask.Id()) << 32) | uint64_t(row.Layer.Blend) << 8 | row.Layer.Channels
+				);
+				// A baked opacity is written in, so it is part of the text.
+				signature = Fold(signature, static_cast<uint64_t>(row.Layer.Opacity * 65535.0f));
+			}
+			const bool baking = !baked.empty();
 			std::vector<ShaderText> modules;
 			for (const Row &row : rows) {
 				modules.push_back(ShaderModuleTextOf(store, row.Layer.Shader));
@@ -462,11 +517,36 @@ namespace engine::scene {
 						 layer.Channels}
 					);
 				}
-				LayeredSurface composed = ComposeLayers(
-					baseText.Code,
-					sources,
-					keywords.IsValid() ? std::string_view(keywords.Text()) : std::string_view{}
-				);
+				const std::string_view switches =
+					keywords.IsValid() ? std::string_view(keywords.Text()) : std::string_view{};
+				// The prefix bakes over the base; the live stack reads the bake.
+				core::Name bakeShader;
+				if (baking) {
+					std::vector<LayerSource> prefix;
+					for (size_t index = 0; index < baked.size(); ++index) {
+						const MaterialLayer &layer = baked[index].Layer;
+						prefix.push_back(
+							{std::string(layer.Shader.Text()),
+							 bakedModules[index].Code,
+							 std::string(layer.Mask.Text()),
+							 layer.Opacity,
+							 layer.Blend,
+							 layer.Channels}
+						);
+					}
+					LayeredSurface bake = ComposeLayers(baseText.Code, prefix, switches, true);
+					if (!bake.Error.empty())
+						bake.Source =
+							"#error " + bake.Error + "\nvoid Surface(SurfaceInput i, inout SurfaceOutput o) {}\n";
+					bakeShader = core::Name("bake/" + TextKey(bake.Source));
+					auto &entry = held->Surfaces[bakeShader.Id()];
+					++entry.Uses;
+					entry.Source = std::move(bake.Source);
+					entry.Reporter = baked.front().Entity;
+				}
+				const std::string bakedBase = baking ? BakedBase(baseText.Code) : std::string();
+				LayeredSurface composed =
+					ComposeLayers(baking ? std::string_view(bakedBase) : std::string_view(baseText.Code), sources, switches);
 				if (!composed.Error.empty()) {
 					// The compiler reports it in the author's terms, on the script.
 					composed.Source = "#error " + composed.Error +
@@ -484,10 +564,45 @@ namespace engine::scene {
 				if (auto *stale = store.GetMutable<SurfaceAppearance>(part))
 					ClearOpacities(*held, state, *stale);
 				if (state.Shader.IsValid()) release(state.Shader);
+				if (state.BakeShader.IsValid()) release(state.BakeShader);
 				state = {signature, shader, std::move(composed.Opacities), {}};
+				state.BakeShader = bakeShader;
+				state.BakeOutput = baking ? core::Name("bake/" + std::to_string(id)) : core::Name{};
 			}
 			SurfaceAppearance *appearance = store.GetMutable<SurfaceAppearance>(part);
 			appearance->Shader = state.Shader;
+			appearance->BakedTexture = core::Name{};
+			if (state.BakeShader.IsValid()) {
+				// After the base's own textures, which keep their slots.
+				const size_t slot = ParseMaterialLayout(baseText.Code).Textures.size();
+				const std::string output(state.BakeOutput.Text());
+				const std::array<core::Name, 5> layers{
+					core::Name(output + "/0"),
+					core::Name(output + "/1"),
+					core::Name(output + "/2"),
+					core::Name(output + "/3"),
+					core::Name(output + "/4"),
+				};
+				appearance->BakedTexture = core::Name(ComposeLayerSet(layers));
+				appearance->BakedSlot = static_cast<uint8_t>(slot);
+				// Baked again when the stack or the values it read change.
+				uint64_t revision = Fold(signature, appearance->MaterialParameterMask | uint64_t(appearance->SharedParameterMask) << 16);
+				for (size_t index = 0; index < std::size(appearance->MaterialParameters); ++index) {
+					const bool own = (appearance->MaterialParameterMask >> index & 1u) != 0;
+					float value = own ? appearance->MaterialParameters[index] : appearance->SharedParameters[index];
+					uint32_t bits = 0;
+					std::memcpy(&bits, &value, sizeof(bits));
+					revision = Fold(revision, bits);
+				}
+				revision = Fold(revision, (uint64_t(appearance->MaterialTexture0.Id()) << 32) | appearance->MaterialTexture1.Id());
+				revision = Fold(revision, (uint64_t(appearance->SharedTexture0.Id()) << 32) | appearance->SharedTexture1.Id());
+				state.BakeRevision = revision;
+				uint16_t mask = 0;
+				for (const MaterialParameter &parameter : ParseMaterialLayout(baseText.Code).Parameters)
+					for (uint32_t component = 0; component < parameter.Components; ++component)
+						mask = static_cast<uint16_t>(mask | 1u << (parameter.Offset + component));
+				state.BakeValueMask = mask;
+			}
 			const auto found = held->Surfaces.find(state.Shader.Id());
 			if (found == held->Surfaces.end()) continue;
 			const MaterialLayout layout = ParseMaterialLayout(found->second.Source);

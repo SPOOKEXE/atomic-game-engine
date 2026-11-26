@@ -508,6 +508,9 @@ namespace engine::scene {
 																			   : appearance->SharedTexture0;
 			instance.MaterialTexture1 = appearance->MaterialTexture1.IsValid() ? appearance->MaterialTexture1
 																			   : appearance->SharedTexture1;
+			if (appearance->BakedTexture.IsValid())
+				(appearance->BakedSlot == 0 ? instance.MaterialTexture0 : instance.MaterialTexture1) =
+					appearance->BakedTexture;
 			for (size_t index = 0; index < std::size(instance.MaterialParameters); ++index)
 				instance.MaterialParameters[index] = (appearance->MaterialParameterMask >> index & 1u) != 0
 														 ? appearance->MaterialParameters[index]

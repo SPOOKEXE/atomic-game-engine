@@ -585,6 +585,10 @@ namespace engine::render {
 		return AddShader(name, spirv, owner, gbuffer, vertex);
 	}
 
+	bool Renderer::AddBakeShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner) {
+		return State != nullptr && State->Device != nullptr && State->AddBakeVariant(name, owner, spirv);
+	}
+
 	bool Renderer::DropShader(const core::Name &name, core::Name owner) {
 		if (State == nullptr || State->Device == nullptr) {
 			return false;
@@ -970,6 +974,9 @@ namespace engine::render {
 							  )
 					: family == 1 ? AddLensShader(name, module->SpirV, owner)
 								  : SetPostProcessShader(name, module->SpirV, owner);
+				// A generated layer prefix also gets its UV-space draw.
+				if (installed && family == 0 && !module->BakeSpirV.empty())
+					(void)AddBakeShader(name, module->BakeSpirV, owner);
 				if (installed)
 					refusals.erase(key);
 				else

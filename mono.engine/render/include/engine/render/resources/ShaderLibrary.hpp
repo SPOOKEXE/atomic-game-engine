@@ -87,6 +87,9 @@ namespace engine::render {
 		// `VertexStage` order; all empty without one.
 		std::array<std::vector<uint32_t>, 4> VertexSpirV;
 
+		// A `bake/` surface written into UV space; see `ShaderAssembly::Bake`.
+		std::vector<uint32_t> BakeSpirV;
+
 		// Whether this is a `Pass`, which `Renderer::AddPassShader` takes.
 		bool Pass = false;
 

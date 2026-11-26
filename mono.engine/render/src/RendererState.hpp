@@ -3440,6 +3440,21 @@ namespace engine::render {
 		std::unordered_map<uint64_t, LayeredTextureEntry> LayeredTextures;
 		// One white layer, bound where an array slot has nothing to read.
 		SDL_GPUTexture *FallbackArrayTexture = nullptr;
+
+		// The UV-space draw of each `bake/` surface, and what each output was
+		// last baked from.
+		struct BakeVariant {
+			assets::ContentHash CodeHash;
+			SDL_GPUGraphicsPipeline *Pipeline = nullptr;
+			uint8_t ArraySlots = 0;
+		};
+		std::unordered_map<uint64_t, BakeVariant> BakePipelines;
+		std::unordered_map<uint64_t, uint64_t> BakedRevisions;
+		SDL_GPUShader *BakeVertexShader = nullptr;
+		// Builds or replaces a bake pipeline; false when it cannot be built.
+		bool AddBakeVariant(const core::Name &name, core::Name owner, std::span<const uint32_t> spirv);
+		// Draws the bakes `views` ask for that have not run at their revision.
+		void RunSurfaceBakes(std::span<const View> views);
 		// The array a `layers:` set names, each layer resolved within its own
 		// owner; null until every layer is resident.
 		SDL_GPUTexture *LayeredTexture(

@@ -1144,6 +1144,10 @@ namespace engine::render {
 			std::span<const std::vector<uint32_t>> vertex = {}
 		);
 
+		// Builds the UV-space draw of a `bake/` surface from its
+		// `ShaderAssembly::Bake` words, for the `SurfaceBake`s a view carries.
+		bool AddBakeShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner = {});
+
 		// Forgets a registered shader and frees its pipelines.
 		//
 		// Instances still naming it fall back to the engine's own shader rather

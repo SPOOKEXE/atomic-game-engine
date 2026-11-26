@@ -62,6 +62,7 @@ namespace engine::render {
 			module.SpirV = std::move(result.SpirV);
 			module.GBufferSpirV.clear();
 			module.VertexSpirV = {};
+			module.BakeSpirV.clear();
 			module.CodeHash = assets::Hasher::Of(std::as_bytes(std::span(module.SpirV)));
 			module.Capabilities = std::move(result.Capabilities);
 			module.Optimizations = std::move(result.Optimizations);
@@ -297,6 +298,7 @@ namespace engine::render {
 
 				ShaderCompilation result, gbuffer;
 				std::array<std::vector<uint32_t>, 4> vertex;
+				std::vector<uint32_t> bake;
 				if (!assembled.Error.empty()) {
 					result.Failed = true;
 					result.Error = std::move(assembled.Error);
@@ -312,6 +314,16 @@ namespace engine::render {
 						if (gbuffer.Failed) {
 							result.Failed = true;
 							result.Error = std::move(gbuffer.Error);
+						}
+					}
+					// Only a generated layer prefix is ever baked.
+					if (!result.Failed && assembled.Surface && name.Text().starts_with("bake/")) {
+						auto compiled = State->Compiler.Compile(assembled.Bake, ShaderStage::Fragment, name.Text());
+						if (compiled.Failed) {
+							result.Failed = true;
+							result.Error = std::move(compiled.Error);
+						} else {
+							bake = std::move(compiled.SpirV);
 						}
 					}
 					for (size_t stage = 0; !result.Failed && stage < assembled.Vertex.size(); ++stage) {
@@ -334,6 +346,7 @@ namespace engine::render {
 				if (changed && module.Error.empty()) {
 					module.GBufferSpirV = std::move(gbuffer.SpirV);
 					module.VertexSpirV = std::move(vertex);
+					module.BakeSpirV = std::move(bake);
 					// A change to Vertex alone is a change to the module.
 					assets::Hasher hasher;
 					hasher.Update(std::as_bytes(std::span(module.SpirV)));

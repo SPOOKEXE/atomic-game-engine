@@ -677,6 +677,7 @@ namespace engine::render {
 				State.CompleteSceneCaptures(false);
 			}
 		} completeCaptures{*State};
+		State->RunSurfaceBakes(views);
 		const FrameResult result =
 			FrameBatch(*this).Run(views, overlay, gameInterfaceHook, present, hostOverlayHook).Frame;
 		if (State->Headless() && result.Submitted) State->ThrottleHeadlessFrames();

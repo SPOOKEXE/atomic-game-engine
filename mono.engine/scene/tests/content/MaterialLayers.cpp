@@ -8,6 +8,7 @@
 #include <engine/scene/content/MaterialLayout.hpp>
 #include <engine/scene/content/Materials.hpp>
 #include <engine/scene/content/Shaders.hpp>
+#include <engine/scene/content/TileSets.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -214,4 +215,37 @@ TEST_CASE("removing a shader-only material leaves the part's own maps", "[scene]
 	world.Store.Destroy(material);
 	CHECK_FALSE(world.Shader().IsValid());
 	CHECK(world.Store.Get<SurfaceAppearance>(world.Part)->ColourMap == core::Name("skin.png"));
+}
+
+TEST_CASE("a stack past the live limit bakes everything under the top seven", "[scene][material]") {
+	World world;
+	world.Module("tint", "void Layer(SurfaceInput i, inout SurfaceOutput o) { o.Albedo = vec3(1, 0, 0); }\n");
+	std::vector<ecs::Entity> layers;
+	for (int32_t order = 0; order < 10; ++order) layers.push_back(world.Layer("tint", order));
+	ResolveMaterialLayers(world.Store);
+	std::vector<LayerBake> bakes;
+	LayerBakesOf(world.Store, bakes);
+	REQUIRE(bakes.size() == 1);
+	CHECK(bakes.front().Part == world.Part);
+	CHECK(bakes.front().Shader.Text().starts_with("bake/"));
+	const auto *appearance = world.Store.Get<SurfaceAppearance>(world.Part);
+	CHECK(IsLayerSet(appearance->BakedTexture.Text()));
+	CHECK(ExpandLayerSet(appearance->BakedTexture.Text()).size() == 5);
+	CHECK(appearance->BakedSlot == 0);
+	const auto *shaders = world.Store.Resource<LayeredShaders>();
+	const auto &bake = shaders->Surfaces.at(bakes.front().Shader.Id()).Source;
+	const auto &live = shaders->Surfaces.at(appearance->Shader.Id()).Source;
+	// The bake writes its three opacities in; the live stack reads the bake and keeps
+	// a float for each of its seven.
+	CHECK(bake.find("engineLayerOpacity") == std::string::npos);
+	CHECK(live.find("engineBaked") != std::string::npos);
+	CHECK(live.find("engineLayerOpacity6") != std::string::npos);
+	CHECK(live.find("engineLayerOpacity7") == std::string::npos);
+	// Back under the limit, nothing is baked.
+	world.Store.Destroy(layers[0]);
+	world.Store.Destroy(layers[1]);
+	ResolveMaterialLayers(world.Store);
+	LayerBakesOf(world.Store, bakes);
+	CHECK(bakes.empty());
+	CHECK_FALSE(world.Store.Get<SurfaceAppearance>(world.Part)->BakedTexture.IsValid());
 }

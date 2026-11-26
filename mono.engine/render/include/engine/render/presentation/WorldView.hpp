@@ -159,6 +159,8 @@ namespace engine::render {
 		std::vector<scene::PortalSeam> Seams;
 		// Portal views collected from the world.
 		std::vector<PortalView> Portals;
+		// Long layer stacks' prefixes to bake into their parts' UVs.
+		std::vector<SurfaceBake> Bakes;
 		// Detached particle data owned by this packet.
 		ParticleFrame Particles;
 		// Device-local generic particles. This is a copied request and field,

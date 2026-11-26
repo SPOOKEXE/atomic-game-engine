@@ -359,11 +359,12 @@ namespace engine::render {
 			}
 			return result;
 		}
-		const auto wrap = [&](bool gbuffer) {
+		const auto wrap = [&](bool gbuffer, bool bake = false) {
 			std::string text = "#version 450\n#extension GL_GOOGLE_cpp_style_line_directive : require\n";
 			text += "#define AUTHORED_SURFACE\n#define MAX_LIGHTS " + std::to_string(MAX_SCENE_LIGHTS) + "\n";
 			if (result.Lit) text += "#define SURFACE_LIT\n";
 			if (gbuffer) text += "#define SURFACE_GBUFFER\n";
+			if (bake) text += "#define SURFACE_BAKE\n";
 			text += SURFACE_SHADING_GLSL;
 			text += "\n#line 1 \"engine/brdf\"\n";
 			text += ENGINE_BRDF_GLSL;
@@ -378,6 +379,7 @@ namespace engine::render {
 		};
 		result.Forward = wrap(false);
 		result.GBuffer = wrap(true);
+		result.Bake = wrap(false, true);
 		return result;
 	}
 }

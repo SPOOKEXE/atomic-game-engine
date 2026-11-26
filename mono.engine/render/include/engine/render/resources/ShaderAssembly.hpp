@@ -57,6 +57,9 @@ namespace engine::render {
 		std::string Forward;
 		// GLSL for the G-buffer pass; empty for a whole program.
 		std::string GBuffer;
+		// GLSL writing the surface into five UV-space targets, for baking a
+		// layer prefix; empty for a whole program.
+		std::string Bake;
 		// Whether the source declared a Surface.
 		bool Surface = false;
 		// Whether it declared a Pass, which is drawn over the lit image.

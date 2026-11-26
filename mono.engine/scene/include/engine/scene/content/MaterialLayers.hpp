@@ -12,7 +12,9 @@
 // `Keywords` goes the same way, with `#define`s for the switches its shader
 // declares with `#pragma keyword NAME`. Parts with the
 // same stack share a shader. A layer's opacity is a material parameter, so
-// fading one compiles nothing.
+// fading one compiles nothing. Past `MAX_MATERIAL_LAYERS`, the layers below the
+// top seven are baked: drawn once into the part's UVs as a `bake/` surface, and
+// read back by the live stack as one texture array.
 //
 // @tier L7 · shared
 
@@ -32,8 +34,10 @@ namespace engine::ecs {
 }
 
 namespace engine::scene {
-	// Most layers one part composes; later ones are left out.
+	// Most layers one part composes live; below these the stack is baked.
 	inline constexpr size_t MAX_MATERIAL_LAYERS = 8;
+	// The side of a baked prefix's textures, in texels.
+	inline constexpr uint32_t LAYER_BAKE_SIZE = 1024;
 
 	// How a layer meets the surface under it.
 	enum class LayerBlend : uint8_t {
@@ -95,8 +99,33 @@ namespace engine::scene {
 	// Composes layers, already in order, over a surface's source. An empty base
 	// is the part's own maps. `keywords` are the base's declared switches to turn
 	// on, joined by commas.
-	LayeredSurface
-	ComposeLayers(std::string_view base, std::span<const LayerSource> layers, std::string_view keywords = {});
+	// With `constantOpacity`, every opacity is written in, as a bake needs.
+	LayeredSurface ComposeLayers(
+		std::string_view base,
+		std::span<const LayerSource> layers,
+		std::string_view keywords = {},
+		bool constantOpacity = false
+	);
+
+	// A surface that reads a baked prefix from `engineBaked`, a five-layer
+	// array declared after `base`'s own textures, keeping `base`'s Light and
+	// helpers. Until the bake lands it draws `base` as it was.
+	std::string BakedBase(std::string_view base);
+
+	// One part's baked prefix, for the renderer to draw into its UVs.
+	struct LayerBake {
+		ecs::Entity Part = ecs::NULL_ENTITY;
+		core::Name Shader;
+		// Its textures are `Output` followed by `/0` to `/4`.
+		core::Name Output;
+		uint64_t Revision = 0;
+		// The part's floats the bake reads: the base's own. A baked layer's
+		// parameters keep their defaults.
+		uint16_t ValueMask = 0;
+	};
+
+	// Every baked prefix the world holds.
+	void LayerBakesOf(const ecs::Store &store, std::vector<LayerBake> &out);
 
 	// Generated surfaces by name. Derived by `ResolveMaterials` and never saved.
 	struct LayeredShaders {
@@ -115,6 +144,11 @@ namespace engine::scene {
 			// The opacities last written, so a float a script has since set is not
 			// mistaken for one.
 			std::vector<float> Written;
+			// The baked prefix, when the stack is longer than the live limit.
+			core::Name BakeShader;
+			core::Name BakeOutput;
+			uint64_t BakeRevision = 0;
+			uint16_t BakeValueMask = 0;
 		};
 		std::unordered_map<uint64_t, Held> Parts;
 	};

@@ -12,6 +12,7 @@
 #include <engine/render/presentation/WorldView.hpp>
 #include <engine/render/resources/ShaderLibrary.hpp>
 #include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/content/MaterialLayers.hpp>
 #include <engine/scene/content/Materials.hpp>
 #include <engine/scene/content/RenderPasses.hpp>
 #include <engine/scene/content/ShaderLens.hpp>
@@ -283,6 +284,41 @@ namespace engine::render {
 													: OverlayRecordStatus::Failed;
 	}
 
+	namespace {
+	// The bakes a world's long layer stacks ask for, with each part's values.
+	void CollectSurfaceBakes(const ecs::Store &store, std::vector<SurfaceBake> &out) {
+		out.clear();
+		std::vector<scene::LayerBake> bakes;
+		scene::LayerBakesOf(store, bakes);
+		for (const scene::LayerBake &bake : bakes) {
+			const auto *visual = store.Get<scene::Visual>(bake.Part);
+			const auto *appearance = store.Get<scene::SurfaceAppearance>(bake.Part);
+			if (visual == nullptr || appearance == nullptr || !visual->Mesh.IsValid()) continue;
+			SurfaceBake row;
+			row.Shader = bake.Shader;
+			row.Mesh = visual->Mesh;
+			row.Output = bake.Output;
+			row.Size = scene::LAYER_BAKE_SIZE;
+			row.Revision = bake.Revision;
+			// The part's values as it draws them, without the bake's own slot.
+			const auto texture = [&](const core::Name &own, const core::Name &shared, uint8_t slot) {
+				if (appearance->BakedTexture.IsValid() && appearance->BakedSlot == slot) return core::Name{};
+				return own.IsValid() ? own : shared;
+			};
+			row.MaterialTexture0 = texture(appearance->MaterialTexture0, appearance->SharedTexture0, 0);
+			row.MaterialTexture1 = texture(appearance->MaterialTexture1, appearance->SharedTexture1, 1);
+			for (size_t index = 0; index < row.Parameters.size(); ++index)
+				row.Parameters[index] = (appearance->MaterialParameterMask >> index & 1u) != 0
+											? appearance->MaterialParameters[index]
+											: appearance->SharedParameters[index];
+			row.ParameterMask = static_cast<uint16_t>(
+				(appearance->MaterialParameterMask | appearance->SharedParameterMask) & bake.ValueMask
+			);
+			out.push_back(row);
+		}
+	}
+	}
+
 	bool BindWorldView(
 		const WorldViewFrame &frame,
 		const WorldCameraFrame &camera,
@@ -344,6 +380,7 @@ namespace engine::render {
 				view.GpuParticles->Field.SpawnSamples.size() * sizeof(scene::GpuParticleSpawnSample)
 			);
 		view.Portals = frame.Portals;
+		view.Bakes = frame.Bakes;
 		view.EyeImage = 0;
 		view.EyeTransparentImages = {};
 		view.EyeSpatialOverlayImage = 0;
@@ -441,6 +478,7 @@ namespace engine::render {
 			frame.InstanceRevision = revision | 1;
 		}
 		CollectPortalViews(store, frame.Portals, frame.Slots);
+		CollectSurfaceBakes(store, frame.Bakes);
 		CollectParticleBatches(store, frame.Particles);
 		frame.Particles.Detach();
 	}

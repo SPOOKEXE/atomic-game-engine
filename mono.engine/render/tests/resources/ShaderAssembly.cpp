@@ -325,3 +325,12 @@ TEST_CASE("a texture array is a sampler2DArray the material slots admit", "[rend
 	);
 	Compiles(assembled);
 }
+
+TEST_CASE("a surface bakes into UV space through its own variant", "[render][shader]") {
+	const auto assembled = AssembleShader("baked", LIT, {});
+	REQUIRE_FALSE(assembled.Bake.empty());
+	ShaderCompiler compiler;
+	const auto compiled = compiler.Compile(assembled.Bake, ShaderStage::Fragment, "baked");
+	INFO(compiled.Error);
+	CHECK_FALSE(compiled.Failed);
+}

@@ -4,6 +4,8 @@
 #include "RenderFixture.hpp"
 #include "RendererTestHooks.hpp"
 
+#include <map>
+#include <engine/scene/content/MaterialLayers.hpp>
 #include <engine/assets/Builtin.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
@@ -2174,6 +2176,82 @@ TEST_CASE("a texture array reads each layer it was given", "[render][gpu][materi
 	// A plain id in an array slot is not an array, so the slot stays unbound.
 	plane.Surface.MaterialTexture0 = core::Name("layer.red");
 	CHECK(plane.At(plane.Capture(), x, y)[1] > 100);
+}
+
+TEST_CASE("a baked layer prefix draws as the live stack does", "[render][gpu][material][.]") {
+	PlaneScene plane(core::Name("fixture.white"));
+	scene::WorldLighting flat;
+	flat.Ambient = {1, 1, 1};
+	flat.OutdoorAmbient = {0, 0, 0};
+	flat.Direct = {0, 0, 0};
+	plane.Fixture.Render.SetLighting(flat);
+	plane.View.Lighting = flat;
+	// Nine layers of three colours at partial opacity: order matters to the result.
+	// Red runs down the mesh, so a bake upside down would not match.
+	const std::array<std::string, 3> colours{"vec3(i.MeshUV.y, 0, 0)", "vec3(0, 1, 0)", "vec3(0, 0, 1)"};
+	std::map<std::string, std::string> modules;
+	std::vector<scene::LayerSource> stack;
+	for (size_t index = 0; index < 9; ++index) {
+		const std::string module = "paint" + std::to_string(index % 3);
+		modules[module] = "void Layer(SurfaceInput i, inout SurfaceOutput o) { o.Albedo = " + colours[index % 3] +
+						  "; o.Roughness = 0.3; }\n";
+		stack.push_back({module, modules[module], "", 0.1f + 0.02f * float(index)});
+	}
+	const render::ShaderModuleResolver resolve = [&](std::string_view name) -> std::optional<std::string> {
+		const auto found = modules.find(std::string(name));
+		return found == modules.end() ? std::nullopt : std::optional(found->second);
+	};
+	render::ShaderCompiler compiler;
+	const auto install = [&](const char *name, const std::string &source, bool bake) {
+		const auto assembled = render::AssembleShader(name, source, resolve);
+		INFO(assembled.Error);
+		REQUIRE(assembled.Error.empty());
+		const auto forward = compiler.Compile(assembled.Forward, render::ShaderStage::Fragment, name);
+		const auto gbuffer = compiler.Compile(assembled.GBuffer, render::ShaderStage::Fragment, name);
+		INFO(forward.Error << gbuffer.Error);
+		REQUIRE(plane.Fixture.Render.AddMaterialShader(core::Name(name), forward.SpirV, {}, gbuffer.SpirV));
+		if (!bake) return;
+		const auto baked = compiler.Compile(assembled.Bake, render::ShaderStage::Fragment, name);
+		INFO(baked.Error);
+		REQUIRE(plane.Fixture.Render.AddBakeShader(core::Name(name), baked.SpirV));
+	};
+	// Opacities written in, as the bake and this reference both have them.
+	install("stack.whole", scene::ComposeLayers("", stack, {}, true).Source, false);
+	const std::span<const scene::LayerSource> prefix(stack.data(), 2), rest(stack.data() + 2, 7);
+	install("bake/stack", scene::ComposeLayers("", prefix, {}, true).Source, true);
+	install("stack.live", scene::ComposeLayers(scene::BakedBase(""), rest, {}, true).Source, false);
+
+	const uint32_t x = plane.Target.Width / 2, y = plane.Target.Height / 2;
+	const uint32_t high = plane.Target.Height * 3 / 8, low = plane.Target.Height * 5 / 8;
+	plane.Surface.Shader = core::Name("stack.whole");
+	const auto wholeImage = plane.Capture();
+	const auto whole = plane.At(wholeImage, x, y);
+	const auto wholeHigh = plane.At(wholeImage, x, high), wholeLow = plane.At(wholeImage, x, low);
+	REQUIRE(std::abs(wholeHigh[0] - wholeLow[0]) > 6);
+	const render::SurfaceBake bake{
+		.Shader = core::Name("bake/stack"), .Mesh = core::Name("fixture.plane"), .Output = core::Name("bake/plane"),
+		.Size = 64, .Revision = 1
+	};
+	plane.View.Bakes = std::span(&bake, 1);
+	plane.Surface.Shader = core::Name("stack.live");
+	const std::array layers{
+		core::Name("bake/plane/0"), core::Name("bake/plane/1"), core::Name("bake/plane/2"),
+		core::Name("bake/plane/3"), core::Name("bake/plane/4")
+	};
+	plane.Surface.MaterialTexture0 = core::Name(scene::ComposeLayerSet(layers));
+	(void)plane.Capture();
+	const auto bakedImage = plane.Capture();
+	const auto baked = plane.At(bakedImage, x, y);
+	CHECK(std::abs(plane.At(bakedImage, x, high)[0] - wholeHigh[0]) <= 3);
+	CHECK(std::abs(plane.At(bakedImage, x, low)[0] - wholeLow[0]) <= 3);
+	INFO("whole " << whole[0] << "," << whole[1] << "," << whole[2] << " baked " << baked[0] << "," << baked[1]
+				  << "," << baked[2]);
+	for (size_t channel = 0; channel < 3; ++channel)
+		CHECK(std::abs(whole[channel] - baked[channel]) <= 3);
+	// The prefix is what the bake holds: without it the live seven differ.
+	plane.Surface.MaterialTexture0 = {};
+	const auto unbaked = plane.At(plane.Capture(), x, y);
+	CHECK(std::abs(unbaked[0] - whole[0]) + std::abs(unbaked[1] - whole[1]) + std::abs(unbaked[2] - whole[2]) > 6);
 }
 
 TEST_CASE("a UDIM tile whose graph output is not ready draws the default", "[render][gpu][udim][.]") {

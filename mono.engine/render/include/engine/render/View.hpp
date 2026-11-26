@@ -227,6 +227,26 @@ namespace engine::render {
 	// group, records every view into one command buffer, then submits once.
 	//
 	// @since v0.17
+	// A surface drawn into its mesh's UVs and kept as textures: the baked
+	// prefix of a long material layer stack. The five layers are named
+	// `Output` followed by `/0` to `/4` (see `SURFACE_BAKE` in
+	// `engine-surface-main.glsl` for what each holds).
+	struct SurfaceBake {
+		// A `bake/` surface the shader library holds.
+		core::Name Shader;
+		core::Name Mesh;
+		core::Name Output;
+		// The content namespace of the shader, mesh and textures.
+		core::Name Owner;
+		uint32_t Size = 1024;
+		core::Name MaterialTexture0;
+		core::Name MaterialTexture1;
+		std::array<float, 16> Parameters{};
+		uint16_t ParameterMask = 0;
+		// What it was baked from; a new value bakes again.
+		uint64_t Revision = 0;
+	};
+
 	struct View {
 		// Borrowed immutable solver checkpoint bytes, owned by the collected world packet.
 		std::span<const std::byte> WeatherCheckpoint;
@@ -485,6 +505,9 @@ namespace engine::render {
 		std::span<const core::CFrame> ForeignJointFrames;
 		std::span<const PortalView> Portals;
 		//@}
+
+		// Surfaces to bake before this view draws; each runs once per revision.
+		std::span<const SurfaceBake> Bakes;
 
 		// Per-world lighting used when `OverrideLighting` is true.
 		scene::WorldLighting Lighting;

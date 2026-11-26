@@ -331,6 +331,7 @@ namespace engine::render {
 		SDL_GPUShader *packedShadowVertex =
 			LoadShader("packed-shadow.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 2, 5);
 		SDL_GPUShader *shadowFragment = LoadShader("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+		SDL_GPUShader *bakeVertex = LoadShader("bake.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 5);
 		SDL_GPUShader *overlayVertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		SDL_GPUShader *imageFragment = LoadShader("image.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *overlayFragment = LoadShader("overlay.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
@@ -364,6 +365,7 @@ namespace engine::render {
 			  shadowVertex,
 			  packedShadowVertex,
 			  shadowFragment,
+			  bakeVertex,
 			  gbufferFragment,
 			  depthPeelFragment}) {
 			if (!shader) continue;
@@ -912,6 +914,7 @@ namespace engine::render {
 		VariantShadowInfo.vertex_input_state.vertex_buffer_descriptions = VariantBuffers;
 		VariantShadowInfo.vertex_input_state.vertex_attributes = VariantAttributes;
 		ShadowFragmentShader = shadowFragment;
+		BakeVertexShader = bakeVertex;
 
 		// Authored variants borrow the same retained vertex stages as deferred built-ins.
 		OpaqueVertexShader = opaqueVertex;
@@ -2052,6 +2055,10 @@ namespace engine::render {
 		OpaqueVertexShader = nullptr;
 		PackedOpaqueVertexShader = nullptr;
 		ShadowFragmentShader = nullptr;
+		BakeVertexShader = nullptr;
+		for (auto &[key, bake] : BakePipelines)
+			if (bake.Pipeline != nullptr) SDL_ReleaseGPUGraphicsPipeline(Device, bake.Pipeline);
+		BakePipelines.clear();
 		VariantsReady = false;
 	}
 

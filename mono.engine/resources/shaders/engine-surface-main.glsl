@@ -1,8 +1,17 @@
 // The generated main around an authored Surface and Light.
 //   SURFACE_LIT      the source defines Light
 //   SURFACE_GBUFFER  write the G-buffer instead of one colour
+//   SURFACE_BAKE     write the surface itself in UV space, for a baked layer prefix:
+//                    albedo and roughness, tangent-space normal and metalness,
+//                    emissive and occlusion, then Custom[0] and Custom[1]
 
-#ifdef SURFACE_GBUFFER
+#ifdef SURFACE_BAKE
+layout(location = 0) out vec4 outBake0;
+layout(location = 1) out vec4 outBake1;
+layout(location = 2) out vec4 outBake2;
+layout(location = 3) out vec4 outBake3;
+layout(location = 4) out vec4 outBake4;
+#elif defined(SURFACE_GBUFFER)
 layout(location = 0) out vec4 outAlbedo;
 layout(location = 1) out vec4 outNormal;
 layout(location = 2) out vec4 outMaterial;
@@ -94,7 +103,15 @@ void main() {
 	Surface(i, o);
 	o.Roughness = clamp(o.Roughness, 0.045, 1.0);
 	o.Metalness = clamp(o.Metalness, 0.0, 1.0);
-#ifdef SURFACE_GBUFFER
+#ifdef SURFACE_BAKE
+	// Tangent space, so the baked normal follows the surface through any pose.
+	vec3 tangent = inverse(CotangentFrame(i.Normal, inWorldPosition, inTexCoord)) * o.Normal;
+	outBake0 = vec4(o.Albedo, o.Roughness);
+	outBake1 = vec4(normalize(tangent) * 0.5 + 0.5, o.Metalness);
+	outBake2 = vec4(o.Emissive, o.Occlusion);
+	outBake3 = o.Custom[0];
+	outBake4 = o.Custom[1];
+#elif defined(SURFACE_GBUFFER)
 	outAlbedo = vec4(o.Albedo, o.Alpha);
 	outMaterial = vec4(o.Roughness, o.Metalness, o.Occlusion, clamp(o.Specular, 0.0, 1.0));
 	#ifdef SURFACE_LIT

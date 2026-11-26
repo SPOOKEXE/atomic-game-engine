@@ -981,6 +981,11 @@ namespace engine::scene {
 		uint16_t SharedParameterMask = 0;
 		//@}
 
+		// **Derived**: a long layer stack's baked prefix, as a `layers:` set, and
+		// the authored texture slot it is drawn in. It wins over the slot's value.
+		core::Name BakedTexture = {};
+		uint8_t BakedSlot = 0;
+
 		// Which shader this surface is drawn with, or invalid for the engine's.
 		//
 		// **Derived, exactly as the maps above are.** `ResolveMaterials` writes
