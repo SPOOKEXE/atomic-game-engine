@@ -42,11 +42,13 @@ namespace engine::script {
 	class ScriptCall;
 	struct ServiceSurface;
 
-	// Per-VM bounds. Defaults suit an interactive tool graph.
+	// Per-VM bounds, nodes and links per graph. Defaults suit an interactive
+	// tool graph as large as a character's body graph (about a thousand
+	// nodes and twice the links).
 	struct NodeGraphLimits {
 		size_t MaximumObjects = 256;
-		size_t MaximumNodes = 1024;
-		size_t MaximumLinks = 4096;
+		size_t MaximumNodes = 4096;
+		size_t MaximumLinks = 16384;
 		// Bytes of outputs one run may produce.
 		size_t MaximumValueBytes = 4 * 1024 * 1024;
 		// Wall time one run may take before the call raises.
