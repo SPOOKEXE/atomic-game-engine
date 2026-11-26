@@ -1331,6 +1331,8 @@ namespace engine::render {
 			gpu::ReleaseTexture(device, State->FallbackTexture);
 		}
 		if (State->FallbackArrayTexture) gpu::ReleaseTexture(device, State->FallbackArrayTexture);
+		if (State->Reference.Accumulation) gpu::ReleaseTexture(device, State->Reference.Accumulation);
+		if (State->Reference.Pipeline) SDL_ReleaseGPUComputePipeline(device, State->Reference.Pipeline);
 		for (auto &[key, layered] : State->LayeredTextures)
 			if (layered.Texture != nullptr) gpu::ReleaseTexture(device, layered.Texture);
 		if (State->OverlayTexture) {

@@ -1156,6 +1156,16 @@ namespace engine::render {
 		// Device bytes of every content texture.
 		size_t TextureBytes() const;
 
+		// Reference path tracing (R08): traces `samples` more paths per pixel of
+		// `view` through the scene's real geometry (mirrors, the sun, its lights
+		// and every surface's colour and emission) and returns the running
+		// average as RGBA floats, rows top first. A different camera or set of
+		// instances starts the average again. Up to `MESH_BUILD_BUDGET` new mesh
+		// trees are built per call; instances whose mesh waits are left out.
+		bool TraceReference(const View &view, uint32_t samples, std::vector<float> &rgba, uint32_t bounces = 3);
+		// Paths per pixel in the running average.
+		uint32_t ReferenceSamples() const;
+
 		// Builds the UV-space draw of a `bake/` surface from its
 		// `ShaderAssembly::Bake` words, for the `SurfaceBake`s a view carries.
 		bool AddBakeShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner = {});

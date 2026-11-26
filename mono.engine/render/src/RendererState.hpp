@@ -47,6 +47,7 @@
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/imagegraph/Reference.hpp>
+#include <engine/render/raytrace/Bvh.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/capture/DataFactoryHookBind.hpp>
 #include <engine/render/capture/VisibilityObservation.hpp>
@@ -3453,6 +3454,23 @@ namespace engine::render {
 		SDL_GPUShader *BakeVertexShader = nullptr;
 		// Builds or replaces a bake pipeline; false when it cannot be built.
 		bool AddBakeVariant(const core::Name &name, core::Name owner, std::span<const uint32_t> spirv);
+		// The reference path tracer's state: mesh trees by mesh and owner, the
+		// pipeline, and the running average.
+		struct ReferenceTrace {
+			struct MeshTree {
+				uint64_t Revision = 0;
+				std::unique_ptr<MeshBvh> Tree;
+			};
+			std::unordered_map<uint64_t, MeshTree> Meshes;
+			SDL_GPUComputePipeline *Pipeline = nullptr;
+			SDL_GPUTexture *Accumulation = nullptr;
+			uint32_t Width = 0, Height = 0;
+			uint64_t Signature = 0;
+			uint32_t Frame = 0;
+			uint32_t Samples = 0;
+		};
+		ReferenceTrace Reference;
+
 		// Asks the texture table for the detail `view`'s drawn textures need.
 		void RequestTextureDetail(const View &view);
 		// Draws the bakes `views` ask for that have not run at their revision.

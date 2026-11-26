@@ -2392,6 +2392,101 @@ TEST_CASE("travelling past textured planes keeps near detail fine and far detail
 	CHECK(peak <= budget);
 }
 
+namespace {
+	// A fixture plane: `size` across, at `position`, facing `facing` (from +z).
+	scene::DrawInstance Panel(glm::vec3 position, glm::vec2 size, glm::quat facing, core::Color3 colour, uint64_t source) {
+		scene::DrawInstance instance = DrawPlanes(std::array{Plane{0, 0, 0, size.x * 0.5f, size.y * 0.5f, 0xFFFFFFFFu}}).front();
+		instance.Frame = core::CFrame(core::Vector3{position.x, position.y, position.z}, facing);
+		instance.Tint = colour;
+		instance.Source = source;
+		return instance;
+	}
+
+	struct Traced {
+		std::vector<float> Pixels;
+		uint32_t Width = 0;
+		glm::vec3 At(uint32_t x, uint32_t y) const {
+			const size_t at = (size_t(y) * Width + x) * 4;
+			return {Pixels[at], Pixels[at + 1], Pixels[at + 2]};
+		}
+		// The mean over a square of pixels around (x, y).
+		glm::vec3 Around(uint32_t x, uint32_t y, uint32_t half = 3) const {
+			glm::vec3 sum(0.0f);
+			for (uint32_t j = y - half; j <= y + half; ++j)
+				for (uint32_t i = x - half; i <= x + half; ++i)
+					sum += At(i, j);
+			return sum / float((2 * half + 1) * (2 * half + 1));
+		}
+	};
+
+	Traced Trace(PlaneScene &plane, std::vector<scene::DrawInstance> instances, uint32_t samples) {
+		plane.Drawn = std::move(instances);
+		plane.View.Instances = plane.Drawn;
+		Traced out;
+		out.Width = plane.Target.Width;
+		REQUIRE(plane.Fixture.Render.TraceReference(plane.View, samples, out.Pixels));
+		return out;
+	}
+}
+
+TEST_CASE("path tracing sees an object behind the camera in a mirror", "[render][gpu][raytrace][.]") {
+	PlaneScene plane(core::Name("fixture.white"));
+	plane.Target = render::SceneTarget{64, 64};
+	plane.View.Lighting.Ambient = {1, 1, 1};
+	plane.View.Lighting.Direct = {0, 0, 0};
+	const glm::quat back = glm::angleAxis(3.14159265f, glm::vec3(0, 1, 0));
+	auto mirror = Panel({0, 0, -4}, {4, 4}, glm::quat(1, 0, 0, 0), {1, 1, 1}, 1);
+	mirror.Surface = 0;
+	const auto red = Panel({0, 0, 4}, {10, 10}, back, {1, 0.05f, 0.05f}, 2);
+	const auto with = Trace(plane, {mirror, red}, 48).Around(32, 32);
+	const auto without = Trace(plane, {mirror}, 48).Around(32, 32);
+	INFO("with " << with.r << "," << with.g << " without " << without.r << "," << without.g);
+	CHECK(with.r > 3.0f * with.g);
+	CHECK(std::abs(without.r - without.g) < 0.1f * without.r);
+}
+
+TEST_CASE("path tracing casts a shadow from geometry outside the view", "[render][gpu][raytrace][.]") {
+	PlaneScene plane(core::Name("fixture.white"));
+	plane.Target = render::SceneTarget{64, 64};
+	plane.View.Lighting.Ambient = {0.05f, 0.05f, 0.05f};
+	plane.View.Lighting.Direct = {1, 1, 1};
+	plane.View.Lighting.Direction = core::Vector3{0.0f, -0.5547f, -0.8321f};
+	const glm::quat up = glm::angleAxis(-1.5707963f, glm::vec3(1, 0, 0));
+	const auto floor = Panel({0, -1, -6}, {30, 30}, up, {0.8f, 0.8f, 0.8f}, 1);
+	// Above and behind the camera: never on screen, but between the sun and the floor.
+	const auto roof = Panel({0, 3, 2}, {3, 3}, up, {0.8f, 0.8f, 0.8f}, 2);
+	// Where the roof's shadow falls: (0, -1, -4), a quarter down from the centre.
+	const auto open = Trace(plane, {floor}, 32).Around(32, 40, 2);
+	const auto shaded = Trace(plane, {floor, roof}, 32).Around(32, 40, 2);
+	INFO("open " << open.r << " shaded " << shaded.r);
+	CHECK(shaded.r < 0.5f * open.r);
+}
+
+TEST_CASE("path tracing carries a red wall's colour onto a white floor", "[render][gpu][raytrace][.]") {
+	PlaneScene plane(core::Name("fixture.white"));
+	plane.Target = render::SceneTarget{64, 64};
+	plane.View.Lighting.Ambient = {0.1f, 0.1f, 0.1f};
+	plane.View.Lighting.Direct = {1, 1, 1};
+	plane.View.Lighting.Direction = core::Vector3{0.7071f, -0.7071f, 0.0f};
+	const glm::quat up = glm::angleAxis(-1.5707963f, glm::vec3(1, 0, 0));
+	const glm::quat left = glm::angleAxis(-1.5707963f, glm::vec3(0, 1, 0));
+	const auto floor = Panel({0, -1, -6}, {30, 30}, up, {0.9f, 0.9f, 0.9f}, 1);
+	const auto wall = Panel({2, 1, -6}, {30, 4}, left, {0.9f, 0.05f, 0.05f}, 2);
+	// The floor just beside the wall: (1.6, -1, -4).
+	const uint32_t x = uint32_t((1.6f / 4.0f + 1.0f) * 0.5f * 64.0f), y = uint32_t((0.25f + 1.0f) * 0.5f * 64.0f);
+	const auto bare = Trace(plane, {floor}, 64).Around(x, y, 1);
+	auto bled = Trace(plane, {floor, wall}, 64).Around(x, y, 1);
+	INFO("bare " << bare.r << "," << bare.g << " bled " << bled.r << "," << bled.g);
+	CHECK(std::abs(bare.r - bare.g) < 0.05f * bare.r);
+	CHECK(bled.r > 1.15f * bled.g);
+	// More samples settle the same picture: the change shrinks as they add up.
+	const glm::vec3 early = bled;
+	const auto later = Trace(plane, {floor, wall}, 64).Around(x, y, 1);
+	const auto latest = Trace(plane, {floor, wall}, 128).Around(x, y, 1);
+	CHECK(plane.Fixture.Render.ReferenceSamples() == 64 + 64 + 128);
+	CHECK(glm::length(latest - later) <= glm::length(later - early) + 1e-3f);
+}
+
 TEST_CASE("a UDIM tile whose graph output is not ready draws the default", "[render][gpu][udim][.]") {
 	PlaneScene plane(core::Name("fixture.white"));
 	scene::WorldLighting bright;

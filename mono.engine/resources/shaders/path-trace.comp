@@ -1,0 +1,230 @@
+#version 450
+
+// Reference path tracing over real scene geometry (R08). One thread per pixel
+// traces `Samples` paths and adds them to the accumulation image; the
+// renderer divides by the running count.
+//
+// Geometry: one node array holding the instance tree first and every mesh
+// tree after it, triangles in each mesh's leaf order, and instances in the
+// instance tree's leaf order, each carrying its transform, where its mesh's
+// tree and triangles start, and its material.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+struct Node {
+	vec4 Low;  // xyz minimum, w first child or item (bits)
+	vec4 High; // xyz maximum, w item count, 0 for an inner node (bits)
+};
+struct Instance {
+	vec4 Rotation;	// quaternion xyzw
+	vec4 Position;	// xyz, w the mesh tree's first node (bits)
+	vec4 Scale;		// xyz, w the mesh's first triangle (bits)
+	vec4 Albedo;	// rgb, w 1 for a mirror
+	vec4 Emission;	// rgb radiance
+};
+
+layout(set = 0, binding = 0, std430) readonly buffer Nodes { Node Data[]; } nodes;
+layout(set = 0, binding = 1, std430) readonly buffer Triangles { vec4 Data[]; } corners;
+layout(set = 0, binding = 2, std430) readonly buffer Instances { Instance Data[]; } instances;
+layout(set = 1, binding = 0, rgba32f) uniform image2D accumulation;
+
+layout(set = 2, binding = 0) uniform TraceValues {
+	vec4 Eye;		// xyz camera position
+	vec4 Right;		// across the image, scaled to its half width
+	vec4 Up;		// up the image, scaled to its half height
+	vec4 Forward;	// the view direction
+	vec4 SunDirection; // towards the sun
+	vec4 SunColour;
+	vec4 Sky;		// radiance of a ray that escapes
+	vec4 Settings;	// x frame, y samples, z bounces, w light count
+	vec4 LightPosition[8]; // xyz, w range
+	vec4 LightColour[8];
+	uvec4 Size;		// xy image size
+} trace;
+
+uint state;
+uint Pcg() {
+	state = state * 747796405u + 2891336453u;
+	uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+	return (word >> 22u) ^ word;
+}
+float Random() {
+	return float(Pcg()) / 4294967296.0;
+}
+
+vec3 Rotate(vec4 q, vec3 v) {
+	vec3 t = 2.0 * cross(q.xyz, v);
+	return v + q.w * t + cross(q.xyz, t);
+}
+vec3 Unrotate(vec4 q, vec3 v) {
+	return Rotate(vec4(-q.xyz, q.w), v);
+}
+
+bool Box(vec3 origin, vec3 inverse, vec3 low, vec3 high, float limit) {
+	vec3 t0 = (low - origin) * inverse, t1 = (high - origin) * inverse;
+	vec3 near = min(t0, t1), far = max(t0, t1);
+	float entry = max(max(near.x, near.y), max(near.z, 0.0));
+	float exit = min(min(far.x, far.y), min(far.z, limit));
+	return entry <= exit;
+}
+
+bool Triangle(vec3 origin, vec3 direction, vec3 a, vec3 b, vec3 c, float limit, out float t) {
+	vec3 e1 = b - a, e2 = c - a;
+	vec3 p = cross(direction, e2);
+	float det = dot(e1, p);
+	if (abs(det) < 1e-12) return false;
+	float inverse = 1.0 / det;
+	vec3 s = origin - a;
+	float u = dot(s, p) * inverse;
+	if (u < 0.0 || u > 1.0) return false;
+	vec3 q = cross(s, e1);
+	float v = dot(direction, q) * inverse;
+	if (v < 0.0 || u + v > 1.0) return false;
+	t = dot(e2, q) * inverse;
+	return t > 1e-4 && t < limit;
+}
+
+vec3 Safe(vec3 d) {
+	return vec3(abs(d.x) < 1e-20 ? 1e20 : 1.0 / d.x, abs(d.y) < 1e-20 ? 1e20 : 1.0 / d.y, abs(d.z) < 1e-20 ? 1e20 : 1.0 / d.z);
+}
+
+// Closest (or any, with `shadow`) hit: distance, instance and world normal.
+bool Trace(vec3 origin, vec3 direction, float limit, bool shadow, out float distance, out uint hitInstance, out vec3 normal) {
+	distance = limit;
+	hitInstance = 0u;
+	normal = vec3(0.0, 1.0, 0.0);
+	bool found = false;
+	vec3 inverse = Safe(direction);
+	uint stack[48];
+	int depth = 0;
+	stack[depth++] = 0u;
+	while (depth > 0) {
+		Node node = nodes.Data[stack[--depth]];
+		if (!Box(origin, inverse, node.Low.xyz, node.High.xyz, distance)) continue;
+		uint first = floatBitsToUint(node.Low.w), count = floatBitsToUint(node.High.w);
+		if (count == 0u) {
+			if (depth < 46) {
+				stack[depth++] = first;
+				stack[depth++] = first + 1u;
+			}
+			continue;
+		}
+		for (uint item = first; item < first + count; ++item) {
+			Instance instance = instances.Data[item];
+			vec3 localOrigin = Unrotate(instance.Rotation, origin - instance.Position.xyz) / instance.Scale.xyz;
+			vec3 localDirection = Unrotate(instance.Rotation, direction) / instance.Scale.xyz;
+			vec3 localInverse = Safe(localDirection);
+			uint root = floatBitsToUint(instance.Position.w), triangles = floatBitsToUint(instance.Scale.w);
+			uint inner[48];
+			int innerDepth = 0;
+			inner[innerDepth++] = root;
+			while (innerDepth > 0) {
+				Node mesh = nodes.Data[inner[--innerDepth]];
+				if (!Box(localOrigin, localInverse, mesh.Low.xyz, mesh.High.xyz, distance)) continue;
+				uint meshFirst = floatBitsToUint(mesh.Low.w), meshCount = floatBitsToUint(mesh.High.w);
+				if (meshCount == 0u) {
+					if (innerDepth < 46) {
+						inner[innerDepth++] = root + meshFirst;
+						inner[innerDepth++] = root + meshFirst + 1u;
+					}
+					continue;
+				}
+				for (uint tri = meshFirst; tri < meshFirst + meshCount; ++tri) {
+					uint at = (triangles + tri) * 3u;
+					vec3 a = corners.Data[at].xyz, b = corners.Data[at + 1u].xyz, c = corners.Data[at + 2u].xyz;
+					float t;
+					if (!Triangle(localOrigin, localDirection, a, b, c, distance, t)) continue;
+					found = true;
+					distance = t;
+					hitInstance = item;
+					normal = normalize(Rotate(instance.Rotation, cross(b - a, c - a) / instance.Scale.xyz));
+					if (shadow) return true;
+				}
+			}
+		}
+	}
+	return found;
+}
+
+bool Occluded(vec3 origin, vec3 direction, float limit) {
+	float d;
+	uint i;
+	vec3 n;
+	return Trace(origin, direction, limit, true, d, i, n);
+}
+
+vec3 CosineSample(vec3 normal) {
+	float r1 = Random(), r2 = Random();
+	float phi = 6.2831853 * r1;
+	float r = sqrt(r2);
+	vec3 tangent = normalize(abs(normal.y) < 0.99 ? cross(normal, vec3(0, 1, 0)) : cross(normal, vec3(1, 0, 0)));
+	vec3 bitangent = cross(normal, tangent);
+	return normalize(tangent * cos(phi) * r + bitangent * sin(phi) * r + normal * sqrt(max(0.0, 1.0 - r2)));
+}
+
+void main() {
+	uvec2 pixel = gl_GlobalInvocationID.xy;
+	if (pixel.x >= trace.Size.x || pixel.y >= trace.Size.y) return;
+	state = (pixel.x * 1973u + pixel.y * 9277u + uint(trace.Settings.x) * 26699u) | 1u;
+	vec3 total = vec3(0.0);
+	int samples = int(trace.Settings.y), bounces = int(trace.Settings.z), lights = int(trace.Settings.w);
+	for (int sampleIndex = 0; sampleIndex < samples; ++sampleIndex) {
+		vec2 jitter = (vec2(pixel) + vec2(Random(), Random())) / vec2(trace.Size.xy) * 2.0 - 1.0;
+		vec3 origin = trace.Eye.xyz;
+		vec3 direction = normalize(trace.Forward.xyz + jitter.x * trace.Right.xyz - jitter.y * trace.Up.xyz);
+		vec3 throughput = vec3(1.0), radiance = vec3(0.0);
+		bool specular = true;
+		for (int bounce = 0; bounce <= bounces; ++bounce) {
+			float distance;
+			uint which;
+			vec3 normal;
+			if (!Trace(origin, direction, 1e30, false, distance, which, normal)) {
+				radiance += throughput * trace.Sky.rgb;
+				break;
+			}
+			Instance instance = instances.Data[which];
+			if (dot(normal, direction) > 0.0) normal = -normal;
+			vec3 point = origin + direction * distance + normal * 1e-3;
+			// Emitters are seen directly or through mirrors; diffuse bounces
+			// already counted their light by sampling it.
+			if (specular) radiance += throughput * instance.Emission.rgb;
+			if (instance.Albedo.w > 0.5) {
+				throughput *= instance.Albedo.rgb;
+				origin = point;
+				direction = reflect(direction, normal);
+				specular = true;
+				continue;
+			}
+			vec3 albedo = instance.Albedo.rgb;
+			// The sun and every light, through shadow rays.
+			float facing = dot(normal, trace.SunDirection.xyz);
+			if (facing > 0.0 && !Occluded(point, trace.SunDirection.xyz, 1e30))
+				radiance += throughput * albedo * trace.SunColour.rgb * facing;
+			for (int light = 0; light < lights && light < 8; ++light) {
+				vec3 offset = trace.LightPosition[light].xyz - point;
+				float length2 = dot(offset, offset), range = trace.LightPosition[light].w;
+				float lengthTo = sqrt(length2);
+				if (lengthTo > range) continue;
+				vec3 towards = offset / lengthTo;
+				float cosine = dot(normal, towards);
+				if (cosine <= 0.0 || Occluded(point, towards, lengthTo)) continue;
+				radiance += throughput * albedo * trace.LightColour[light].rgb * cosine / max(length2, 1e-4);
+			}
+			throughput *= albedo;
+			origin = point;
+			direction = CosineSample(normal);
+			specular = false;
+			// Indirect light from emitters: counted when a diffuse bounce hits one.
+			float d2;
+			uint w2;
+			vec3 n2;
+			if (Trace(origin, direction, 1e30, false, d2, w2, n2)) {
+				radiance += throughput * instances.Data[w2].Emission.rgb;
+			}
+			if (max(throughput.r, max(throughput.g, throughput.b)) < 1e-3) break;
+		}
+		total += radiance;
+	}
+	vec4 held = imageLoad(accumulation, ivec2(pixel));
+	imageStore(accumulation, ivec2(pixel), vec4(held.rgb + total, held.a + float(samples)));
+}
