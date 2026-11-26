@@ -2296,6 +2296,102 @@ TEST_CASE("a dissolve graph's two variants cut away different amounts", "[render
 	CHECK(none == 0);
 }
 
+namespace {
+	// A square RGBA8 texture of `side` with its full box-filtered chain.
+	assets::TextureData Chained(uint32_t side, uint8_t shade) {
+		assets::TextureData image;
+		image.Width = image.Height = side;
+		image.Format = assets::TextureFormat::RGBA8;
+		image.Pixels.assign(size_t(side) * side * 4, std::byte{shade});
+		for (uint32_t level = 1; assets::MipExtent(side, level - 1) > 1; ++level) {
+			const uint32_t extent = assets::MipExtent(side, level);
+			image.Mips.emplace_back(size_t(extent) * extent * 4, std::byte{shade});
+		}
+		return image;
+	}
+}
+
+TEST_CASE("streamed textures hold the detail views ask for inside a budget", "[render][gpu][streaming][.]") {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	const size_t full = 1024 * 1024 * 4 * 4 / 3 + 64;
+	// Room for one texture at full detail and the other near its base.
+	renderer.SetTextureStreaming(full + 300 * 1024, 64 * 1024 * 1024, 64);
+	REQUIRE(renderer.AddTexture(core::Name("stream.a"), Chained(1024, 200)));
+	REQUIRE(renderer.AddTexture(core::Name("stream.b"), Chained(1024, 100)));
+	auto a = renderer.TextureStreaming(core::Name("stream.a"));
+	REQUIRE(a.Streamed);
+	CHECK(a.Base == 4);
+	CHECK(a.Resident == 4);
+	for (int step = 0; step < 8; ++step) {
+		renderer.PrewarmTexture(core::Name("stream.a"), 0, 2);
+		renderer.PrewarmTexture(core::Name("stream.b"), 0, 2);
+		render::OverlayImage overlay;
+		(void)renderer.Render(std::span<const render::View>{}, overlay, nullptr, false);
+		CHECK(renderer.TextureBytes() <= full + 300 * 1024);
+	}
+	a = renderer.TextureStreaming(core::Name("stream.a"));
+	const auto b = renderer.TextureStreaming(core::Name("stream.b"));
+	INFO("a " << a.Resident << " b " << b.Resident);
+	// Asked for equally: the budget holds both short of full, evenly.
+	CHECK(a.Resident == b.Resident);
+	CHECK(a.Resident > 0);
+	CHECK(a.Resident < 4);
+	// Nobody asks: both fall back to their base level.
+	for (int step = 0; step < 70; ++step) {
+		render::OverlayImage overlay;
+		(void)renderer.Render(std::span<const render::View>{}, overlay, nullptr, false);
+	}
+	CHECK(renderer.TextureStreaming(core::Name("stream.a")).Resident == 4);
+	CHECK(renderer.TextureStreaming(core::Name("stream.b")).Resident == 4);
+}
+
+TEST_CASE("travelling past textured planes keeps near detail fine and far detail coarse", "[render][gpu][streaming][.]") {
+	PlaneScene plane(core::Name("fixture.white"));
+	plane.Target = render::SceneTarget{1024, 512};
+	const size_t budget = 6 * 1024 * 1024;
+	plane.Fixture.Render.SetTextureStreaming(budget, 2 * 1024 * 1024, 32);
+	// A row of planes down the view, each with its own 512 texture.
+	std::vector<scene::DrawInstance> row;
+	for (int index = 0; index < 8; ++index) {
+		const core::Name name("street." + std::to_string(index));
+		REQUIRE(plane.Fixture.Render.AddTexture(name, Chained(512, uint8_t(60 + index * 20))));
+		auto instance = DrawPlanes(std::array{Plane{float(index % 2 ? 2 : -2), 0, 4.0f + index * 6.0f, 1.5f, 1.5f, 0xFFFFFFFFu}}).front();
+		instance.Source = 100 + index;
+		instance.Texture = name;
+		row.push_back(instance);
+	}
+	plane.Others = row;
+	size_t peak = 0;
+	const auto travel = [&](float z, int frames) {
+		plane.View.CameraFrame.Position = {0, 0, z};
+		for (int frame = 0; frame < frames; ++frame) {
+			(void)plane.Capture();
+			peak = std::max(peak, plane.Fixture.Render.TextureBytes());
+		}
+	};
+	travel(0, 12);
+	const auto near = plane.Fixture.Render.TextureStreaming(core::Name("street.0"));
+	const auto far = plane.Fixture.Render.TextureStreaming(core::Name("street.7"));
+	INFO("near " << near.Resident << "/" << near.Requested << " far " << far.Resident << "/" << far.Requested);
+	CHECK(near.Resident < far.Resident);
+	CHECK(near.Resident <= 1);
+	// Walk down the street: the far end becomes the near end.
+	for (float z = 0; z > -42; z -= 6)
+		travel(z, 4);
+	travel(-42, 12);
+	CHECK(plane.Fixture.Render.TextureStreaming(core::Name("street.7")).Resident <= 1);
+	CHECK(plane.Fixture.Render.TextureStreaming(core::Name("street.0")).Resident >
+		  plane.Fixture.Render.TextureStreaming(core::Name("street.7")).Resident);
+	// A teleport back, prewarmed: detail is there on arrival.
+	plane.Fixture.Render.PrewarmTexture(core::Name("street.0"), 0, 30);
+	for (int frame = 0; frame < 10; ++frame)
+		travel(-42, 1);
+	CHECK(plane.Fixture.Render.TextureStreaming(core::Name("street.0")).Resident == 0);
+	CHECK(peak <= budget);
+}
+
 TEST_CASE("a UDIM tile whose graph output is not ready draws the default", "[render][gpu][udim][.]") {
 	PlaneScene plane(core::Name("fixture.white"));
 	scene::WorldLighting bright;

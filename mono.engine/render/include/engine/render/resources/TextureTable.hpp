@@ -17,6 +17,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -148,6 +149,45 @@ namespace engine::render {
 
 		// Releases every texture and the sampler.
 		void Shutdown();
+
+		// View-driven mip residency (R06). With a nonzero `budget`, a texture
+		// whose mip chain is larger than `baseSide` keeps the chain on the CPU and
+		// is resident only from its first level at or under `baseSide`; views ask
+		// for finer levels with `RequestDetail`, and `UpdateStreaming` (once per
+		// frame) uploads them in priority order within `uploadPerFrame` bytes and
+		// keeps every texture inside `budget`, coarsening the least wanted first.
+		// A texture nobody asks for falls back to its base level. Zero turns it off
+		// for textures added afterwards.
+		void SetStreaming(size_t budget, size_t uploadPerFrame, uint32_t baseSide);
+
+		// Asks for `level` (0 the full size) of a texture this frame, at
+		// `priority` (higher first). The finest request and highest priority win.
+		void RequestDetail(const core::Name &name, core::Name owner, uint32_t level, float priority);
+
+		// Holds `level` for `frames` frames ahead of need, as before a teleport.
+		void Prewarm(const core::Name &name, core::Name owner, uint32_t level, uint32_t frames);
+
+		// Moves resident levels towards what was asked for. Once per frame.
+		void UpdateStreaming();
+
+		struct StreamState {
+			bool Streamed = false;
+			// The finest level asked for lately, or the level count when none.
+			uint32_t Requested = 0;
+			uint32_t Resident = 0;
+			uint32_t Base = 0;
+			uint32_t Levels = 0;
+		};
+		StreamState StreamingState(const core::Name &name, core::Name owner = {}) const;
+
+		// Device bytes of every content texture, streamed or not.
+		size_t ResidentBytes() const {
+			return UploadedBytes;
+		}
+		// Bytes uploaded by the last `UpdateStreaming`.
+		size_t StreamedLastFrame() const {
+			return StreamUploaded;
+		}
 
 		// Uploads a texture under a name, replacing one already there.
 		//
@@ -460,6 +500,20 @@ namespace engine::render {
 			// unbounded copy of every upload chain.
 			std::vector<std::byte> SourcePixels;
 			TextureCopyStatus CopyStatus = TextureCopyStatus::Unsupported;
+
+			// Streaming state, when the texture streams (see `SetStreaming`).
+			struct Streamed {
+				std::shared_ptr<const assets::TextureData> Source;
+				uint32_t Base = 0;
+				uint32_t Resident = 0;
+				uint32_t Wanted = 0;
+				float Priority = 0.0f;
+				uint64_t LastRequested = 0;
+				uint64_t PrewarmUntil = 0;
+				uint32_t PrewarmLevel = 0;
+				std::string Label;
+			};
+			std::shared_ptr<Streamed> Stream;
 		};
 
 		// Creates one device texture and fills it, widening `R8` on the way.
@@ -477,7 +531,9 @@ namespace engine::render {
 		// @param label  What to name in a log line if it fails.
 		// @param bytes  Set to what the upload cost in device memory.
 		// @return The texture, or null.
-		SDL_GPUTexture *Upload(const assets::TextureData &image, std::string_view label, size_t &bytes);
+		// `firstLevel` uploads the chain from that level down, as a smaller texture.
+		SDL_GPUTexture *
+		Upload(const assets::TextureData &image, std::string_view label, size_t &bytes, uint32_t firstLevel = 0);
 
 		// One entry from an upload and the image it came from. See the body.
 		static Entry
@@ -523,5 +579,13 @@ namespace engine::render {
 		BandedUpload Bands;
 		size_t RetainedCopyBytes = 0;
 		bool RetainSources = false;
+
+		size_t StreamBudget = 0;
+		size_t StreamUploadPerFrame = 0;
+		uint32_t StreamBaseSide = 256;
+		uint64_t StreamFrame = 1;
+		size_t StreamUploaded = 0;
+		// Handles a swap replaced, released once no frame in flight can use them.
+		std::vector<std::pair<uint64_t, SDL_GPUTexture *>> Retired;
 	};
 }

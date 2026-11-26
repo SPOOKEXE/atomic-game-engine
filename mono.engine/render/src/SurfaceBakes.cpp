@@ -188,4 +188,54 @@ namespace engine::render {
 			}
 		}
 	}
+
+	void Renderer::Impl::RequestTextureDetail(const View &view) {
+		if (view.Target == nullptr || view.Target->Height == 0 || view.Instances.empty()) return;
+		// Pixels across per unit of size at distance one.
+		const float focal = float(view.Target->Height) / (2.0f * std::tan(view.Camera.FieldOfViewRadians * 0.5f));
+		std::vector<core::Vector3> eyes{view.CameraFrame.Position};
+		for (const SurfaceView &surface : view.Surfaces)
+			eyes.push_back(surface.Frame.Position);
+		for (const PortalView &portal : view.Portals)
+			eyes.push_back(portal.Warp.Frame.Position);
+		for (const scene::DrawInstance &instance : view.Instances) {
+			const core::Vector3 &half = instance.HalfExtent;
+			const float radius = std::sqrt(half.X * half.X + half.Y * half.Y + half.Z * half.Z);
+			float nearest = 1e30f;
+			for (const core::Vector3 &eye : eyes) {
+				const core::Vector3 offset = instance.Frame.Position - eye;
+				nearest = std::min(nearest, std::sqrt(offset.X * offset.X + offset.Y * offset.Y + offset.Z * offset.Z));
+			}
+			const float projected = 2.0f * radius * focal / std::max(nearest - radius, 0.05f);
+			const core::Name owner = view.ContentOwnerOf(instance.SourceWorld);
+			const auto ask = [&](const core::Name &name) {
+				if (!name.IsValid() || scene::IsLayerSet(name.Text())) return;
+				const auto one = [&](const core::Name &texture) {
+					uint32_t width = 0, height = 0;
+					if (!Textures.SizeOf(texture, width, height, owner)) return;
+					const float ratio = float(std::max(width, height)) / std::max(projected, 1.0f);
+					const uint32_t level = ratio <= 1.0f ? 0u : static_cast<uint32_t>(std::floor(std::log2(ratio)));
+					Textures.RequestDetail(texture, owner, level, projected);
+				};
+				if (scene::IsTileSet(name.Text())) {
+					for (const auto &tile : scene::ExpandTileSet(name.Text()))
+						one(tile.Texture);
+				} else {
+					one(name);
+				}
+			};
+			for (const core::Name *name :
+				 {&instance.Texture,
+				  &instance.NormalMap,
+				  &instance.RoughnessMap,
+				  &instance.OcclusionMap,
+				  &instance.HeightMap,
+				  &instance.MetalnessMap,
+				  &instance.EmissiveMap,
+				  &instance.PackedPbrMap,
+				  &instance.MaterialTexture0,
+				  &instance.MaterialTexture1})
+				ask(*name);
+		}
+	}
 }

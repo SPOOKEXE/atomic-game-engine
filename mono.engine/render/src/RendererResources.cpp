@@ -585,6 +585,22 @@ namespace engine::render {
 		return AddShader(name, spirv, owner, gbuffer, vertex);
 	}
 
+	void Renderer::SetTextureStreaming(size_t budget, size_t uploadPerFrame, uint32_t baseSide) {
+		if (State != nullptr) State->Textures.SetStreaming(budget, uploadPerFrame, baseSide);
+	}
+
+	void Renderer::PrewarmTexture(const core::Name &name, uint32_t level, uint32_t frames, core::Name owner) {
+		if (State != nullptr) State->Textures.Prewarm(name, owner, level, frames);
+	}
+
+	TextureTable::StreamState Renderer::TextureStreaming(const core::Name &name, core::Name owner) const {
+		return State == nullptr ? TextureTable::StreamState{} : State->Textures.StreamingState(name, owner);
+	}
+
+	size_t Renderer::TextureBytes() const {
+		return State == nullptr ? 0 : State->Textures.ResidentBytes();
+	}
+
 	bool Renderer::AddBakeShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner) {
 		return State != nullptr && State->Device != nullptr && State->AddBakeVariant(name, owner, spirv);
 	}

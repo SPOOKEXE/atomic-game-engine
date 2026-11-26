@@ -134,6 +134,9 @@ namespace engine::render {
 	}
 
 	void TextureTable::Shutdown() {
+		for (const auto &[frame, texture] : Retired)
+			if (Device != nullptr) gpu::ReleaseTexture(Device, texture);
+		Retired.clear();
 		if (Device != nullptr) {
 			AbandonBands();
 			for (const auto &[name, entry] : Textures) {
@@ -166,15 +169,20 @@ namespace engine::render {
 		Device = nullptr;
 	}
 
-	SDL_GPUTexture *
-	TextureTable::Upload(const assets::TextureData &image, std::string_view label, size_t &bytes) {
+	SDL_GPUTexture *TextureTable::Upload(
+		const assets::TextureData &image, std::string_view label, size_t &bytes, uint32_t firstLevel
+	) {
 		const auto format = detail::TextureFormatForUpload(image.Format);
 		const auto uploadSize = UploadedByteCount(image);
 		if (Device == nullptr || !image.IsValid() || !format || !uploadSize ||
 			*uploadSize > std::numeric_limits<uint32_t>::max() ||
-			!detail::SupportsTextureFormat(Device, image.Format))
+			!detail::SupportsTextureFormat(Device, image.Format) || firstLevel >= image.LevelCount())
 			return nullptr;
-		const uint32_t levels = image.LevelCount();
+		const uint32_t levels = image.LevelCount() - firstLevel;
+		size_t chainBytes = 0;
+		for (uint32_t level = 0; level < levels; level++)
+			chainBytes += size_t(assets::MipExtent(image.Width, firstLevel + level)) *
+						  assets::MipExtent(image.Height, firstLevel + level) * format->UploadBytesPerPixel;
 
 		// **Every level staged back to back in one buffer**, so a chain costs one
 		// transfer allocation and one copy pass rather than fifteen of each. The
@@ -183,7 +191,7 @@ namespace engine::render {
 		// alignment: SDL's backend inserts a staging copy for a level that lands
 		// unaligned, and paying that on the two or three smallest levels is
 		// cheaper than the padding on every level of every texture.
-		const size_t uploadBytes = *uploadSize;
+		const size_t uploadBytes = chainBytes;
 
 		// R8 and packed RGBA4 expand explicitly; floating formats stay native.
 		std::vector<std::byte> staged;
@@ -194,9 +202,10 @@ namespace engine::render {
 		}
 		size_t written = 0;
 		for (uint32_t level = 0; level < levels; level++) {
-			const std::vector<std::byte> &source = level == 0 ? image.Pixels : image.Mips[level - 1];
+			const uint32_t chain = firstLevel + level;
+			const std::vector<std::byte> &source = chain == 0 ? image.Pixels : image.Mips[chain - 1];
 			const uint64_t pixels =
-				uint64_t(assets::MipExtent(image.Width, level)) * assets::MipExtent(image.Height, level);
+				uint64_t(assets::MipExtent(image.Width, chain)) * assets::MipExtent(image.Height, chain);
 			const size_t destinationBytes = static_cast<size_t>(pixels * format->UploadBytesPerPixel);
 			if (!detail::CopyPixelsForUpload(
 					image.Format, source, std::span(staged).subspan(written, destinationBytes)
@@ -209,8 +218,8 @@ namespace engine::render {
 		info.type = SDL_GPU_TEXTURETYPE_2D;
 		info.format = format->DeviceFormat;
 		info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-		info.width = image.Width;
-		info.height = image.Height;
+		info.width = assets::MipExtent(image.Width, firstLevel);
+		info.height = assets::MipExtent(image.Height, firstLevel);
 		info.layer_count_or_depth = 1;
 		info.num_levels = levels;
 		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
@@ -246,8 +255,8 @@ namespace engine::render {
 
 		size_t offset = 0;
 		for (uint32_t level = 0; level < levels; level++) {
-			const uint32_t width = assets::MipExtent(image.Width, level);
-			const uint32_t height = assets::MipExtent(image.Height, level);
+			const uint32_t width = assets::MipExtent(image.Width, firstLevel + level);
+			const uint32_t height = assets::MipExtent(image.Height, firstLevel + level);
 
 			SDL_GPUTextureTransferInfo source{};
 			source.transfer_buffer = transfer;
@@ -378,8 +387,17 @@ namespace engine::render {
 		const bool retainedOverLimit =
 			image.Pixels.size() > MAXIMUM_RETAINED_COPY_BYTES - (RetainedCopyBytes - oldCopyBytes);
 
+		// A streamed texture starts at its base level and keeps its chain here.
+		uint32_t base = 0;
+		const bool streams = StreamBudget > 0 && image.LevelCount() > 1 &&
+							 std::max(image.Width, image.Height) > StreamBaseSide;
+		if (streams)
+			while (base + 1 < image.LevelCount() &&
+				   std::max(assets::MipExtent(image.Width, base), assets::MipExtent(image.Height, base)) >
+					   StreamBaseSide)
+				++base;
 		size_t uploadBytes = 0;
-		SDL_GPUTexture *texture = Upload(image, name.Text(), uploadBytes);
+		SDL_GPUTexture *texture = Upload(image, name.Text(), uploadBytes, base);
 		if (texture == nullptr) {
 			return false;
 		}
@@ -404,6 +422,13 @@ namespace engine::render {
 
 		// Build timing, source copies and the map slot before retiring accepted content.
 		// Moving the prepared vectors cannot allocate, so a refusal leaves the old entry intact.
+		if (streams) {
+			auto stream = std::make_shared<Entry::Streamed>();
+			stream->Source = std::make_shared<const assets::TextureData>(image);
+			stream->Base = stream->Resident = stream->Wanted = base;
+			stream->Label = std::string(name.Text());
+			prepared.Stream = std::move(stream);
+		}
 		if (destination->Texture != nullptr) gpu::ReleaseTexture(Device, destination->Texture);
 		*destination = std::move(prepared);
 		destination->Revision = ++ContentGeneration;
@@ -822,4 +847,141 @@ namespace engine::render {
 		return removed;
 	}
 
+
+	void TextureTable::SetStreaming(size_t budget, size_t uploadPerFrame, uint32_t baseSide) {
+		StreamBudget = budget;
+		StreamUploadPerFrame = uploadPerFrame;
+		StreamBaseSide = std::max(baseSide, 1u);
+	}
+
+	void TextureTable::RequestDetail(const core::Name &name, core::Name owner, uint32_t level, float priority) {
+		const auto found = Textures.find(TextureKey(name, owner));
+		if (found == Textures.end() || found->second.Stream == nullptr) return;
+		auto &stream = *found->second.Stream;
+		// The finest asked for this frame, or the first ask since the last.
+		if (stream.LastRequested != StreamFrame) {
+			stream.Wanted = level;
+			stream.Priority = priority;
+		} else {
+			stream.Wanted = std::min(stream.Wanted, level);
+			stream.Priority = std::max(stream.Priority, priority);
+		}
+		stream.LastRequested = StreamFrame;
+	}
+
+	void TextureTable::Prewarm(const core::Name &name, core::Name owner, uint32_t level, uint32_t frames) {
+		const auto found = Textures.find(TextureKey(name, owner));
+		if (found == Textures.end() || found->second.Stream == nullptr) return;
+		auto &stream = *found->second.Stream;
+		stream.PrewarmLevel = level;
+		stream.PrewarmUntil = StreamFrame + frames;
+	}
+
+	TextureTable::StreamState TextureTable::StreamingState(const core::Name &name, core::Name owner) const {
+		const auto found = Textures.find(TextureKey(name, owner));
+		if (found == Textures.end() || found->second.Stream == nullptr) return {};
+		const auto &stream = *found->second.Stream;
+		return {
+			.Streamed = true,
+			.Requested = stream.Wanted,
+			.Resident = stream.Resident,
+			.Base = stream.Base,
+			.Levels = stream.Source->LevelCount(),
+		};
+	}
+
+	void TextureTable::UpdateStreaming() {
+		// What a frame in flight may still sample goes after three more frames.
+		std::erase_if(Retired, [&](const auto &retired) {
+			if (retired.first + 3 > StreamFrame) return false;
+			gpu::ReleaseTexture(Device, retired.second);
+			return true;
+		});
+		StreamUploaded = 0;
+		if (StreamBudget == 0 || Device == nullptr) {
+			++StreamFrame;
+			return;
+		}
+		// A request holds for a second; past that the texture falls back.
+		constexpr uint64_t HOLD = 60;
+		struct Plan {
+			Entry *Held;
+			uint32_t Target;
+		};
+		std::vector<Plan> plans;
+		size_t fixed = 0;
+		const auto chain = [](const assets::TextureData &image, uint32_t first) {
+			const auto format = detail::TextureFormatForUpload(image.Format);
+			size_t bytes = 0;
+			for (uint32_t level = first; level < image.LevelCount(); ++level)
+				bytes += size_t(assets::MipExtent(image.Width, level)) * assets::MipExtent(image.Height, level) *
+						 (format ? format->UploadBytesPerPixel : 4);
+			return bytes;
+		};
+		for (auto &[key, entry] : Textures) {
+			if (entry.Stream == nullptr) {
+				fixed += entry.Bytes;
+				continue;
+			}
+			auto &stream = *entry.Stream;
+			const bool asked = stream.LastRequested + HOLD >= StreamFrame;
+			const bool warm = stream.PrewarmUntil >= StreamFrame;
+			uint32_t target = stream.Base;
+			if (asked) target = std::min(target, stream.Wanted);
+			if (warm) target = std::min(target, stream.PrewarmLevel);
+			// A prewarmed texture outranks what views ask for.
+			if (warm) stream.Priority = std::max(stream.Priority, 1e6f);
+			plans.push_back({&entry, target});
+		}
+		// Inside the budget: the least wanted gives up detail first.
+		std::sort(plans.begin(), plans.end(), [](const Plan &a, const Plan &b) {
+			return a.Held->Stream->Priority < b.Held->Stream->Priority;
+		});
+		const auto total = [&] {
+			size_t bytes = fixed;
+			for (const Plan &plan : plans)
+				bytes += chain(*plan.Held->Stream->Source, plan.Target);
+			return bytes;
+		};
+		for (size_t bytes = total(); bytes > StreamBudget;) {
+			bool coarsened = false;
+			for (Plan &plan : plans) {
+				if (plan.Target >= plan.Held->Stream->Base) continue;
+				const size_t before = chain(*plan.Held->Stream->Source, plan.Target);
+				++plan.Target;
+				bytes -= before - chain(*plan.Held->Stream->Source, plan.Target);
+				coarsened = true;
+				if (bytes <= StreamBudget) break;
+			}
+			if (!coarsened) break;
+		}
+		// Coarser first (it frees memory), then finer by priority, one level at a
+		// time so no frame uploads a whole chain at once.
+		std::stable_sort(plans.begin(), plans.end(), [](const Plan &a, const Plan &b) {
+			const bool aFrees = a.Target > a.Held->Stream->Resident, bFrees = b.Target > b.Held->Stream->Resident;
+			if (aFrees != bFrees) return aFrees;
+			return a.Held->Stream->Priority > b.Held->Stream->Priority;
+		});
+		for (const Plan &plan : plans) {
+			auto &stream = *plan.Held->Stream;
+			if (plan.Target == stream.Resident) continue;
+			const uint32_t next = plan.Target < stream.Resident ? stream.Resident - 1 : plan.Target;
+			const size_t cost = chain(*stream.Source, next);
+			if (next < stream.Resident && StreamUploaded > 0 && StreamUploaded + cost > StreamUploadPerFrame) continue;
+			// Never past the budget, even for one frame.
+			const size_t grows = cost > plan.Held->Bytes ? cost - plan.Held->Bytes : 0;
+			if (UploadedBytes + grows > StreamBudget || UploadedBytes + grows > MaximumBytes) continue;
+			size_t bytes = 0;
+			SDL_GPUTexture *texture = Upload(*stream.Source, stream.Label, bytes, next);
+			if (texture == nullptr) continue;
+			Retired.emplace_back(StreamFrame, plan.Held->Texture);
+			UploadedBytes = UploadedBytes - plan.Held->Bytes + bytes;
+			plan.Held->Texture = texture;
+			plan.Held->Bytes = bytes;
+			plan.Held->Revision = ++ContentGeneration;
+			stream.Resident = next;
+			StreamUploaded += bytes;
+		}
+		++StreamFrame;
+	}
 }

@@ -3453,6 +3453,8 @@ namespace engine::render {
 		SDL_GPUShader *BakeVertexShader = nullptr;
 		// Builds or replaces a bake pipeline; false when it cannot be built.
 		bool AddBakeVariant(const core::Name &name, core::Name owner, std::span<const uint32_t> spirv);
+		// Asks the texture table for the detail `view`'s drawn textures need.
+		void RequestTextureDetail(const View &view);
 		// Draws the bakes `views` ask for that have not run at their revision.
 		void RunSurfaceBakes(std::span<const View> views);
 		// The array a `layers:` set names, each layer resolved within its own

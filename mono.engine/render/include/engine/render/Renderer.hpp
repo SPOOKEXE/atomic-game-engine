@@ -20,6 +20,7 @@
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/imagegraph/Document.hpp>
+#include <engine/render/resources/TextureTable.hpp>
 #include <engine/render/FrameResult.hpp>
 #include <engine/render/ImageGraphBinding.hpp>
 #include <engine/render/SceneLight.hpp>
@@ -1143,6 +1144,17 @@ namespace engine::render {
 			std::span<const uint32_t> gbuffer = {},
 			std::span<const std::vector<uint32_t>> vertex = {}
 		);
+
+		// View-driven mip residency (R06): see `TextureTable::SetStreaming`. Each
+		// frame every view asks for the detail its drawn textures need from their
+		// projected size, from the camera, mirror surfaces and portals.
+		void SetTextureStreaming(size_t budget, size_t uploadPerFrame, uint32_t baseSide = 256);
+		// Holds a texture at `level` for `frames` frames, ahead of a teleport.
+		void PrewarmTexture(const core::Name &name, uint32_t level, uint32_t frames, core::Name owner = {});
+		// A streamed texture's requested and resident levels.
+		TextureTable::StreamState TextureStreaming(const core::Name &name, core::Name owner = {}) const;
+		// Device bytes of every content texture.
+		size_t TextureBytes() const;
 
 		// Builds the UV-space draw of a `bake/` surface from its
 		// `ShaderAssembly::Bake` words, for the `SurfaceBake`s a view carries.

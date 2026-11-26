@@ -678,6 +678,9 @@ namespace engine::render {
 			}
 		} completeCaptures{*State};
 		State->RunSurfaceBakes(views);
+		for (const View &view : views)
+			State->RequestTextureDetail(view);
+		State->Textures.UpdateStreaming();
 		const FrameResult result =
 			FrameBatch(*this).Run(views, overlay, gameInterfaceHook, present, hostOverlayHook).Frame;
 		if (State->Headless() && result.Submitted) State->ThrottleHeadlessFrames();
