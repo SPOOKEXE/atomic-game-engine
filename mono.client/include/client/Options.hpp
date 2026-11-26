@@ -185,6 +185,17 @@ namespace client {
 		// normal safety limit; a command-line measurement may request more.
 		size_t TextureBudgetBytes = 0;
 
+		// Mip streaming (`render::TextureTable::SetStreaming`): textures with
+		// chains above `TEXTURE_STREAMING_BASE_SIDE` keep their detail on the
+		// CPU and views request what they need, inside this many GPU bytes,
+		// uploading at most `TextureStreamingUploadBytes` a frame. Zero turns
+		// streaming off. The default leaves a quarter of the default 512 MiB
+		// table for everything that does not stream.
+		static constexpr size_t DEFAULT_TEXTURE_STREAMING_BYTES = 384u * 1024u * 1024u;
+		static constexpr uint32_t TEXTURE_STREAMING_BASE_SIDE = 256;
+		size_t TextureStreamingBytes = DEFAULT_TEXTURE_STREAMING_BYTES;
+		size_t TextureStreamingUploadBytes = 8u * 1024u * 1024u;
+
 		// Bounded local allowance for a staged portal destination. Integrators may
 		// lower either value for constrained devices; exhaustion keeps the mouth
 		// image-only until capacity becomes available.

@@ -87,6 +87,11 @@ int main(int argc, char **argv) {
 		"N",
 		"Texture-table capacity in MiB. Default 512; raise only for an explicit residency benchmark"
 	);
+	arguments.Value(
+		"texture-streaming-mib",
+		"N",
+		"GPU bytes in MiB for streamed texture mips. Default 384; 0 keeps every texture fully resident"
+	);
 	arguments.Flag("headless", "Run with no window (needs --frames except for --data-factory)");
 	arguments.Flag(
 		"data-factory",
@@ -330,6 +335,19 @@ int main(int argc, char **argv) {
 			return 2;
 		}
 		options.TextureBudgetBytes = *textureBudget;
+	}
+	if (arguments.Has("texture-streaming-mib")) {
+		const int64_t requestedMiB = arguments.GetInteger("texture-streaming-mib", 0);
+		if (requestedMiB == 0) {
+			options.TextureStreamingBytes = 0;
+		} else {
+			const auto streaming = client::Options::TextureBudgetBytesForMiB(requestedMiB);
+			if (!streaming) {
+				std::fprintf(stderr, "--texture-streaming-mib must be 0 or fit in a positive byte count.\n");
+				return 2;
+			}
+			options.TextureStreamingBytes = *streaming;
+		}
 	}
 	options.Headless = arguments.Has("headless");
 

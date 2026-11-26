@@ -470,6 +470,26 @@ namespace client {
 			return false;
 		}
 
+		// **Mips stream to what the views need.** Every view already requests
+		// detail each frame; this is the switch that makes those requests
+		// govern residency instead of holding every chain whole.
+		if (Settings.TextureStreamingBytes != 0) {
+			// A smaller table than the default keeps a quarter for what does
+			// not stream.
+			const size_t streaming = Settings.TextureBudgetBytes != 0
+										 ? std::min(Settings.TextureStreamingBytes, Settings.TextureBudgetBytes / 4 * 3)
+										 : Settings.TextureStreamingBytes;
+			Renderer.SetTextureStreaming(
+				streaming,
+				Settings.TextureStreamingUploadBytes,
+				client::Options::TEXTURE_STREAMING_BASE_SIDE
+			);
+			ENGINE_INFO(
+				"texture streaming: {} MiB, {} MiB a frame", streaming / (1024u * 1024u),
+				Settings.TextureStreamingUploadBytes / (1024u * 1024u)
+			);
+		}
+
 		// **Said once here and applied every frame, beside the sun.** The depth
 		// is the world's now - `workspace.SurfaceBounces`, or the renderer's own
 		// measurement when nothing says - so a value pushed once at startup would

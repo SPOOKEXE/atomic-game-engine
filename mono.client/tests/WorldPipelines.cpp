@@ -36,6 +36,13 @@ TEST_CASE("texture budget command-line values stay explicit and bounded", "[clie
 	CHECK_FALSE(client::Options::TextureBudgetBytesForMiB(std::numeric_limits<int64_t>::max()));
 }
 
+TEST_CASE("the client streams texture mips by default inside the default table", "[client][options]") {
+	const client::Options options;
+	CHECK(options.TextureStreamingBytes > 0);
+	CHECK(options.TextureStreamingBytes < 512u * 1024u * 1024u);
+	CHECK(options.TextureStreamingUploadBytes > 0);
+}
+
 namespace {
 	struct TemporaryPipelineFile {
 		std::filesystem::path Path;
