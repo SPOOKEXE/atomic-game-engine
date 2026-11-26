@@ -984,6 +984,7 @@ namespace studio {
 		friend struct UiAuthoringProbe;
 		friend struct ToolsProbe;
 		friend struct ViewportCameraProbe;
+		friend struct MaterialPreviewProbe;
 		friend struct FactoryPluginProbe;
 		friend struct ViewportGuiControlsProbe;
 
@@ -6753,6 +6754,39 @@ namespace studio {
 		engine::ecs::Entity ProceduralRenderedMesh{};
 		// Orbit angle represented by the last rendered preview.
 		float ProceduralRenderedOrbit = 0.0f;
+		// Material graph preview: the selected `MaterialGraph` on a turning
+		// sphere (or cube or plane), drawn through the shared preview slot.
+		bool ShowMaterialPreview = false;
+		// Whether the preview slot should draw the graph this frame.
+		bool MaterialPreviewWanted = false;
+		// The graph shown: its world, entity and name (the shader name parts use).
+		WorldId MaterialPreviewWorld{};
+		engine::ecs::Entity MaterialPreviewGraph{};
+		engine::core::Name MaterialPreviewName{};
+		// 0 sphere, 1 cube, 2 plane.
+		int MaterialPreviewShape = 0;
+		// Turntable angle and whether it turns.
+		float MaterialPreviewOrbit = 0.0f;
+		bool MaterialPreviewTurning = true;
+		// Captures alternate between two names, so the one on screen is never
+		// the one being replaced; `MaterialPreviewShown` is which is displayed.
+		std::array<engine::core::Name, 2> MaterialPreviewTextures{};
+		int MaterialPreviewShown = -1;
+		void *MaterialPreviewHandle = nullptr;
+		// Frames since the last capture, so a capture waits for the draw data
+		// holding the previous one to retire.
+		uint32_t MaterialPreviewAge = 0;
+		// The graph source revision last compiled, and its first error.
+		uint64_t MaterialPreviewRevision = 0;
+		std::string MaterialPreviewError;
+		engine::render::ShaderCompiler MaterialPreviewCompiler;
+		// Whether the preview shapes are uploaded.
+		bool MaterialPreviewMeshes = false;
+		// Draws the material preview panel.
+		void DrawMaterialPreview();
+		// Renders the graph into the preview slot and captures it.
+		bool RenderMaterialPreviewSlot();
+
 		// Draws the procedural panel and tracks preview changes.
 		void DrawProceduralGeneration();
 		// Applies pending procedural edits and preview work.

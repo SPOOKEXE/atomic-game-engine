@@ -502,6 +502,7 @@ namespace studio {
 			Skinned("Render Pipeline", [&] { DrawRenderPipeline(); });
 			Skinned("Image Composer", [&] { DrawImageComposer(); });
 			Skinned("Procedural Generation", [&] { DrawProceduralGeneration(); });
+			Skinned("Material Preview", [&] { DrawMaterialPreview(); });
 			Skinned("Pipeline Profile", [&] { DrawPipelineProfile(); });
 			Skinned("Asset Pipeline", [&] { DrawAssetPipeline(); });
 			Skinned("Network", [&] { DrawNetwork(); });
@@ -1483,6 +1484,7 @@ namespace studio {
 			{"imageComposer", &ShowImageComposer},
 			{"assetPipeline", &ShowAssetPipeline},
 			{"procedural", &ShowProcedural},
+			{"materialPreview", &ShowMaterialPreview},
 			{"network", &ShowNetwork},
 			{"control", &ShowControl},
 			{"teamCreate", &ShowTeamCreate},
@@ -1643,6 +1645,7 @@ namespace studio {
 		ImGui::MenuItem("Image Composer", nullptr, &ShowImageComposer);
 		ImGui::MenuItem("Asset Pipeline", nullptr, &ShowAssetPipeline);
 		ImGui::MenuItem("Procedural Generation", nullptr, &ShowProcedural);
+		ImGui::MenuItem("Material Preview", nullptr, &ShowMaterialPreview);
 		ImGui::MenuItem("Pipeline Profile", nullptr, &ShowPipelineProfile);
 		ImGui::MenuItem("Physics Profiler", nullptr, &ShowPhysicsSolver);
 

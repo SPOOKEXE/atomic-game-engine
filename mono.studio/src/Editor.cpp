@@ -2443,7 +2443,7 @@ namespace studio {
 			}
 		}
 
-		if (!PreviewWanted.empty() || ProceduralPreviewWanted) {
+		if (!PreviewWanted.empty() || ProceduralPreviewWanted || MaterialPreviewWanted) {
 			Candidates.push_back(PreviewSlot());
 		}
 
@@ -2489,6 +2489,7 @@ namespace studio {
 
 		if (viewport == PreviewSlot()) {
 			if (ProceduralPreviewWanted && RenderProceduralPreviewSlot()) return;
+			if (MaterialPreviewWanted && RenderMaterialPreviewSlot()) return;
 			if (RenderPreviewSlot()) {
 				PreviewWanted.clear();
 				return;
