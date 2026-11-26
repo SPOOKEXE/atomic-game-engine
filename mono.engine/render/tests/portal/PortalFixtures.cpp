@@ -15,6 +15,7 @@
 #include <engine/render/interface/InterfacePass.hpp>
 #include <engine/render/presentation/WorldView.hpp>
 #include <engine/render/resources/ResourceImage.hpp>
+#include <engine/render/resources/ShaderAssembly.hpp>
 #include <engine/render/resources/ShaderCompiler.hpp>
 #include <engine/render/resources/ShaderLibrary.hpp>
 #include <engine/scene/Registration.hpp>
@@ -2510,4 +2511,102 @@ TEST_CASE("interface pass matches the reference raster coverage", "[render][gpu]
 	}
 	const gui::ReferenceComparison comparison = gui::CompareReferenceImages(expected, observed, 0, 0.0f);
 	CHECK(comparison.WithinChangedAreaCap);
+}
+
+TEST_CASE("authored surfaces reach portal and mirror captures", "[render][gpu][surface-authored][.]") {
+	const bool mirror = GENERATE(false, true);
+	const bool lightFunction = GENERATE(false, true);
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallPortalFixture(fixture.Render, true);
+	// One surface the engine lights, one that lights itself. Both must keep
+	// their colour when only a capture can see them.
+	const core::Name shader(lightFunction ? "surface.portal-lit" : "surface.portal-plain");
+	const auto assembled = render::AssembleShader(
+		shader.Text(),
+		lightFunction ? "void Surface(SurfaceInput i, inout SurfaceOutput o) { o.Albedo = vec3(0); }\n"
+						"vec3 Light(SurfaceOutput s, LightSample l) { return vec3(0, 1, 0); }\n"
+					  : "void Surface(SurfaceInput i, inout SurfaceOutput o) { o.Albedo = vec3(1, 0, 0); }\n",
+		{}
+	);
+	REQUIRE(assembled.Error.empty());
+	render::ShaderCompiler compiler;
+	const auto forward = compiler.Compile(assembled.Forward, render::ShaderStage::Fragment, shader.Text());
+	const auto gbuffer = compiler.Compile(assembled.GBuffer, render::ShaderStage::Fragment, shader.Text());
+	INFO(forward.Error << gbuffer.Error);
+	REQUIRE_FALSE(forward.Failed);
+	REQUIRE_FALSE(gbuffer.Failed);
+	REQUIRE(fixture.Render.AddMaterialShader(shader, forward.SpirV, {}, gbuffer.SpirV));
+
+	const render::SceneTarget target{WIDTH, HEIGHT};
+	auto pane = Plane(1, {0, 1, 0}, HALF_WIDTH, HALF_HEIGHT, mirror ? core::Color3{1, 1, 1} : core::Color3{});
+	pane.Surface = 0;
+	// Behind the eye for a mirror, at the far side for a portal: the primary
+	// view never draws it.
+	auto subject =
+		Plane(2, {mirror ? 0.0f : DESTINATION_X, 1, mirror ? 6.0f : -2.0f}, 1, 1, core::Color3{1, 1, 1});
+	std::array instances{pane, subject};
+	render::PortalView portal;
+	portal.Centre = pane.Frame.Position;
+	portal.Normal = {0, 0, 1};
+	portal.First = {HALF_WIDTH, 0, 0};
+	portal.Second = {0, HALF_HEIGHT, 0};
+	portal.Warp.Frame.Position = {DESTINATION_X, 0, 0};
+	render::SurfaceView surface;
+	surface.PaneCentre = portal.Centre;
+	surface.PaneNormal = portal.Normal;
+	surface.PaneFirst = portal.First;
+	surface.PaneSecond = portal.Second;
+	surface.Width = WIDTH;
+	surface.Height = HEIGHT;
+	render::View view;
+	view.World = 14902;
+	view.WorldName = core::Name("portal.fixture.authored");
+	view.Pipeline = core::Name("portal.fixture.pbr");
+	view.Target = &target;
+	view.CameraFrame = core::CFrame::LookAt({0, 1, 4}, {0, 1, 0});
+	view.Camera.NearPlane = .1f;
+	view.Camera.FarPlane = 256;
+	view.Instances = instances;
+	view.OverrideLighting = true;
+	view.Lighting.Ambient = {1, 1, 1};
+	view.Lighting.OutdoorAmbient = view.Lighting.Ambient;
+	view.Lighting.Direct = {};
+	if (mirror) {
+		const scene::SurfacePane geometry{
+			.Centre = portal.Centre, .Normal = portal.Normal, .First = portal.First, .Second = portal.Second
+		};
+		const auto reflected = scene::ReflectCamera(geometry, view.CameraFrame, {});
+		REQUIRE(reflected.Renders);
+		surface.Frame = reflected.Frame;
+		surface.Projection = scene::SurfaceProjection(reflected.Lens, reflected.Frame);
+		view.Surfaces = std::span(&surface, 1);
+		fixture.Render.SetSurfaceBounces(1);
+	} else {
+		view.Portals = std::span(&portal, 1);
+	}
+	render::OverlayImage overlay;
+	const auto capture = [&] {
+		view.Damage.Scene = true;
+		const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		CHECK((mirror ? frame.SurfacePasses > 0 : frame.PortalPasses > 0));
+		return CapturePresentationResource(fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT);
+	};
+	const auto plain = capture();
+	instances[1].Shader = shader;
+	const auto authored = capture();
+	const size_t channel = lightFunction ? 1 : 0;
+	size_t pixels = 0;
+	for (uint32_t y = 32; y < 65; ++y)
+		for (uint32_t x = 35; x < 95; ++x) {
+			const size_t at = y * authored.RowStrideBytes + x * 4;
+			const int own = std::to_integer<int>(authored.Bytes[at + channel]);
+			const int other = std::to_integer<int>(authored.Bytes[at + (channel == 0 ? 1 : 0)]);
+			const int before = std::to_integer<int>(plain.Bytes[at + (channel == 0 ? 1 : 0)]);
+			// The white plate turns the surface's colour: its own channel stays
+			// up while the other falls away from the plain white.
+			if (own > other + 30 && before > other + 30) ++pixels;
+		}
+	INFO("mirror=" << mirror << " light=" << lightFunction << " pixels=" << pixels);
+	CHECK(pixels > 30);
 }
