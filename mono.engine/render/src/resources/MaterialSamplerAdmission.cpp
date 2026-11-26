@@ -96,7 +96,12 @@ namespace engine::render {
 					std::to_string(module.get_decoration(resource.id, spv::DecorationDescriptorSet)) +
 					" binding " + std::to_string(module.get_decoration(resource.id, spv::DecorationBinding));
 				if (!type.array.empty()) return location + " must be a single descriptor";
-				if (type.image.dim != spv::Dim2D || type.image.arrayed || type.image.ms || type.image.depth)
+				// An authored texture array sits in one of the two material slots.
+				const uint32_t binding = module.get_decoration(resource.id, spv::DecorationBinding);
+				const bool arraySlot = module.get_decoration(resource.id, spv::DecorationDescriptorSet) == 2 &&
+									   (binding == 11 || binding == 12);
+				if (type.image.dim != spv::Dim2D || (type.image.arrayed && !arraySlot) || type.image.ms ||
+					type.image.depth)
 					return location + " must sample a non-comparison, non-multisampled 2D texture";
 				const auto &sample = module.get_type(type.image.type);
 				if (sample.basetype != spirv_cross::SPIRType::Float || sample.width != 32)
@@ -106,6 +111,22 @@ namespace engine::render {
 			return "material shader reflection failed: " + std::string(error.what());
 		}
 		return std::nullopt;
+	}
+
+	uint8_t MaterialArraySlots(std::span<const uint32_t> spirv) {
+		uint8_t slots = 0;
+		try {
+			spirv_cross::Compiler module(spirv.data(), spirv.size());
+			for (const auto &resource : module.get_shader_resources().sampled_images) {
+				const uint32_t binding = module.get_decoration(resource.id, spv::DecorationBinding);
+				if (module.get_decoration(resource.id, spv::DecorationDescriptorSet) == 2 &&
+					(binding == 11 || binding == 12) && module.get_type(resource.type_id).image.arrayed)
+					slots |= static_cast<uint8_t>(1u << (binding - 11));
+			}
+		} catch (const spirv_cross::CompilerError &) {
+			return 0;
+		}
+		return slots;
 	}
 
 	std::optional<std::string> AdmitCookedMaterialInterface(std::span<const uint32_t> spirv) {

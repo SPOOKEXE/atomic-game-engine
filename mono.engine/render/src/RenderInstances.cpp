@@ -193,6 +193,8 @@ namespace engine::render {
 		bool authoredPipeline = false;
 		// The vertex uniform slot a deforming surface's values go to, or -1.
 		int vertexValuesSlot = -1;
+		// Which authored texture slots the bound shader reads as arrays.
+		uint8_t arraySlots = 0;
 		const auto bindMesh = [&](const MeshEntry &mesh,
 								  SDL_GPUGraphicsPipeline *native,
 								  const core::Name &shader,
@@ -223,10 +225,12 @@ namespace engine::render {
 			authoredPipeline = authoredMaterial;
 			materialSamplerCount = authoredMaterial || surfaceShader ? 13u : 11u;
 			vertexValuesSlot = -1;
+			arraySlots = 0;
 			if (authoredMaterial && shader.IsValid()) {
 				const auto found = ShaderVariants.find(ShaderVariantKey(shader, owner));
 				// After the frame block, and after the packed descriptor on a packed mesh.
 				if (found != ShaderVariants.end() && found->second.Deformed()) vertexValuesSlot = mesh.Packed ? 2 : 1;
+				if (found != ShaderVariants.end()) arraySlots = found->second.ArraySlots;
 			}
 			if (want != bound) {
 				encoder.Pipeline(want);
@@ -395,8 +399,20 @@ namespace engine::render {
 				SDL_GPUTexture *const emissive = dataMap(names.Emissive);
 				// An authored shader's own textures take the two slots the engine's
 				// refraction uses, which no authored shader reads.
-				SDL_GPUTexture *const material0 = dataMap(names.Material0);
-				SDL_GPUTexture *const material1 = dataMap(names.Material1);
+				// An array slot reads a `layers:` set and nothing else; a plain slot
+				// never reads one.
+				const auto materialMap = [&](const core::Name &name, bool array) -> SDL_GPUTexture * {
+					const bool layered = scene::IsLayerSet(name.Text());
+					if (!array) return layered ? nullptr : dataMap(name);
+					if (!layered) return nullptr;
+					return LayeredTexture(name, SlotContentOwner[slot], [&](core::Name layer) {
+						return TextureContentOwnerWithFallback(
+							layer, SlotContentOwner[slot], SlotImageGraphWorld[slot], SlotImageGraphFallbackWorld[slot]
+						);
+					});
+				};
+				SDL_GPUTexture *const material0 = materialMap(names.Material0, (arraySlots & 1u) != 0);
+				SDL_GPUTexture *const material1 = materialMap(names.Material1, (arraySlots & 2u) != 0);
 				// A missing packed map must leave each semantic on its legacy map or
 				// scalar. Treating the missing marker as data would overwrite all of
 				// them with magenta-channel values.
@@ -449,8 +465,12 @@ namespace engine::render {
 				if (authoredPipeline) {
 					SDL_GPUTextureSamplerBinding authored[13];
 					std::copy(std::begin(samplers), std::begin(samplers) + 11, authored);
-					authored[11] = {material0 != nullptr ? material0 : FallbackTexture, materialSampler};
-					authored[12] = {material1 != nullptr ? material1 : FallbackTexture, materialSampler};
+					const auto standIn = [&](uint8_t bit) {
+						SDL_GPUTexture *array = (arraySlots & bit) != 0 ? EnsureFallbackArrayTexture() : nullptr;
+						return array != nullptr ? array : FallbackTexture;
+					};
+					authored[11] = {material0 != nullptr ? material0 : standIn(1), materialSampler};
+					authored[12] = {material1 != nullptr ? material1 : standIn(2), materialSampler};
 					encoder.FragmentSamplers(0, authored, 13);
 				} else {
 					encoder.FragmentSamplers(0, samplers, materialSamplerCount);
@@ -1152,5 +1172,102 @@ namespace engine::render {
 		InstanceIndexTransfer = residentIndices.Transfer;
 		InstanceIndexCapacity = residentIndices.Capacity;
 		return true;
+	}
+	SDL_GPUTexture *Renderer::Impl::EnsureFallbackArrayTexture() {
+		if (FallbackArrayTexture != nullptr) return FallbackArrayTexture;
+		SDL_GPUTextureCreateInfo info{};
+		info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+		info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+		info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+		info.width = info.height = 1;
+		info.layer_count_or_depth = 1;
+		info.num_levels = 1;
+		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+		SDL_GPUTexture *texture = gpu::CreateTexture(Device, &info);
+		if (texture == nullptr) return nullptr;
+		// Its own command buffer, submitted ahead of the frame that samples it.
+		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
+		if (command == nullptr) {
+			gpu::ReleaseTexture(Device, texture);
+			return nullptr;
+		}
+		SDL_GPUColorTargetInfo clear{};
+		clear.texture = texture;
+		clear.clear_color = {1.0f, 1.0f, 1.0f, 1.0f};
+		clear.load_op = SDL_GPU_LOADOP_CLEAR;
+		clear.store_op = SDL_GPU_STOREOP_STORE;
+		SDL_EndGPURenderPass(SDL_BeginGPURenderPass(command, &clear, 1, nullptr));
+		SDL_SubmitGPUCommandBuffer(command);
+		return FallbackArrayTexture = texture;
+	}
+
+	SDL_GPUTexture *Renderer::Impl::LayeredTexture(
+		const core::Name &set, core::Name owner, const std::function<core::Name(core::Name)> &ownerOf
+	) {
+		const std::vector<core::Name> layers = scene::ExpandLayerSet(set.Text());
+		if (layers.empty()) return nullptr;
+		std::vector<uint64_t> revisions;
+		std::vector<SDL_GPUTexture *> sources;
+		for (const core::Name &layer : layers) {
+			const core::Name layerOwner = ownerOf(layer);
+			SDL_GPUTexture *found = Textures.Find(layer, layerOwner);
+			if (found == nullptr) return nullptr;
+			sources.push_back(found);
+			revisions.push_back(Textures.RevisionOf(layer, layerOwner));
+		}
+		auto &entry = LayeredTextures[(uint64_t(owner.Id()) << 32) | set.Id()];
+		if (entry.Texture != nullptr && entry.Revisions == revisions) return entry.Texture;
+
+		// The first layer sets the size and colour space; the rest are scaled to it.
+		uint32_t width = 0, height = 0;
+		assets::TextureFormat format = assets::TextureFormat::RGBA8_LINEAR;
+		Textures.SizeOf(layers.front(), width, height, ownerOf(layers.front()));
+		Textures.FormatOf(layers.front(), format, ownerOf(layers.front()));
+		if (width == 0 || height == 0) return nullptr;
+		SDL_GPUTextureCreateInfo info{};
+		info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+		info.format = format == assets::TextureFormat::RGBA8 || format == assets::TextureFormat::RGBA4_SRGB
+						  ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB
+					  : format == assets::TextureFormat::RGBA16_FLOAT || format == assets::TextureFormat::RGBA32_FLOAT ||
+							  format == assets::TextureFormat::R16_FLOAT || format == assets::TextureFormat::R32_FLOAT
+						  ? SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT
+						  : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+		info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+		info.width = width;
+		info.height = height;
+		info.layer_count_or_depth = static_cast<Uint32>(layers.size());
+		info.num_levels = 1;
+		for (uint32_t side = std::max(width, height); side > 1; side /= 2)
+			++info.num_levels;
+		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+		SDL_GPUTexture *texture = gpu::CreateTexture(Device, &info);
+		if (texture == nullptr) return nullptr;
+		// Its own command buffer, submitted ahead of the frame that samples it.
+		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
+		if (command == nullptr) {
+			gpu::ReleaseTexture(Device, texture);
+			return nullptr;
+		}
+		for (size_t index = 0; index < sources.size(); ++index) {
+			uint32_t sourceWidth = 0, sourceHeight = 0;
+			Textures.SizeOf(layers[index], sourceWidth, sourceHeight, ownerOf(layers[index]));
+			SDL_GPUBlitInfo blit{};
+			blit.source.texture = sources[index];
+			blit.source.w = sourceWidth;
+			blit.source.h = sourceHeight;
+			blit.destination.texture = texture;
+			blit.destination.layer_or_depth_plane = static_cast<Uint32>(index);
+			blit.destination.w = width;
+			blit.destination.h = height;
+			blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+			blit.filter = SDL_GPU_FILTER_LINEAR;
+			SDL_BlitGPUTexture(command, &blit);
+		}
+		if (info.num_levels > 1) SDL_GenerateMipmapsForGPUTexture(command, texture);
+		SDL_SubmitGPUCommandBuffer(command);
+		if (entry.Texture != nullptr) gpu::ReleaseTexture(Device, entry.Texture);
+		entry.Texture = texture;
+		entry.Revisions = std::move(revisions);
+		return texture;
 	}
 }

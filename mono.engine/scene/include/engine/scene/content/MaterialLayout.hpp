@@ -42,6 +42,8 @@ namespace engine::scene {
 	struct MaterialLayout {
 		std::vector<MaterialParameter> Parameters;
 		std::vector<std::string> Textures;
+		// For each texture, how many layers its array holds, or 0 for a plain one.
+		std::vector<uint32_t> TextureLayers;
 		// Named images a pass reads, from `#pragma image name`, in binding order.
 		std::vector<std::string> Images;
 		// The first declaration that is wrong, as `line: reason`; empty when none.

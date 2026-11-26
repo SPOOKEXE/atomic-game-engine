@@ -64,4 +64,38 @@ namespace engine::scene {
 		}
 		return sorted.empty() ? std::string() : out;
 	}
+
+	namespace {
+		constexpr std::string_view LAYERS = "layers:";
+	}
+
+	bool IsLayerSet(std::string_view value) noexcept {
+		return value.starts_with(LAYERS);
+	}
+
+	std::vector<core::Name> ExpandLayerSet(std::string_view value) {
+		std::vector<core::Name> layers;
+		if (!value.starts_with(LAYERS)) return layers;
+		value.remove_prefix(LAYERS.size());
+		while (!value.empty()) {
+			const size_t bar = std::min(value.find('|'), value.size());
+			const std::string_view name = value.substr(0, bar);
+			if (name.empty() || layers.size() >= MAX_TEXTURE_LAYERS) return {};
+			layers.emplace_back(name);
+			value = bar < value.size() ? value.substr(bar + 1) : std::string_view{};
+		}
+		return layers;
+	}
+
+	std::string ComposeLayerSet(std::span<const core::Name> layers) {
+		if (layers.empty() || layers.size() > MAX_TEXTURE_LAYERS) return {};
+		std::string out(LAYERS);
+		for (size_t index = 0; index < layers.size(); ++index) {
+			const std::string_view text = layers[index].Text();
+			if (text.empty() || text.find('|') != std::string_view::npos) return {};
+			if (index > 0) out += '|';
+			out += text;
+		}
+		return out;
+	}
 }

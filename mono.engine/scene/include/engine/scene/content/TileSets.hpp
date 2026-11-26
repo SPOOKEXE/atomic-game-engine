@@ -46,4 +46,19 @@ namespace engine::scene {
 	// Writes an explicit set. Refuses tiles outside 1001..1100, duplicates, empty
 	// names and names holding `|`, returning an empty string.
 	std::string ComposeTileSet(std::span<const UdimTile> tiles);
+
+	// Most layers one texture array holds.
+	inline constexpr size_t MAX_TEXTURE_LAYERS = 16;
+
+	// Whether a slot value names the layers of a texture array, which a shader
+	// declared with `#pragma texture name[N]`.
+	bool IsLayerSet(std::string_view value) noexcept;
+
+	// The textures a layer set names, in layer order; empty for anything else.
+	std::vector<core::Name> ExpandLayerSet(std::string_view value);
+
+	// Writes a layer set as `layers:a|b|c`. Refuses more than
+	// `MAX_TEXTURE_LAYERS`, empty names and names holding `|`, returning an
+	// empty string.
+	std::string ComposeLayerSet(std::span<const core::Name> layers);
 }

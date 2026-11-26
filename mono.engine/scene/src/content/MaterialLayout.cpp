@@ -1,5 +1,6 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/content/MaterialLayout.hpp>
+#include <engine/scene/content/TileSets.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -88,6 +89,20 @@ namespace engine::scene {
 			}
 			if (kind == "texture") {
 				const std::string_view name = Word(text);
+				// `name[N]` is an array of N layers.
+				uint32_t layers = 0;
+				if (!text.empty() && text.front() == '[') {
+					const size_t close = text.find(']');
+					const std::string_view count =
+						close == std::string_view::npos ? std::string_view{} : text.substr(1, close - 1);
+					const auto parsed = std::from_chars(count.data(), count.data() + count.size(), layers);
+					if (count.empty() || parsed.ec != std::errc{} || parsed.ptr != count.data() + count.size() ||
+						layers < 1 || layers > MAX_TEXTURE_LAYERS) {
+						fail("a texture array is `#pragma texture name[N]` with N from 1 to 16");
+						continue;
+					}
+					text.remove_prefix(close + 1);
+				}
 				if (!Identifier(name) || !Trim(text).empty()) {
 					fail("a texture is `#pragma texture name`");
 				} else if (layout.Find(name) != nullptr || layout.FindTexture(name) >= 0) {
@@ -96,6 +111,7 @@ namespace engine::scene {
 					fail("a material has at most two textures of its own");
 				} else {
 					layout.Textures.emplace_back(name);
+					layout.TextureLayers.push_back(layers);
 				}
 				continue;
 			}

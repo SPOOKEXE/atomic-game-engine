@@ -7363,5 +7363,14 @@ TEST_CASE("a Material holds its own shader values under the part's", "[scripting
 		assert(part.MaterialParameters == "3=2", "part holds " .. part.MaterialParameters)
 		local ok = pcall(function() material:SetMaterialParameter("missing", 1) end)
 		assert(not ok, "an undeclared name is refused")
+		local layered = Instance.new("ShaderScript")
+		layered.Name = "layered"
+		layered.Source = "#pragma texture details[2]\n"
+			.. "void Surface(SurfaceInput i, inout SurfaceOutput o) { o.Albedo = texture(details, vec3(i.UV, 0)).rgb; }\n"
+		layered.Parent = workspace
+		material.Shader = "layered"
+		material:SetMaterialTexture("details", { "a.atex", "b.atex" })
+		assert(material.MaterialTexture0 == "layers:a.atex|b.atex", "array holds " .. material.MaterialTexture0)
+		assert(not pcall(function() material:SetMaterialTexture("details", { "a", "b", "c" }) end), "too many layers")
 	)");
 }

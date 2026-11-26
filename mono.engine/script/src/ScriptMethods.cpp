@@ -855,7 +855,8 @@ namespace engine::script {
 		}
 
 		// `part:SetMaterialTexture(name, content)`: a texture its shader declared with
-		// `#pragma texture`, as one content id or a `{ [1001] = id }` UDIM set. On a
+		// `#pragma texture`, as one content id or a `{ [1001] = id }` UDIM set, or for
+		// a `#pragma texture name[N]` array a list of up to N ids. On a
 		// `Material` it sets the material's texture, which the part's own overrides.
 		void SetMaterialTexture(ScriptCall &call) {
 			const std::string name = call.AsString(0);
@@ -872,7 +873,28 @@ namespace engine::script {
 				CodecStatus why{};
 				if (!call.ReadValue(1, value, why))
 					call.Raise("SetMaterialTexture takes a content id or tiles");
-				if (value.Tag == ValueTag::String) {
+				const uint32_t layers =
+					static_cast<size_t>(slot) < layout.TextureLayers.size() ? layout.TextureLayers[slot] : 0;
+				if (layers > 0) {
+					// An array takes its layers in order: one id or a list of them.
+					std::vector<Name> named;
+					if (value.Tag == ValueTag::String) {
+						named.emplace_back(value.Text);
+					} else if (value.Tag == ValueTag::Array) {
+						for (const auto &item : value.Items) {
+							if (item.Tag != ValueTag::String || item.Text.empty())
+								call.Raise("SetMaterialTexture takes a list of content ids for an array");
+							named.emplace_back(item.Text);
+						}
+					} else {
+						call.Raise("SetMaterialTexture takes a list of content ids for an array");
+					}
+					if (named.size() > layers)
+						call.Raise(("'" + name + "' holds " + std::to_string(layers) + " layer(s)").c_str());
+					const std::string composed = scene::ComposeLayerSet(named);
+					if (composed.empty()) call.Raise("SetMaterialTexture refused a content id holding '|'");
+					content = Name(composed);
+				} else if (value.Tag == ValueTag::String) {
 					content = Name(value.Text);
 				} else {
 					content = ComposeTiles(call, value, "SetMaterialTexture");

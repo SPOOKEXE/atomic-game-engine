@@ -1264,6 +1264,8 @@ namespace engine::render {
 			bool Deformed() const {
 				return Vertex[0] != nullptr;
 			}
+			// Which authored texture slots are arrays; see `MaterialArraySlots`.
+			uint8_t ArraySlots = 0;
 			// Drawn ahead of the G-buffer rather than in it.
 			bool DrawnAhead() const {
 				return HdrOpaque != nullptr && GBuffer == nullptr;
@@ -3428,6 +3430,23 @@ namespace engine::render {
 		// drew anyway. Owning a texture for the job costs four bytes of device
 		// memory and removes the case rather than making it rarer.
 		SDL_GPUTexture *FallbackTexture = nullptr;
+
+		// GPU texture arrays built from a `layers:` set, keyed by the set's name
+		// and owner, rebuilt when a layer's content changes.
+		struct LayeredTextureEntry {
+			SDL_GPUTexture *Texture = nullptr;
+			std::vector<uint64_t> Revisions;
+		};
+		std::unordered_map<uint64_t, LayeredTextureEntry> LayeredTextures;
+		// One white layer, bound where an array slot has nothing to read.
+		SDL_GPUTexture *FallbackArrayTexture = nullptr;
+		// The array a `layers:` set names, each layer resolved within its own
+		// owner; null until every layer is resident.
+		SDL_GPUTexture *LayeredTexture(
+			const core::Name &set, core::Name owner, const std::function<core::Name(core::Name)> &ownerOf
+		);
+		// The white single-layer array, made on first use.
+		SDL_GPUTexture *EnsureFallbackArrayTexture();
 
 		SDL_GPUTexture *OverlayTexture = nullptr;
 		SDL_GPUTransferBuffer *OverlayTransfer = nullptr;

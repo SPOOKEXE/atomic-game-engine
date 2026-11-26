@@ -314,3 +314,14 @@ TEST_CASE("a surface's Vertex runs in every engine vertex stage", "[render][shad
 	// Without one there is nothing to place.
 	CHECK(AssembleShader("plain", "void Surface(SurfaceInput i, inout SurfaceOutput o) {}", {}).Vertex[0].empty());
 }
+
+TEST_CASE("a texture array is a sampler2DArray the material slots admit", "[render][shader]") {
+	const auto assembled = AssembleShader(
+		"arrayed",
+		"#pragma texture details[3]\n"
+		"void Surface(SurfaceInput i, inout SurfaceOutput o) {\n"
+		"	o.Albedo = texture(details, vec3(i.UV, float(detailsLayers() - 1))).rgb;\n}\n",
+		{}
+	);
+	Compiles(assembled);
+}

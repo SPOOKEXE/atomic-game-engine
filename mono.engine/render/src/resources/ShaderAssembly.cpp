@@ -264,8 +264,12 @@ namespace engine::render {
 		std::string declared;
 		for (size_t slot = 0; slot < layout.Textures.size(); ++slot) {
 			const std::string &texture = layout.Textures[slot];
-			declared += "layout(set = 2, binding = " + std::to_string(11 + slot) + ") uniform sampler2D " +
-						texture + ";\n";
+			const uint32_t layers = slot < layout.TextureLayers.size() ? layout.TextureLayers[slot] : 0;
+			declared += "layout(set = 2, binding = " + std::to_string(11 + slot) + ") uniform " +
+						(layers > 0 ? "sampler2DArray " : "sampler2D ") + texture + ";\n";
+			// An array is read as `texture(name, vec3(uv, layer))`.
+			if (layers > 0)
+				declared += "int " + texture + "Layers() { return " + std::to_string(layers) + "; }\n";
 			declared += "bool " + texture + "Bound() { return lighting.ParameterState." +
 						(slot == 0 ? "y" : "z") + " > 0.5; }\n";
 		}

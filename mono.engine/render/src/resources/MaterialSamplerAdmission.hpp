@@ -53,6 +53,9 @@ namespace engine::render {
 		}
 		return std::nullopt;
 	}
+	// Which of the two authored material slots (bit 0 binding 11, bit 1 binding
+	// 12) a fragment declares as a texture array.
+	uint8_t MaterialArraySlots(std::span<const uint32_t> spirv);
 	// Checks cooked resource types without compiling source at load time.
 	std::optional<std::string> AdmitMaterialSamplers(std::span<const uint32_t> spirv);
 	// Matches the fixed opaque vertex outputs and the material colour attachment.

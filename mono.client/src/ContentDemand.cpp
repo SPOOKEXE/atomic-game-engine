@@ -43,6 +43,13 @@ namespace client {
 					if (seen.insert(tile.Texture.Id()).second) out.push_back(tile.Texture);
 				return;
 			}
+			// So does the layer set of a texture array.
+			if (engine::scene::IsLayerSet(name.Text())) {
+				if (!seen.insert(name.Id()).second) return;
+				for (const auto &layer : engine::scene::ExpandLayerSet(name.Text()))
+					if (seen.insert(layer.Id()).second) out.push_back(layer);
+				return;
+			}
 			if (seen.insert(name.Id()).second) {
 				out.push_back(name);
 			}

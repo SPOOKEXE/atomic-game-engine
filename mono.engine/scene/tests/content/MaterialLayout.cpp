@@ -1,11 +1,15 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/content/MaterialLayout.hpp>
+#include <engine/scene/content/TileSets.hpp>
+
+#include <array>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 TEST_SUITE_ID("engine.scene.materiallayout")
 
+using namespace engine;
 using namespace engine::scene;
 
 TEST_CASE("a layout packs parameters without crossing a group of four", "[scene][material]") {
@@ -51,4 +55,23 @@ TEST_CASE("material values survive their text and malformed text changes nothing
 	CHECK(FormatMaterialParameters(loaded).empty());
 	REQUIRE(ParseMaterialParameters("", appearance));
 	CHECK(appearance.MaterialParameterMask == 0);
+}
+
+TEST_CASE("a texture array declares its layers and a layer set names them", "[scene][material]") {
+	const auto layout = ParseMaterialLayout("#pragma texture details[4]\n#pragma texture mask\n");
+	REQUIRE(layout.Error.empty());
+	CHECK(layout.Textures == std::vector<std::string>{"details", "mask"});
+	CHECK(layout.TextureLayers == std::vector<uint32_t>{4, 0});
+	CHECK_FALSE(ParseMaterialLayout("#pragma texture details[0]\n").Error.empty());
+	CHECK_FALSE(ParseMaterialLayout("#pragma texture details[17]\n").Error.empty());
+	CHECK_FALSE(ParseMaterialLayout("#pragma texture details[2\n").Error.empty());
+
+	const std::array names{core::Name("a.atex"), core::Name("b.atex")};
+	const std::string set = ComposeLayerSet(names);
+	CHECK(set == "layers:a.atex|b.atex");
+	CHECK(IsLayerSet(set));
+	CHECK(ExpandLayerSet(set) == std::vector<core::Name>(names.begin(), names.end()));
+	CHECK(ExpandLayerSet("a.atex").empty());
+	const std::array bad{core::Name("a|b")};
+	CHECK(ComposeLayerSet(bad).empty());
 }

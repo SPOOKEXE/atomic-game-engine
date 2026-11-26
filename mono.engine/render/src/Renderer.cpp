@@ -1330,6 +1330,9 @@ namespace engine::render {
 		if (State->FallbackTexture) {
 			gpu::ReleaseTexture(device, State->FallbackTexture);
 		}
+		if (State->FallbackArrayTexture) gpu::ReleaseTexture(device, State->FallbackArrayTexture);
+		for (auto &[key, layered] : State->LayeredTextures)
+			if (layered.Texture != nullptr) gpu::ReleaseTexture(device, layered.Texture);
 		if (State->OverlayTexture) {
 			gpu::ReleaseTexture(device, State->OverlayTexture);
 		}

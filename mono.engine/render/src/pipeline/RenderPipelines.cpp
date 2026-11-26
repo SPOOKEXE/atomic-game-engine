@@ -7,6 +7,7 @@
 // reason instead of appearing as a black screen. `tests/Passes.cpp` is the
 // suite that holds that line.
 
+#include "resources/MaterialSamplerAdmission.hpp"
 #include "DisplayColour.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
@@ -1887,6 +1888,7 @@ namespace engine::render {
 		blended.fragment_shader = fragment;
 
 		variant.Fragment = fragment;
+		variant.ArraySlots = MaterialArraySlots(spirv);
 		variant.Opaque = SDL_CreateGPUGraphicsPipeline(Device, &opaque);
 		variant.Transparent = SDL_CreateGPUGraphicsPipeline(Device, &blended);
 		SDL_GPUGraphicsPipelineCreateInfo packedOpaque = opaque;

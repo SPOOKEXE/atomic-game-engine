@@ -2121,6 +2121,61 @@ TEST_CASE("a surface's Vertex moves what it draws and the shadow it casts", "[re
 	CHECK(gone + 40 < open);
 }
 
+TEST_CASE("a texture array reads each layer it was given", "[render][gpu][material][.]") {
+	PlaneScene plane(core::Name("fixture.white"));
+	scene::WorldLighting bright;
+	bright.Ambient = bright.OutdoorAmbient = {1, 1, 1};
+	bright.Direct = {0, 0, 0};
+	plane.Fixture.Render.SetLighting(bright);
+	plane.View.Lighting = bright;
+	const auto solid = [&](const char *name, uint8_t r, uint8_t g, uint8_t b, uint32_t side) {
+		assets::TextureData map;
+		map.Width = map.Height = side;
+		map.Format = assets::TextureFormat::RGBA8;
+		for (uint32_t texel = 0; texel < side * side; ++texel)
+			for (const uint8_t channel : {r, g, b, uint8_t(255)})
+				map.Pixels.push_back(std::byte{channel});
+		REQUIRE(plane.Fixture.Render.AddTexture(core::Name(name), map));
+	};
+	solid("layer.red", 255, 0, 0, 4);
+	// A different size is scaled to the first layer's.
+	solid("layer.blue", 0, 0, 255, 8);
+	const auto assembled = render::AssembleShader(
+		"arrayed",
+		"#pragma texture details[2]\n#pragma parameter float layer = 0\n"
+		"void Surface(SurfaceInput i, inout SurfaceOutput o) {\n"
+		"	o.Albedo = detailsBound() ? texture(details, vec3(i.UV, layer)).rgb : vec3(0, 1, 0);\n}\n",
+		{}
+	);
+	REQUIRE(assembled.Error.empty());
+	render::ShaderCompiler compiler;
+	const auto forward = compiler.Compile(assembled.Forward, render::ShaderStage::Fragment, "arrayed");
+	const auto gbuffer = compiler.Compile(assembled.GBuffer, render::ShaderStage::Fragment, "arrayed");
+	INFO(forward.Error << gbuffer.Error);
+	REQUIRE(plane.Fixture.Render.AddMaterialShader(core::Name("arrayed"), forward.SpirV, {}, gbuffer.SpirV));
+	plane.Surface.Shader = core::Name("arrayed");
+	const uint32_t x = plane.Target.Width / 2, y = plane.Target.Height / 2;
+	// Nothing given: the slot is unbound and the shader says so.
+	const auto unbound = plane.At(plane.Capture(), x, y);
+	CHECK(unbound[1] > 100);
+	CHECK(unbound[0] < 20);
+	const std::array layers{core::Name("layer.red"), core::Name("layer.blue")};
+	plane.Surface.MaterialTexture0 = core::Name(scene::ComposeLayerSet(layers));
+	const auto first = plane.At(plane.Capture(), x, y);
+	INFO(first[0] << " " << first[1] << " " << first[2]);
+	CHECK(first[0] > 100);
+	CHECK(first[2] < 20);
+	plane.Surface.MaterialParameters[0] = 1.0f;
+	plane.Surface.MaterialParameterMask = 1;
+	const auto second = plane.At(plane.Capture(), x, y);
+	INFO(second[0] << " " << second[1] << " " << second[2]);
+	CHECK(second[2] > 100);
+	CHECK(second[0] < 20);
+	// A plain id in an array slot is not an array, so the slot stays unbound.
+	plane.Surface.MaterialTexture0 = core::Name("layer.red");
+	CHECK(plane.At(plane.Capture(), x, y)[1] > 100);
+}
+
 TEST_CASE("a UDIM tile whose graph output is not ready draws the default", "[render][gpu][udim][.]") {
 	PlaneScene plane(core::Name("fixture.white"));
 	scene::WorldLighting bright;
