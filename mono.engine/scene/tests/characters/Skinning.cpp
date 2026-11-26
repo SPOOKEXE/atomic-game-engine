@@ -181,6 +181,46 @@ TEST_CASE("resolving twice writes nothing the second time", "[scene][skinning]")
 	CHECK(ResolveBones(store) == 0);
 }
 
+TEST_CASE("the pass follows bones renumbered or added between runs", "[scene][skinning]") {
+	// The pass keeps each rig's gathered joints between runs. A bone added
+	// moves the store's layout; a renumbering (`SetBones`) is only a value
+	// write, which the pass must notice by itself.
+	RegisterSceneClasses();
+	Store store("skinning_test.cached");
+	const Entity rig = MakeRig(store, 3, CFrame());
+	CHECK(ResolveBones(store) == 3);
+
+	// A moved middle joint carries the far one with it.
+	const Entity middle = JointAt(store, rig, 1);
+	const Entity far = JointAt(store, rig, 2);
+	Bone *middleRow = store.GetMutable<Bone>(middle);
+	middleRow->Transform = CFrame(Vector3(0.0f, 5.0f, 0.0f));
+	CHECK(ResolveBones(store) == 2);
+	CHECK(store.Get<Bone>(far)->WorldFrame.Position.Y == Approx(5.0f));
+
+	// A new joint under the far one is resolved on the next pass.
+	const Entity extra = store.CreateInstance(BoneClass(), "Joint");
+	store.SetParent(extra, far);
+	Bone joint;
+	joint.Rest = CFrame(Vector3(1.0f, 0.0f, 0.0f));
+	joint.Joint = 3;
+	joint.ParentJoint = 2;
+	store.Set(extra, joint);
+	CHECK(ResolveBones(store) == 1);
+	CHECK(store.Get<Bone>(extra)->WorldFrame.Position.X == Approx(4.0f));
+
+	// Renumbering in place (parents still before children): the tail moves
+	// to higher slots with no layout change, and a moved transform on the
+	// renumbered joint still reaches the joint under it.
+	store.GetMutable<Bone>(far)->Joint = 4;
+	store.GetMutable<Bone>(extra)->Joint = 5;
+	store.GetMutable<Bone>(extra)->ParentJoint = 4;
+	store.GetMutable<Bone>(far)->Transform = CFrame(Vector3(0.0f, 0.0f, 2.0f));
+	ResolveBones(store);
+	CHECK(store.Get<Bone>(extra)->WorldFrame.Position.Z == Approx(2.0f));
+	CHECK(ResolveBones(store) == 0);
+}
+
 TEST_CASE("resolving one bone on the spot matches the pass", "[scene][skinning]") {
 	// The two answers have to agree, for `ResolveAttachment`'s reason: a
 	// property that answered differently depending on when in the frame it was
