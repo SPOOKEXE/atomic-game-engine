@@ -666,7 +666,7 @@ namespace studio {
 				// one thing; recording its colour and forgetting its normals
 				// would draw a part textured and flat, which reads as the normal
 				// map being broken rather than absent.
-				const engine::scene::MaterialMaps maps{
+				engine::scene::MaterialMaps maps{
 					.Colour = engine::core::Name(material.ColourMap),
 					.Normal = engine::core::Name(material.NormalMap),
 					.Roughness = engine::core::Name(material.RoughnessMap),
@@ -674,7 +674,21 @@ namespace studio {
 					.Height = engine::core::Name(material.HeightMap),
 					.Metalness = engine::core::Name(material.MetalnessMap),
 					.Emissive = engine::core::Name(material.EmissiveMap),
+					.PackedPbr = engine::core::Name(material.PackedPbrMap),
+					.RoughnessChannel = material.RoughnessChannel,
+					.OcclusionChannel = material.OcclusionChannel,
+					.HeightChannel = material.HeightChannel,
+					.MetalnessChannel = material.MetalnessChannel,
+					.SpecularFactor = material.SpecularFactor,
+					.TransmissionFactor = material.TransmissionFactor,
+					.IndexOfRefraction = material.IndexOfRefraction,
+					.Thickness = material.Thickness,
+					.Shader = engine::core::Name(material.Shader),
+					.Texture0 = engine::core::Name(material.Texture0),
+					.Texture1 = engine::core::Name(material.Texture1),
 				};
+				std::copy(std::begin(material.Parameters), std::end(material.Parameters), maps.Parameters.begin());
+				maps.ParameterMask = material.ParameterMask;
 				EachOpenWorld([&name, &maps](engine::ecs::Store &store) {
 					engine::scene::RecordMaterial(store, name, maps);
 				});

@@ -971,6 +971,16 @@ namespace engine::scene {
 		uint16_t MaterialParameterMask = 0;
 		//@}
 
+		// **Derived**: what the `Material` child and its asset set, which the
+		// part's own values above override float by float when drawn.
+		// `ResolveMaterials` writes them.
+		//@{
+		core::Name SharedTexture0 = {};
+		core::Name SharedTexture1 = {};
+		float SharedParameters[16] = {};
+		uint16_t SharedParameterMask = 0;
+		//@}
+
 		// Which shader this surface is drawn with, or invalid for the engine's.
 		//
 		// **Derived, exactly as the maps above are.** `ResolveMaterials` writes
@@ -1062,6 +1072,14 @@ namespace engine::scene {
 		// Switches of that shader to turn on, joined by commas; see
 		// `content/MaterialLayers.hpp`.
 		core::Name Keywords = {};
+
+		// Values the shader declares, set for the part wearing this material.
+		// They override the asset's and the part's own `MaterialParameters` and
+		// textures override them, float by float.
+		core::Name MaterialTexture0 = {};
+		core::Name MaterialTexture1 = {};
+		float Parameters[16] = {};
+		uint16_t ParameterMask = 0;
 	};
 
 	// Which tags an entity carries, as a bitmask.

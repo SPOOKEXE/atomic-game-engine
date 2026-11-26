@@ -2042,6 +2042,11 @@ declare extern type Material extends Instance with
 	write Keywords: string?
 	read MaterialId: string
 	write MaterialId: string?
+	read MaterialTexture0: string
+	write MaterialTexture0: string?
+	read MaterialTexture1: string
+	write MaterialTexture1: string?
+	Parameters: string
 	read Shader: string
 	write Shader: string?
 end

@@ -311,3 +311,23 @@ TEST_CASE("a version 2 material is one with no emissive map", "[assets]") {
 	CHECK(read.HeightMap == "materials/bricks_height.atex");
 	CHECK(read.EmissiveMap.empty());
 }
+
+TEST_CASE("a material round-trips its shader and the values it reads", "[assets]") {
+	MaterialData written;
+	written.Shader = "skin";
+	written.Texture0 = "skin/detail.atex";
+	written.Texture1 = "udim:1001=a;1002=b";
+	written.Parameters[0] = 0.5f;
+	written.Parameters[15] = -2.0f;
+	written.ParameterMask = 0x8001;
+	bool wrote = false, read = false;
+	const MaterialData out = RoundTrip(written, wrote, read);
+	REQUIRE(wrote);
+	REQUIRE(read);
+	CHECK(out.Shader == written.Shader);
+	CHECK(out.Texture0 == written.Texture0);
+	CHECK(out.Texture1 == written.Texture1);
+	CHECK(out.Parameters[0] == 0.5f);
+	CHECK(out.Parameters[15] == -2.0f);
+	CHECK(out.ParameterMask == 0x8001);
+}

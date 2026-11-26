@@ -503,14 +503,17 @@ namespace engine::scene {
 			instance.TransmissionFactor = appearance->TransmissionFactor;
 			instance.IndexOfRefraction = appearance->IndexOfRefraction;
 			instance.Thickness = appearance->Thickness;
-			instance.MaterialTexture0 = appearance->MaterialTexture0;
-			instance.MaterialTexture1 = appearance->MaterialTexture1;
-			std::copy(
-				std::begin(appearance->MaterialParameters),
-				std::end(appearance->MaterialParameters),
-				std::begin(instance.MaterialParameters)
-			);
-			instance.MaterialParameterMask = appearance->MaterialParameterMask;
+			// The part's own values over what its material set.
+			instance.MaterialTexture0 = appearance->MaterialTexture0.IsValid() ? appearance->MaterialTexture0
+																			   : appearance->SharedTexture0;
+			instance.MaterialTexture1 = appearance->MaterialTexture1.IsValid() ? appearance->MaterialTexture1
+																			   : appearance->SharedTexture1;
+			for (size_t index = 0; index < std::size(instance.MaterialParameters); ++index)
+				instance.MaterialParameters[index] = (appearance->MaterialParameterMask >> index & 1u) != 0
+														 ? appearance->MaterialParameters[index]
+														 : appearance->SharedParameters[index];
+			instance.MaterialParameterMask =
+				static_cast<uint16_t>(appearance->MaterialParameterMask | appearance->SharedParameterMask);
 			instance.Shader = appearance->Shader;
 			instance.Alpha = appearance->Mode;
 			instance.AlphaCutoff = appearance->AlphaCutoff;

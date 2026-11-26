@@ -242,6 +242,41 @@ namespace engine::scene::part_detail {
 		return property;
 	}
 
+	// `Material.Parameters`: the material's own values, encoded as
+	// `MeshPart.MaterialParameters` is.
+	PropertyDescriptor MaterialRefParametersProperty() {
+		PropertyDescriptor property;
+		property.Name = core::Name("Parameters");
+		property.Type = PropertyType::String;
+		property.Size = sizeof(std::string);
+		property.Kind = PropertyKind::Computed;
+		property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<MaterialRef>()});
+		property.Writes = property.Reads;
+		property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+			const auto *material = store.Get<MaterialRef>(instance);
+			if (material == nullptr) return false;
+			SurfaceAppearance values;
+			std::copy(
+				std::begin(material->Parameters), std::end(material->Parameters), std::begin(values.MaterialParameters)
+			);
+			values.MaterialParameterMask = material->ParameterMask;
+			*static_cast<std::string *>(out) = FormatMaterialParameters(values);
+			return true;
+		};
+		property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+			auto *material = store.GetMutable<MaterialRef>(instance);
+			SurfaceAppearance values;
+			if (material == nullptr || !ParseMaterialParameters(*static_cast<const std::string *>(value), values))
+				return false;
+			std::copy(
+				std::begin(values.MaterialParameters), std::end(values.MaterialParameters), std::begin(material->Parameters)
+			);
+			material->ParameterMask = values.MaterialParameterMask;
+			return true;
+		};
+		return property;
+	}
+
 	// `MeshPart.MaterialParameters`: the set values as `index=value` pairs joined
 	// by `;`. It is how the block saves and replicates; scripts use
 	// `SetMaterialParameter`, which knows the names.
@@ -989,6 +1024,9 @@ namespace engine::scene::part_detail {
 		// resolution order and why it is that way round.
 		ecs::Classes::Property<&MaterialRef::Shader>(materialClass, "Shader");
 		ecs::Classes::Property<&MaterialRef::Keywords>(materialClass, "Keywords");
+		ecs::Classes::Property<&MaterialRef::MaterialTexture0>(materialClass, "MaterialTexture0");
+		ecs::Classes::Property<&MaterialRef::MaterialTexture1>(materialClass, "MaterialTexture1");
+		ecs::Classes::Computed(materialClass, MaterialRefParametersProperty());
 
 		// The light's shared properties. Type-specific controls are declared on
 		// the two classes that consume them, so a point light never offers an

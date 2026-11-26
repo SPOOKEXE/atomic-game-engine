@@ -1,6 +1,8 @@
 #include <engine/assets/Material.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <iterator>
 
 namespace engine::assets {
 
@@ -9,6 +11,8 @@ namespace engine::assets {
 			data.RoughnessMap.size() > MAXIMUM_NAME || data.OcclusionMap.size() > MAXIMUM_NAME ||
 			data.HeightMap.size() > MAXIMUM_NAME || data.EmissiveMap.size() > MAXIMUM_NAME ||
 			data.MetalnessMap.size() > MAXIMUM_NAME || data.PackedPbrMap.size() > MAXIMUM_NAME ||
+			data.Shader.size() > MAXIMUM_NAME || data.Texture0.size() > MAXIMUM_NAME ||
+			data.Texture1.size() > MAXIMUM_NAME ||
 			(data.RoughnessChannel > 3 && data.RoughnessChannel != 255) ||
 			(data.OcclusionChannel > 3 && data.OcclusionChannel != 255) ||
 			(data.HeightChannel > 3 && data.HeightChannel != 255) ||
@@ -45,6 +49,11 @@ namespace engine::assets {
 		writer.WriteFloat(data.TransmissionFactor);
 		writer.WriteFloat(data.IndexOfRefraction);
 		writer.WriteFloat(data.Thickness);
+		writer.WriteString(data.Shader);
+		writer.WriteString(data.Texture0);
+		writer.WriteString(data.Texture1);
+		writer.WriteUInt16(data.ParameterMask);
+		for (const float value : data.Parameters) writer.WriteFloat(value);
 		return true;
 	}
 
@@ -141,6 +150,23 @@ namespace engine::assets {
 			}
 		}
 
+		std::string_view shader, texture0, texture1;
+		float parameters[16] = {};
+		uint16_t parameterMask = 0;
+		if (version >= 8) {
+			shader = reader.ReadString();
+			texture0 = reader.ReadString();
+			texture1 = reader.ReadString();
+			parameterMask = reader.ReadUInt16();
+			for (float &value : parameters) value = reader.ReadFloat();
+			bool finite = true;
+			for (const float value : parameters) finite = finite && std::isfinite(value);
+			if (reader.Failed() || !finite || shader.size() > MAXIMUM_NAME || texture0.size() > MAXIMUM_NAME ||
+				texture1.size() > MAXIMUM_NAME) {
+				return false;
+			}
+		}
+
 		out.ColourMap.assign(colour);
 		out.NormalMap.assign(normal);
 		out.RoughnessMap.assign(roughness);
@@ -157,6 +183,11 @@ namespace engine::assets {
 		out.TransmissionFactor = transmissionFactor;
 		out.IndexOfRefraction = indexOfRefraction;
 		out.Thickness = thickness;
+		out.Shader.assign(shader);
+		out.Texture0.assign(texture0);
+		out.Texture1.assign(texture1);
+		std::copy(std::begin(parameters), std::end(parameters), std::begin(out.Parameters));
+		out.ParameterMask = parameterMask;
 		return true;
 	}
 }

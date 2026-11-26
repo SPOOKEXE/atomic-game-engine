@@ -11,6 +11,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/content/Materials.hpp>
@@ -315,4 +316,64 @@ TEST_CASE("a world with no materials acquires no catalogue", "[scene][materials]
 	// unconditionally rather than only when there is something to remember.
 	CHECK(ResolveMaterials(store) == 0);
 	CHECK_FALSE(store.HasResource<engine::scene::MaterialCatalogue>());
+}
+
+TEST_CASE("shader values come from the asset, then the material, then the part", "[scene][materials]") {
+	Store store = Fresh("materials.values");
+	const Name asset("materials/skin.amat");
+	MaterialMaps maps{.Shader = Name("skin"), .Texture0 = Name("asset.t0"), .Texture1 = Name("asset.t1")};
+	maps.Parameters[0] = 1.0f;
+	maps.Parameters[1] = 2.0f;
+	maps.Parameters[2] = 3.0f;
+	maps.ParameterMask = 0b111;
+	REQUIRE(RecordMaterial(store, asset, maps));
+	const Entity part = store.CreateInstance(engine::ecs::Classes::Find(Name("MeshPart")), "Body");
+	const Entity material = Dress(store, part, asset);
+	ResolveMaterials(store);
+	const auto draw = [&] {
+		return engine::scene::MakeDrawInstance(
+			{}, {}, {}, store.Get<SurfaceAppearance>(part), nullptr, 1
+		);
+	};
+	// The asset alone names the shader and every value.
+	auto drawn = draw();
+	CHECK(store.Get<SurfaceAppearance>(part)->Shader == Name("skin"));
+	CHECK(drawn.MaterialTexture0 == Name("asset.t0"));
+	CHECK(drawn.MaterialParameters[2] == 3.0f);
+	CHECK(drawn.MaterialParameterMask == 0b111);
+
+	// The material instance overrides what it sets.
+	auto *ref = store.GetMutable<MaterialRef>(material);
+	ref->MaterialTexture1 = Name("material.t1");
+	ref->Parameters[1] = 20.0f;
+	ref->Parameters[3] = 40.0f;
+	ref->ParameterMask = 0b1010;
+	ResolveMaterials(store);
+	drawn = draw();
+	CHECK(drawn.MaterialTexture0 == Name("asset.t0"));
+	CHECK(drawn.MaterialTexture1 == Name("material.t1"));
+	CHECK(drawn.MaterialParameters[0] == 1.0f);
+	CHECK(drawn.MaterialParameters[1] == 20.0f);
+	CHECK(drawn.MaterialParameters[3] == 40.0f);
+	CHECK(drawn.MaterialParameterMask == 0b1111);
+
+	// The part's own values win, and are left as they were authored.
+	auto *own = store.GetMutable<SurfaceAppearance>(part);
+	own->MaterialParameters[1] = 200.0f;
+	own->MaterialParameterMask = 0b10;
+	own->MaterialTexture0 = Name("part.t0");
+	ResolveMaterials(store);
+	drawn = draw();
+	CHECK(drawn.MaterialParameters[1] == 200.0f);
+	CHECK(drawn.MaterialParameters[3] == 40.0f);
+	CHECK(drawn.MaterialTexture0 == Name("part.t0"));
+	CHECK(store.Get<SurfaceAppearance>(part)->MaterialParameterMask == 0b10);
+
+	// Without the material, only the part's own remain.
+	store.Destroy(material);
+	ResolveMaterials(store);
+	drawn = draw();
+	CHECK(drawn.MaterialParameterMask == 0b10);
+	CHECK(drawn.MaterialTexture1 == Name());
+	CHECK_FALSE(store.Get<SurfaceAppearance>(part)->Shader.IsValid());
 }

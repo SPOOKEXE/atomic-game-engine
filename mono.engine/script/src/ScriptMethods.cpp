@@ -804,12 +804,43 @@ namespace engine::script {
 			WriteMaterialProperty(call, call.Subject(), "Parameters", &encoded, sizeof(encoded));
 		}
 
+		// The layout of the shader a `Material` names, for values set on it.
+		scene::MaterialLayout MaterialOwnLayout(ScriptCall &call, const scene::MaterialRef &material) {
+			if (!material.Shader.IsValid()) call.Raise("the Material has no Shader");
+			const scene::ShaderText text = scene::ShaderTextOf(call.World(), material.Shader);
+			if (!text.Found)
+				call.Raise(("no ShaderScript named '" + std::string(material.Shader.Text()) + "'").c_str());
+			return scene::ParseMaterialLayout(text.Code);
+		}
+
+		// `SetMaterialParameter` on a Material: its own value, under the part's.
+		void SetMaterialRefParameter(ScriptCall &call, const std::string &name, const scene::MaterialRef &material) {
+			const scene::MaterialLayout layout = MaterialOwnLayout(call, material);
+			const scene::MaterialParameter *parameter = layout.Find(name);
+			if (parameter == nullptr) call.Raise(("the shader declares no parameter '" + name + "'").c_str());
+			std::array<float, 4> values{};
+			const size_t count = ReadMaterialValue(call, *parameter, values);
+			scene::SurfaceAppearance held;
+			std::copy(
+				std::begin(material.Parameters), std::end(material.Parameters), std::begin(held.MaterialParameters)
+			);
+			held.MaterialParameterMask = material.ParameterMask;
+			scene::SetMaterialParameter(held, *parameter, values.data(), count);
+			const std::string encoded = scene::FormatMaterialParameters(held);
+			WriteMaterialProperty(call, call.Subject(), "Parameters", &encoded, sizeof(encoded));
+		}
+
 		// `part:SetMaterialParameter(name, value)`: one value its shader declared with
-		// `#pragma parameter`. Nil goes back to the shader's default.
+		// `#pragma parameter`. Nil goes back to the shader's default. On a
+		// `Material` it sets the material's value, which the part's own overrides.
 		void SetMaterialParameter(ScriptCall &call) {
 			const std::string name = call.AsString(0);
 			if (const auto *pass = call.World().Get<scene::RenderPass>(call.Subject())) {
 				SetPassParameter(call, name, *pass);
+				return;
+			}
+			if (const auto *material = call.World().Get<scene::MaterialRef>(call.Subject())) {
+				SetMaterialRefParameter(call, name, *material);
 				return;
 			}
 			const auto [part, layout] = MaterialSubject(call);
@@ -824,10 +855,15 @@ namespace engine::script {
 		}
 
 		// `part:SetMaterialTexture(name, content)`: a texture its shader declared with
-		// `#pragma texture`, as one content id or a `{ [1001] = id }` UDIM set.
+		// `#pragma texture`, as one content id or a `{ [1001] = id }` UDIM set. On a
+		// `Material` it sets the material's texture, which the part's own overrides.
 		void SetMaterialTexture(ScriptCall &call) {
 			const std::string name = call.AsString(0);
-			const auto [part, layout] = MaterialSubject(call);
+			const auto *material = call.World().Get<scene::MaterialRef>(call.Subject());
+			// A Material holds its own textures; a part, the ones over them.
+			const auto [part, layout] = material != nullptr
+											? std::pair(call.Subject(), MaterialOwnLayout(call, *material))
+											: MaterialSubject(call);
 			const int slot = layout.FindTexture(name);
 			if (slot < 0) call.Raise(("the shader declares no texture '" + name + "'").c_str());
 			Name content;

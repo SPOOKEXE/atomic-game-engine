@@ -64,6 +64,7 @@
 //
 // @tier L7 · shared
 
+#include <array>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/ClassId.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -142,6 +143,13 @@ namespace engine::scene {
 		// Authored surface thickness used by volume transmission.
 		float Thickness = 0.0f;
 
+		// The authored shader and the values it reads, from `assets::MaterialData`.
+		core::Name Shader = {};
+		core::Name Texture0 = {};
+		core::Name Texture1 = {};
+		std::array<float, 16> Parameters{};
+		uint16_t ParameterMask = 0;
+
 		// Whether this names anything at all.
 		//
 		// @return `true` when any map is set. A material naming none is a real
@@ -149,7 +157,8 @@ namespace engine::scene {
 		//         catalogue knows this material" rather than "it is usable".
 		bool IsValid() const {
 			return Colour.IsValid() || Normal.IsValid() || Roughness.IsValid() || Occlusion.IsValid() ||
-				   Height.IsValid() || Metalness.IsValid() || Emissive.IsValid() || PackedPbr.IsValid();
+				   Height.IsValid() || Metalness.IsValid() || Emissive.IsValid() || PackedPbr.IsValid() ||
+				   Shader.IsValid() || Texture0.IsValid() || Texture1.IsValid() || ParameterMask != 0;
 		}
 	};
 

@@ -458,6 +458,9 @@
 			"members": [
 				{"kind":"property","name":"Keywords","type":"string","writable":true,"valueType":"Name","storage":"field"},
 				{"kind":"property","name":"MaterialId","type":"string","writable":true,"valueType":"Name","storage":"field"},
+				{"kind":"property","name":"MaterialTexture0","type":"string","writable":true,"valueType":"Name","storage":"field"},
+				{"kind":"property","name":"MaterialTexture1","type":"string","writable":true,"valueType":"Name","storage":"field"},
+				{"kind":"property","name":"Parameters","type":"string","writable":true,"valueType":"String","storage":"computed"},
 				{"kind":"property","name":"Shader","type":"string","writable":true,"valueType":"Name","storage":"field"}
 			]
 		},

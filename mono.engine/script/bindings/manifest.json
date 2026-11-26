@@ -747,7 +747,10 @@
 			"properties": [
 				{"name": "Keywords", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.MaterialRef"], "writes": ["scene.MaterialRef"]},
 				{"name": "MaterialId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.MaterialRef"], "writes": ["scene.MaterialRef"]},
+				{"name": "MaterialTexture0", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.MaterialRef"], "writes": ["scene.MaterialRef"]},
+				{"name": "MaterialTexture1", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.MaterialRef"], "writes": ["scene.MaterialRef"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parameters", "type": "String", "kind": "computed", "bytes": 32, "writable": true, "nullable": false, "reads": ["scene.MaterialRef"], "writes": ["scene.MaterialRef"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Replicates", "type": "bool", "kind": "computed", "bytes": 1, "writable": true, "nullable": false, "reads": ["ecs.Replicate"], "writes": ["ecs.Replicate"]},
 				{"name": "Shader", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.MaterialRef"], "writes": ["scene.MaterialRef"]}

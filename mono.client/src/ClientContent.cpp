@@ -643,7 +643,7 @@ namespace client {
 				// one thing; recording its colour and forgetting its normals
 				// would draw a part textured and flat, which reads as the normal
 				// map being broken rather than absent.
-				const engine::scene::MaterialMaps maps{
+				engine::scene::MaterialMaps maps{
 					.Colour = engine::core::Name(material.ColourMap),
 					.Normal = engine::core::Name(material.NormalMap),
 					.Roughness = engine::core::Name(material.RoughnessMap),
@@ -660,7 +660,12 @@ namespace client {
 					.TransmissionFactor = material.TransmissionFactor,
 					.IndexOfRefraction = material.IndexOfRefraction,
 					.Thickness = material.Thickness,
+					.Shader = engine::core::Name(material.Shader),
+					.Texture0 = engine::core::Name(material.Texture0),
+					.Texture1 = engine::core::Name(material.Texture1),
 				};
+				std::copy(std::begin(material.Parameters), std::end(material.Parameters), maps.Parameters.begin());
+				maps.ParameterMask = material.ParameterMask;
 
 				// **Deliberately not asked for here**, unlike a mesh's sheets, and
 				// the asymmetry is the point. Every material in the catalogue

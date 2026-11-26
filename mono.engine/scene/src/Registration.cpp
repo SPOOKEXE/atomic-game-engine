@@ -1245,6 +1245,10 @@ namespace engine::scene {
 				// the file saying why.
 				writer.WriteName(refs[index].Shader);
 				writer.WriteName(refs[index].Keywords);
+				writer.WriteName(refs[index].MaterialTexture0);
+				writer.WriteName(refs[index].MaterialTexture1);
+				writer.WriteUInt16(refs[index].ParameterMask);
+				for (const float value : refs[index].Parameters) writer.WriteFloat(value);
 			}
 		}
 
@@ -1254,6 +1258,10 @@ namespace engine::scene {
 				refs[index].Asset = reader.ReadName();
 				refs[index].Shader = reader.ReadName();
 				refs[index].Keywords = reader.ReadName();
+				refs[index].MaterialTexture0 = reader.ReadName();
+				refs[index].MaterialTexture1 = reader.ReadName();
+				refs[index].ParameterMask = reader.ReadUInt16();
+				for (float &value : refs[index].Parameters) value = reader.ReadFloat();
 			}
 		}
 

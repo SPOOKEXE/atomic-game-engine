@@ -6,6 +6,7 @@
 // covers what a script can actually reach, which is the part a binding can get
 // wrong while every piece under it is correct.
 
+#include <engine/scene/content/Shaders.hpp>
 #include <engine/assets/Animation.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Paths.hpp>
@@ -7335,4 +7336,32 @@ TEST_CASE("both languages refuse the Unit of a zero vector", "[scripting][js]") 
 		CHECK_FALSE(ok);
 		CHECK(runtime->LastError().find("zero vector") != std::string::npos);
 	}
+}
+
+TEST_CASE("a Material holds its own shader values under the part's", "[scripting][material]") {
+	RegisterClasses();
+	(void)engine::scene::ShaderScriptClass();
+	Store store("material_values");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	MustRun(*runtime, R"(
+		local shader = Instance.new("ShaderScript")
+		shader.Name = "tinted"
+		shader.Source = "#pragma parameter vec3 tint = 1, 1, 1\n#pragma parameter float gain = 1\n#pragma texture detail\n"
+			.. "void Surface(SurfaceInput i, inout SurfaceOutput o) { o.Albedo = tint * gain; }\n"
+		shader.Parent = workspace
+		local part = Instance.new("MeshPart")
+		part.Name = "Body"
+		part.Parent = workspace
+		local material = Instance.new("Material")
+		material.Shader = "tinted"
+		material.Parent = part
+		material:SetMaterialParameter("tint", Color3.new(1, 0.5, 0.25))
+		material:SetMaterialTexture("detail", "skin/detail.atex")
+		part:SetMaterialParameter("gain", 2)
+		assert(material.Parameters == "0=1;1=0.5;2=0.25", "material holds " .. material.Parameters)
+		assert(material.MaterialTexture0 == "skin/detail.atex", "material texture " .. material.MaterialTexture0)
+		assert(part.MaterialParameters == "3=2", "part holds " .. part.MaterialParameters)
+		local ok = pcall(function() material:SetMaterialParameter("missing", 1) end)
+		assert(not ok, "an undeclared name is refused")
+	)");
 }

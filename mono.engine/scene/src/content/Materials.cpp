@@ -124,7 +124,19 @@ namespace engine::scene {
 					// `MaterialRef::Shader` - because it may name a `ShaderScript` that
 					// only that world contains, and a catalogue keyed by asset name has
 					// nowhere to put an answer that differs per world.
-					appearance->Shader = material.Shader;
+					const MaterialMaps asset = ColourMapOf(store, material.Asset);
+					appearance->Shader = material.Shader.IsValid() ? material.Shader : asset.Shader;
+					// The asset's values, then the instance's over them.
+					appearance->SharedTexture0 =
+						material.MaterialTexture0.IsValid() ? material.MaterialTexture0 : asset.Texture0;
+					appearance->SharedTexture1 =
+						material.MaterialTexture1.IsValid() ? material.MaterialTexture1 : asset.Texture1;
+					for (size_t index = 0; index < asset.Parameters.size(); ++index)
+						appearance->SharedParameters[index] = (material.ParameterMask >> index & 1u) != 0
+																  ? material.Parameters[index]
+																  : asset.Parameters[index];
+					appearance->SharedParameterMask =
+						static_cast<uint16_t>(material.ParameterMask | asset.ParameterMask);
 					written.push_back(parent);
 					resolved++;
 				}
@@ -198,6 +210,10 @@ namespace engine::scene {
 					// by that material's shader, which is the one thing about it
 					// still visible after the textures had gone.
 					appearance->Shader = core::Name{};
+					appearance->SharedTexture0 = core::Name{};
+					appearance->SharedTexture1 = core::Name{};
+					std::fill(std::begin(appearance->SharedParameters), std::end(appearance->SharedParameters), 0.0f);
+					appearance->SharedParameterMask = 0;
 				}
 			}
 

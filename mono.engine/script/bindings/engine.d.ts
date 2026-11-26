@@ -1780,6 +1780,9 @@ declare interface Attachment extends Instance {
 declare interface Material extends Instance {
 	Keywords: string;
 	MaterialId: string;
+	MaterialTexture0: string;
+	MaterialTexture1: string;
+	Parameters: string;
 	Shader: string;
 }
 
