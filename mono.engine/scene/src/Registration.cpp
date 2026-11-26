@@ -30,6 +30,7 @@
 #include <engine/scene/characters/Input.hpp>
 #include <engine/scene/characters/Skinning.hpp>
 #include <engine/scene/characters/Tools.hpp>
+#include <engine/scene/content/MaterialGraphs.hpp>
 #include <engine/scene/content/MaterialLayers.hpp>
 #include <engine/scene/content/Materials.hpp>
 #include <engine/scene/content/MeshCatalogue.hpp>
@@ -1206,6 +1207,15 @@ namespace engine::scene {
 				shaders[index] = {};
 		}
 
+		// A cache of compiled material graphs, rebuilt on demand.
+		void WriteCompiledGraphs(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadCompiledGraphs(core::ByteReader &, void *destination, size_t count) {
+			auto *graphs = static_cast<CompiledGraphs *>(destination);
+			for (size_t index = 0; index < count; index++)
+				graphs[index] = {};
+		}
+
 		// Derived by the shader library, so a save holds none of it.
 		void WriteShaderDiagnostics(core::ByteWriter &, const void *, size_t) {}
 
@@ -2175,6 +2185,9 @@ namespace engine::scene {
 		ecs::Components::Register<LayeredShaders>(
 			"scene.LayeredShaders", WriteLayeredShaders, ReadLayeredShaders
 		);
+		ecs::Components::Register<CompiledGraphs>(
+			"scene.CompiledGraphs", WriteCompiledGraphs, ReadCompiledGraphs
+		);
 		ecs::Components::Register<ShaderDiagnostics>(
 			"scene.ShaderDiagnostics", WriteShaderDiagnostics, ReadShaderDiagnostics
 		);
@@ -2597,6 +2610,7 @@ namespace engine::scene {
 		(void)ShaderScriptClass();
 		(void)ShaderModuleClass();
 		(void)MaterialLayerClass();
+		(void)MaterialGraphClass();
 		(void)RenderPassClass();
 		(void)LensShaderClass();
 		(void)EditableMeshClass();

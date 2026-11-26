@@ -7,6 +7,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/content/MaterialLayers.hpp>
 #include <engine/scene/content/RenderPasses.hpp>
+#include <engine/scene/content/MaterialGraphs.hpp>
 #include <engine/scene/content/Shaders.hpp>
 
 #include <algorithm>
@@ -142,6 +143,21 @@ namespace engine::scene {
 			return module;
 		}
 
+		// A material graph: its document is the Source; it compiles to a surface.
+		ecs::ClassId RegisterMaterialGraphClass() {
+			EnsureClassTree();
+			const ecs::ClassId instance = ecs::Classes::Find(core::Name("Instance"));
+			const std::array source{ecs::Components::Of<ShaderSource>()};
+			const ecs::ClassId graph = ecs::Classes::Register("MaterialGraph", instance, source);
+			ecs::Classes::Computed(graph, SourceProperty());
+			ecs::Classes::Computed(graph, RevisionProperty());
+			ecs::Classes::Computed(graph, CompileErrorProperty());
+			(void)ecs::Classes::SetPropertiesTag(graph, "Source", core::Name("Rendering"));
+			(void)ecs::Classes::SetPropertiesTag(graph, "Revision", core::Name("Data"));
+			(void)ecs::Classes::SetPropertiesTag(graph, "CompileError", core::Name("Data"));
+			return graph;
+		}
+
 		ecs::ClassId RegisterLensShaderClass() {
 			EnsureClassTree();
 
@@ -162,6 +178,11 @@ namespace engine::scene {
 	ecs::ClassId ShaderScriptClass() {
 		static const ecs::ClassId script = RegisterShaderScriptClass();
 		return script;
+	}
+
+	ecs::ClassId MaterialGraphClass() {
+		static const ecs::ClassId graph = RegisterMaterialGraphClass();
+		return graph;
 	}
 
 	ecs::ClassId ShaderModuleClass() {
@@ -269,6 +290,36 @@ namespace engine::scene {
 
 	ShaderText ShaderTextOf(ecs::Store &store, const core::Name &name) {
 		const ecs::Entity script = ShaderScriptNamed(store, name);
+		if (script == ecs::NULL_ENTITY && name.IsValid()) {
+			// A material graph, compiled once per revision. A graph that does not
+			// compile becomes a surface that reports why on the graph.
+			const ecs::ClassId graphClass = MaterialGraphClass();
+			ecs::Entity graph = ecs::NULL_ENTITY;
+			store.Each<const ShaderSource>([&](ecs::Entity entity, const ShaderSource &) {
+				if (store.IsA(entity, graphClass) && store.InstanceNameOf(entity) == name &&
+					(graph == ecs::NULL_ENTITY || entity.Id < graph.Id))
+					graph = entity;
+			});
+			if (const ShaderSource *held = graph == ecs::NULL_ENTITY ? nullptr : store.Get<ShaderSource>(graph)) {
+				if (!store.HasResource<CompiledGraphs>()) store.SetResource(CompiledGraphs{});
+				auto &cache = store.ResourceMutable<CompiledGraphs>()->Entries[graph.Id];
+				if (cache.Revision != held->Revision || cache.Code.empty()) {
+					const CompiledGraph compiled = CompileMaterialGraph(held->Code, name.Text());
+					cache.Revision = held->Revision;
+					cache.Code = compiled.Error.empty()
+									 ? compiled.Source
+									 : "#error " + compiled.Error +
+										   "\nvoid Surface(SurfaceInput i, inout SurfaceOutput o) {}\n";
+				}
+				return ShaderText{
+					.Code = cache.Code,
+					.StoreIdentity = store.Identity(),
+					.Source = graph,
+					.Revision = held->Revision,
+					.Found = true
+				};
+			}
+		}
 		if (script == ecs::NULL_ENTITY) {
 			// A layer stack's generated surface. Its name is its content, so one
 			// revision is all it has.

@@ -1,5 +1,6 @@
 #include "resources/MaterialSamplerAdmission.hpp"
 
+#include <engine/scene/content/MaterialGraphs.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Registration.hpp>
@@ -333,4 +334,23 @@ TEST_CASE("a surface bakes into UV space through its own variant", "[render][sha
 	const auto compiled = compiler.Compile(assembled.Bake, ShaderStage::Fragment, "baked");
 	INFO(compiled.Error);
 	CHECK_FALSE(compiled.Failed);
+}
+
+TEST_CASE("a material graph compiles in every permutation", "[render][shader]") {
+	constexpr const char *dissolve = R"(parameter float amount = 0.3
+parameter vec3 edge = 1, 0.45, 0.1
+texture pattern
+keyword GLOW
+node n = noise uv 12
+node p = sample pattern meshuv
+node cut = step amount (mul n p.a)
+node rim = sub 1 (smoothstep amount (add amount 0.06) n)
+output Albedo = mix base.Albedo edge rim
+output@GLOW Emissive = mul edge (mul rim 4)
+discard cut
+)";
+	const auto graph = scene::CompileMaterialGraph(dissolve, "dissolve");
+	REQUIRE(graph.Error.empty());
+	for (const std::string prefix : {std::string(), std::string("#define GLOW 1\n")})
+		Compiles(AssembleShader("dissolve", prefix + graph.Source, {}));
 }

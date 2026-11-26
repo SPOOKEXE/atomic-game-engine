@@ -7,6 +7,7 @@
 #include <engine/game/Values.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/resources/ShaderCompiler.hpp>
+#include <engine/scene/content/MaterialGraphs.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/scene/content/Shaders.hpp>
 #include <engine/scene/editable/ImageGraph.hpp>
@@ -1089,7 +1090,10 @@ namespace studio {
 
 			ImGui::Separator();
 
-			if (Selection.size() == 1 && oneClass && primaryClass == engine::scene::ShaderScriptClass()) {
+			// A material graph's document is edited like a shader's source.
+			if (Selection.size() == 1 && oneClass &&
+				(primaryClass == engine::scene::ShaderScriptClass() ||
+				 primaryClass == engine::scene::MaterialGraphClass())) {
 				if (const engine::scene::ShaderSource *source =
 						store.Get<engine::scene::ShaderSource>(*primary)) {
 					selectedShader = SelectedShader{*primary, *source, store.InstanceNameOf(*primary)};

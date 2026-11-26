@@ -13,6 +13,7 @@
 
 #include "RenderTypes.hpp"
 
+#include <engine/scene/content/MaterialGraphs.hpp>
 #include <engine/assets/Shader.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Name.hpp>
@@ -948,4 +949,24 @@ TEST_CASE("a replica holding the same script reuses the authority's compile", "[
 	// An edit is still an edit, whichever store holds it.
 	REQUIRE(SetShaderSource(replica, copy, std::string(VALID) + "\n// edited\n"));
 	CHECK(library.Refresh(replica) == 1);
+}
+
+TEST_CASE("a material graph keeps its last good shader after a bad edit", "[render][shader]") {
+	Store store = Fresh("library.graph");
+	const Name name("Dissolve");
+	const Entity graph = store.CreateInstance(engine::scene::MaterialGraphClass(), name.Text());
+	REQUIRE(graph != NULL_ENTITY);
+	REQUIRE(SetShaderSource(store, graph, "parameter float amount = 0.3\nnode n = noise uv 8\ndiscard step amount n\n"));
+	Select(store, "Dissolve");
+	ShaderLibrary library;
+	REQUIRE(library.Refresh(store) == 1);
+	REQUIRE(library.Find(name) != nullptr);
+	const auto accepted = library.Find(name)->SpirV;
+	REQUIRE_FALSE(accepted.empty());
+	// A type error: the old shader stays, and the graph says what is wrong.
+	REQUIRE(SetShaderSource(store, graph, "node a = add uv normal\n"));
+	CHECK(library.Refresh(store) == 0);
+	CHECK(library.Find(name)->SpirV == accepted);
+	CHECK(library.Find(name)->AttemptError.find("1: ") != std::string::npos);
+	CHECK_FALSE(engine::scene::ShaderErrorOf(store, graph).empty());
 }

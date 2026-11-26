@@ -5,6 +5,7 @@
 #include "RendererTestHooks.hpp"
 
 #include <map>
+#include <engine/scene/content/MaterialGraphs.hpp>
 #include <engine/scene/content/MaterialLayers.hpp>
 #include <engine/assets/Builtin.hpp>
 #include <engine/assets/Mesh.hpp>
@@ -2252,6 +2253,47 @@ TEST_CASE("a baked layer prefix draws as the live stack does", "[render][gpu][ma
 	plane.Surface.MaterialTexture0 = {};
 	const auto unbaked = plane.At(plane.Capture(), x, y);
 	CHECK(std::abs(unbaked[0] - whole[0]) + std::abs(unbaked[1] - whole[1]) + std::abs(unbaked[2] - whole[2]) > 6);
+}
+
+TEST_CASE("a dissolve graph's two variants cut away different amounts", "[render][gpu][material][.]") {
+	PlaneScene plane(core::Name("fixture.white"));
+	scene::WorldLighting bright;
+	bright.Ambient = bright.OutdoorAmbient = {1, 1, 1};
+	bright.Direct = {0, 0, 0};
+	plane.Fixture.Render.SetLighting(bright);
+	plane.View.Lighting = bright;
+	const auto graph = scene::CompileMaterialGraph(
+		"parameter float amount = 0.3\nnode n = noise uv 6\noutput Albedo = vec3 1 0 0\ndiscard step amount n\n",
+		"dissolve"
+	);
+	REQUIRE(graph.Error.empty());
+	const auto assembled = render::AssembleShader("dissolve", graph.Source, {});
+	REQUIRE(assembled.Error.empty());
+	render::ShaderCompiler compiler;
+	const auto forward = compiler.Compile(assembled.Forward, render::ShaderStage::Fragment, "dissolve");
+	const auto gbuffer = compiler.Compile(assembled.GBuffer, render::ShaderStage::Fragment, "dissolve");
+	INFO(forward.Error << gbuffer.Error);
+	REQUIRE(plane.Fixture.Render.AddMaterialShader(core::Name("dissolve"), forward.SpirV, {}, gbuffer.SpirV));
+	plane.Surface.Shader = core::Name("dissolve");
+	// Red pixels that survive, across the middle of the plane.
+	const auto kept = [&](float amount) {
+		plane.Surface.MaterialParameters[0] = amount;
+		plane.Surface.MaterialParameterMask = 1;
+		const auto image = plane.Capture();
+		size_t red = 0;
+		for (uint32_t x = plane.Target.Width / 4; x < plane.Target.Width * 3 / 4; ++x)
+			for (uint32_t y = plane.Target.Height / 4; y < plane.Target.Height * 3 / 4; ++y) {
+				const auto pixel = plane.At(image, x, y);
+				if (pixel[0] > 100 && pixel[1] < 40) ++red;
+			}
+		return red;
+	};
+	const size_t whole = kept(0.0f), half = kept(0.5f), none = kept(1.01f);
+	INFO(whole << " " << half << " " << none);
+	CHECK(whole > half);
+	CHECK(half > none);
+	CHECK(half > 0);
+	CHECK(none == 0);
 }
 
 TEST_CASE("a UDIM tile whose graph output is not ready draws the default", "[render][gpu][udim][.]") {
