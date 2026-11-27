@@ -78,7 +78,8 @@ namespace engine::scene {
 				if (!Identifier(name) || !Trim(text).empty()) {
 					fail("an image is `#pragma image name`");
 				} else if (layout.Find(name) != nullptr || layout.FindTexture(name) >= 0 ||
-						   std::find(layout.Images.begin(), layout.Images.end(), name) != layout.Images.end()) {
+						   std::find(layout.Images.begin(), layout.Images.end(), name) !=
+							   layout.Images.end()) {
 					fail("'" + std::string(name) + "' is declared twice");
 				} else if (layout.Images.size() >= MAX_PASS_IMAGES) {
 					fail("a pass reads at most four named images");
@@ -96,8 +97,9 @@ namespace engine::scene {
 					const std::string_view count =
 						close == std::string_view::npos ? std::string_view{} : text.substr(1, close - 1);
 					const auto parsed = std::from_chars(count.data(), count.data() + count.size(), layers);
-					if (count.empty() || parsed.ec != std::errc{} || parsed.ptr != count.data() + count.size() ||
-						layers < 1 || layers > MAX_TEXTURE_LAYERS) {
+					if (count.empty() || parsed.ec != std::errc{} ||
+						parsed.ptr != count.data() + count.size() || layers < 1 ||
+						layers > MAX_TEXTURE_LAYERS) {
 						fail("a texture array is `#pragma texture name[N]` with N from 1 to 16");
 						continue;
 					}

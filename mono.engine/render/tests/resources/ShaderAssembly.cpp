@@ -1,6 +1,5 @@
 #include "resources/MaterialSamplerAdmission.hpp"
 
-#include <engine/scene/content/MaterialGraphs.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Registration.hpp>
@@ -9,6 +8,7 @@
 #include <engine/render/resources/ShaderLibrary.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/content/MaterialGraphs.hpp>
 #include <engine/scene/content/MaterialLayers.hpp>
 #include <engine/scene/content/Materials.hpp>
 #include <engine/scene/content/Shaders.hpp>
@@ -250,12 +250,12 @@ TEST_CASE("a pass names the images it reads and nothing else may", "[render][sha
 	const auto compiled = compiler.Compile(pass.Forward, ShaderStage::Fragment, "reader");
 	INFO(compiled.Error);
 	CHECK_FALSE(compiled.Failed);
-	CHECK_FALSE(AssembleShader(
-					"surface",
-					"#pragma image blur\nvoid Surface(SurfaceInput i, inout SurfaceOutput o) {}\n",
-					{}
-	)
-					.Error.empty());
+	CHECK_FALSE(
+		AssembleShader(
+			"surface", "#pragma image blur\nvoid Surface(SurfaceInput i, inout SurfaceOutput o) {}\n", {}
+		)
+			.Error.empty()
+	);
 	CHECK_FALSE(AssembleShader(
 					"many",
 					"#pragma image a\n#pragma image b\n#pragma image c\n#pragma image d\n#pragma image e\n"
@@ -313,7 +313,9 @@ TEST_CASE("a surface's Vertex runs in every engine vertex stage", "[render][shad
 	CHECK(failed.Failed);
 	CHECK(failed.Error.find("broken:4") != std::string::npos);
 	// Without one there is nothing to place.
-	CHECK(AssembleShader("plain", "void Surface(SurfaceInput i, inout SurfaceOutput o) {}", {}).Vertex[0].empty());
+	CHECK(AssembleShader("plain", "void Surface(SurfaceInput i, inout SurfaceOutput o) {}", {})
+			  .Vertex[0]
+			  .empty());
 }
 
 TEST_CASE("a texture array is a sampler2DArray the material slots admit", "[render][shader]") {

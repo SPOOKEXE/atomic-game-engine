@@ -476,16 +476,16 @@ namespace client {
 		if (Settings.TextureStreamingBytes != 0) {
 			// A smaller table than the default keeps a quarter for what does
 			// not stream.
-			const size_t streaming = Settings.TextureBudgetBytes != 0
-										 ? std::min(Settings.TextureStreamingBytes, Settings.TextureBudgetBytes / 4 * 3)
-										 : Settings.TextureStreamingBytes;
+			const size_t streaming =
+				Settings.TextureBudgetBytes != 0
+					? std::min(Settings.TextureStreamingBytes, Settings.TextureBudgetBytes / 4 * 3)
+					: Settings.TextureStreamingBytes;
 			Renderer.SetTextureStreaming(
-				streaming,
-				Settings.TextureStreamingUploadBytes,
-				client::Options::TEXTURE_STREAMING_BASE_SIDE
+				streaming, Settings.TextureStreamingUploadBytes, client::Options::TEXTURE_STREAMING_BASE_SIDE
 			);
 			ENGINE_INFO(
-				"texture streaming: {} MiB, {} MiB a frame", streaming / (1024u * 1024u),
+				"texture streaming: {} MiB, {} MiB a frame",
+				streaming / (1024u * 1024u),
 				Settings.TextureStreamingUploadBytes / (1024u * 1024u)
 			);
 		}

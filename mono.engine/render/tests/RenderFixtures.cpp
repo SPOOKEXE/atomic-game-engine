@@ -4,9 +4,6 @@
 #include "RenderFixture.hpp"
 #include "RendererTestHooks.hpp"
 
-#include <map>
-#include <engine/scene/content/MaterialGraphs.hpp>
-#include <engine/scene/content/MaterialLayers.hpp>
 #include <engine/assets/Builtin.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
@@ -15,6 +12,8 @@
 #include <engine/render/resources/ShaderAssembly.hpp>
 #include <engine/render/resources/ShaderCompiler.hpp>
 #include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/content/MaterialGraphs.hpp>
+#include <engine/scene/content/MaterialLayers.hpp>
 #include <engine/scene/content/MaterialLayout.hpp>
 #include <engine/scene/content/TileSets.hpp>
 #include <engine/testing/Suite.hpp>
@@ -26,6 +25,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <sstream>
 
 TEST_SUITE_ID("engine.render.fixtures")
@@ -1958,7 +1958,9 @@ TEST_CASE("authored passes chain, read the user tag and run on demand", "[render
 	CHECK(plane.At(plane.Capture(), x, y)[2] < 10);
 }
 
-TEST_CASE("authored passes share named images and run after transparent draws", "[render][gpu][material][.]") {
+TEST_CASE(
+	"authored passes share named images and run after transparent draws", "[render][gpu][material][.]"
+) {
 	PlaneScene plane(core::Name("fixture.white"));
 	render::ShaderCompiler compiler;
 	compiler.SetOptimise(true);
@@ -1970,7 +1972,8 @@ TEST_CASE("authored passes share named images and run after transparent draws", 
 		INFO(compiled.Error);
 		REQUIRE_FALSE(compiled.Failed);
 		std::vector<core::Name> images;
-		for (const auto &image : assembled.Images) images.emplace_back(image);
+		for (const auto &image : assembled.Images)
+			images.emplace_back(image);
 		REQUIRE(plane.Fixture.Render.AddPassShader(core::Name(name), compiled.SpirV, {}, images));
 	};
 	add("mask.write", "vec4 Pass(PassInput i) { return vec4(1, 0, 0, 1); }");
@@ -2030,7 +2033,8 @@ TEST_CASE("a compute pass writes any pixel of its image", "[render][gpu][materia
 		INFO(compiled.Error);
 		REQUIRE_FALSE(compiled.Failed);
 		std::vector<core::Name> images;
-		for (const auto &image : assembled.Images) images.emplace_back(image);
+		for (const auto &image : assembled.Images)
+			images.emplace_back(image);
 		REQUIRE(plane.Fixture.Render.AddPassShader(
 			core::Name(name), compiled.SpirV, {}, images, assembled.Compute
 		));
@@ -2085,15 +2089,16 @@ TEST_CASE("a surface's Vertex moves what it draws and the shadow it casts", "[re
 			REQUIRE_FALSE(compiled.Failed);
 			vertex.push_back(std::move(compiled.SpirV));
 		}
-		REQUIRE(plane.Fixture.Render.AddMaterialShader(
-			core::Name(name), forward.SpirV, {}, gbuffer.SpirV, vertex
-		));
+		REQUIRE(
+			plane.Fixture.Render.AddMaterialShader(core::Name(name), forward.SpirV, {}, gbuffer.SpirV, vertex)
+		);
 	};
 	const std::string surface = "void Surface(SurfaceInput i, inout SurfaceOutput o) {}\n";
 	install("vertex.still", surface + "void Vertex(inout VertexInput v) {}\n");
 	install(
 		"vertex.away",
-		"#pragma parameter float shift = 100\n" + surface + "void Vertex(inout VertexInput v) { v.Position.x += shift; }\n"
+		"#pragma parameter float shift = 100\n" + surface +
+			"void Vertex(inout VertexInput v) { v.Position.x += shift; }\n"
 	);
 	// Facing away from the sun and the camera, so only its shadow is seen.
 	auto caster = DrawPlanes(std::array{Plane{0, 0, 3, 0.6f, 0.6f, 0xFFFFFFFFu}}).front();
@@ -2194,8 +2199,9 @@ TEST_CASE("a baked layer prefix draws as the live stack does", "[render][gpu][ma
 	std::vector<scene::LayerSource> stack;
 	for (size_t index = 0; index < 9; ++index) {
 		const std::string module = "paint" + std::to_string(index % 3);
-		modules[module] = "void Layer(SurfaceInput i, inout SurfaceOutput o) { o.Albedo = " + colours[index % 3] +
-						  "; o.Roughness = 0.3; }\n";
+		modules[module] =
+			"void Layer(SurfaceInput i, inout SurfaceOutput o) { o.Albedo = " + colours[index % 3] +
+			"; o.Roughness = 0.3; }\n";
 		stack.push_back({module, modules[module], "", 0.1f + 0.02f * float(index)});
 	}
 	const render::ShaderModuleResolver resolve = [&](std::string_view name) -> std::optional<std::string> {
@@ -2230,14 +2236,20 @@ TEST_CASE("a baked layer prefix draws as the live stack does", "[render][gpu][ma
 	const auto wholeHigh = plane.At(wholeImage, x, high), wholeLow = plane.At(wholeImage, x, low);
 	REQUIRE(std::abs(wholeHigh[0] - wholeLow[0]) > 6);
 	const render::SurfaceBake bake{
-		.Shader = core::Name("bake/stack"), .Mesh = core::Name("fixture.plane"), .Output = core::Name("bake/plane"),
-		.Size = 64, .Revision = 1
+		.Shader = core::Name("bake/stack"),
+		.Mesh = core::Name("fixture.plane"),
+		.Output = core::Name("bake/plane"),
+		.Size = 64,
+		.Revision = 1
 	};
 	plane.View.Bakes = std::span(&bake, 1);
 	plane.Surface.Shader = core::Name("stack.live");
 	const std::array layers{
-		core::Name("bake/plane/0"), core::Name("bake/plane/1"), core::Name("bake/plane/2"),
-		core::Name("bake/plane/3"), core::Name("bake/plane/4")
+		core::Name("bake/plane/0"),
+		core::Name("bake/plane/1"),
+		core::Name("bake/plane/2"),
+		core::Name("bake/plane/3"),
+		core::Name("bake/plane/4")
 	};
 	plane.Surface.MaterialTexture0 = core::Name(scene::ComposeLayerSet(layers));
 	(void)plane.Capture();
@@ -2245,14 +2257,19 @@ TEST_CASE("a baked layer prefix draws as the live stack does", "[render][gpu][ma
 	const auto baked = plane.At(bakedImage, x, y);
 	CHECK(std::abs(plane.At(bakedImage, x, high)[0] - wholeHigh[0]) <= 3);
 	CHECK(std::abs(plane.At(bakedImage, x, low)[0] - wholeLow[0]) <= 3);
-	INFO("whole " << whole[0] << "," << whole[1] << "," << whole[2] << " baked " << baked[0] << "," << baked[1]
-				  << "," << baked[2]);
+	INFO(
+		"whole " << whole[0] << "," << whole[1] << "," << whole[2] << " baked " << baked[0] << "," << baked[1]
+				 << "," << baked[2]
+	);
 	for (size_t channel = 0; channel < 3; ++channel)
 		CHECK(std::abs(whole[channel] - baked[channel]) <= 3);
 	// The prefix is what the bake holds: without it the live seven differ.
 	plane.Surface.MaterialTexture0 = {};
 	const auto unbaked = plane.At(plane.Capture(), x, y);
-	CHECK(std::abs(unbaked[0] - whole[0]) + std::abs(unbaked[1] - whole[1]) + std::abs(unbaked[2] - whole[2]) > 6);
+	CHECK(
+		std::abs(unbaked[0] - whole[0]) + std::abs(unbaked[1] - whole[1]) + std::abs(unbaked[2] - whole[2]) >
+		6
+	);
 }
 
 TEST_CASE("a dissolve graph's two variants cut away different amounts", "[render][gpu][material][.]") {
@@ -2263,7 +2280,8 @@ TEST_CASE("a dissolve graph's two variants cut away different amounts", "[render
 	plane.Fixture.Render.SetLighting(bright);
 	plane.View.Lighting = bright;
 	const auto graph = scene::CompileMaterialGraph(
-		"parameter float amount = 0.3\nnode n = noise uv 6\noutput Albedo = vec3 1 0 0\ndiscard step amount n\n",
+		"parameter float amount = 0.3\nnode n = noise uv 6\noutput Albedo = vec3 1 0 0\ndiscard step amount "
+		"n\n",
 		"dissolve"
 	);
 	REQUIRE(graph.Error.empty());
@@ -2347,7 +2365,10 @@ TEST_CASE("streamed textures hold the detail views ask for inside a budget", "[r
 	CHECK(renderer.TextureStreaming(core::Name("stream.b")).Resident == 4);
 }
 
-TEST_CASE("travelling past textured planes keeps near detail fine and far detail coarse", "[render][gpu][streaming][.]") {
+TEST_CASE(
+	"travelling past textured planes keeps near detail fine and far detail coarse",
+	"[render][gpu][streaming][.]"
+) {
 	PlaneScene plane(core::Name("fixture.white"));
 	plane.Target = render::SceneTarget{1024, 512};
 	const size_t budget = 6 * 1024 * 1024;
@@ -2357,7 +2378,11 @@ TEST_CASE("travelling past textured planes keeps near detail fine and far detail
 	for (int index = 0; index < 8; ++index) {
 		const core::Name name("street." + std::to_string(index));
 		REQUIRE(plane.Fixture.Render.AddTexture(name, Chained(512, uint8_t(60 + index * 20))));
-		auto instance = DrawPlanes(std::array{Plane{float(index % 2 ? 2 : -2), 0, 4.0f + index * 6.0f, 1.5f, 1.5f, 0xFFFFFFFFu}}).front();
+		auto instance =
+			DrawPlanes(
+				std::array{Plane{float(index % 2 ? 2 : -2), 0, 4.0f + index * 6.0f, 1.5f, 1.5f, 0xFFFFFFFFu}}
+			)
+				.front();
 		instance.Source = 100 + index;
 		instance.Texture = name;
 		row.push_back(instance);
@@ -2374,7 +2399,9 @@ TEST_CASE("travelling past textured planes keeps near detail fine and far detail
 	travel(0, 12);
 	const auto near = plane.Fixture.Render.TextureStreaming(core::Name("street.0"));
 	const auto far = plane.Fixture.Render.TextureStreaming(core::Name("street.7"));
-	INFO("near " << near.Resident << "/" << near.Requested << " far " << far.Resident << "/" << far.Requested);
+	INFO(
+		"near " << near.Resident << "/" << near.Requested << " far " << far.Resident << "/" << far.Requested
+	);
 	CHECK(near.Resident < far.Resident);
 	CHECK(near.Resident <= 1);
 	// Walk down the street: the far end becomes the near end.
@@ -2382,8 +2409,10 @@ TEST_CASE("travelling past textured planes keeps near detail fine and far detail
 		travel(z, 4);
 	travel(-42, 12);
 	CHECK(plane.Fixture.Render.TextureStreaming(core::Name("street.7")).Resident <= 1);
-	CHECK(plane.Fixture.Render.TextureStreaming(core::Name("street.0")).Resident >
-		  plane.Fixture.Render.TextureStreaming(core::Name("street.7")).Resident);
+	CHECK(
+		plane.Fixture.Render.TextureStreaming(core::Name("street.0")).Resident >
+		plane.Fixture.Render.TextureStreaming(core::Name("street.7")).Resident
+	);
 	// A teleport back, prewarmed: detail is there on arrival.
 	plane.Fixture.Render.PrewarmTexture(core::Name("street.0"), 0, 30);
 	for (int frame = 0; frame < 10; ++frame)
@@ -2394,8 +2423,10 @@ TEST_CASE("travelling past textured planes keeps near detail fine and far detail
 
 namespace {
 	// A fixture plane: `size` across, at `position`, facing `facing` (from +z).
-	scene::DrawInstance Panel(glm::vec3 position, glm::vec2 size, glm::quat facing, core::Color3 colour, uint64_t source) {
-		scene::DrawInstance instance = DrawPlanes(std::array{Plane{0, 0, 0, size.x * 0.5f, size.y * 0.5f, 0xFFFFFFFFu}}).front();
+	scene::DrawInstance
+	Panel(glm::vec3 position, glm::vec2 size, glm::quat facing, core::Color3 colour, uint64_t source) {
+		scene::DrawInstance instance =
+			DrawPlanes(std::array{Plane{0, 0, 0, size.x * 0.5f, size.y * 0.5f, 0xFFFFFFFFu}}).front();
 		instance.Frame = core::CFrame(core::Vector3{position.x, position.y, position.z}, facing);
 		instance.Tint = colour;
 		instance.Source = source;
@@ -2473,7 +2504,8 @@ TEST_CASE("path tracing carries a red wall's colour onto a white floor", "[rende
 	const auto floor = Panel({0, -1, -6}, {30, 30}, up, {0.9f, 0.9f, 0.9f}, 1);
 	const auto wall = Panel({2, 1, -6}, {30, 4}, left, {0.9f, 0.05f, 0.05f}, 2);
 	// The floor just beside the wall: (1.6, -1, -4).
-	const uint32_t x = uint32_t((1.6f / 4.0f + 1.0f) * 0.5f * 64.0f), y = uint32_t((0.25f + 1.0f) * 0.5f * 64.0f);
+	const uint32_t x = uint32_t((1.6f / 4.0f + 1.0f) * 0.5f * 64.0f),
+				   y = uint32_t((0.25f + 1.0f) * 0.5f * 64.0f);
 	const auto bare = Trace(plane, {floor}, 64).Around(x, y, 1);
 	auto bled = Trace(plane, {floor, wall}, 64).Around(x, y, 1);
 	INFO("bare " << bare.r << "," << bare.g << " bled " << bled.r << "," << bled.g);
@@ -2510,7 +2542,10 @@ TEST_CASE("path tracing reads a part's colour texture", "[render][gpu][raytrace]
 	CHECK(right.b > 4.0f * right.r);
 }
 
-TEST_CASE("path tracing reflects sharply off a smooth surface and broadly off a rough one", "[render][gpu][raytrace][.]") {
+TEST_CASE(
+	"path tracing reflects sharply off a smooth surface and broadly off a rough one",
+	"[render][gpu][raytrace][.]"
+) {
 	PlaneScene plane(core::Name("fixture.white"));
 	plane.Target = render::SceneTarget{64, 64};
 	plane.View.Lighting.Ambient = {0, 0, 0};

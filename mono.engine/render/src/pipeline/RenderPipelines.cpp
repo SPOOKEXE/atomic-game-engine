@@ -7,12 +7,12 @@
 // reason instead of appearing as a black screen. `tests/Passes.cpp` is the
 // suite that holds that line.
 
-#include "resources/MaterialSamplerAdmission.hpp"
 #include "DisplayColour.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
 #include "RendererTestHooks.hpp"
 #include "diagnostics/VulkanTimestamps.hpp"
+#include "resources/MaterialSamplerAdmission.hpp"
 #include "resources/ShaderBinary.hpp"
 #include "resources/StartupCompilation.hpp"
 
@@ -1986,7 +1986,8 @@ namespace engine::render {
 		// The same identity `Renderer::AddShader` compares against.
 		assets::Hasher hasher;
 		hasher.Update(std::as_bytes(spirv));
-		for (const auto &stage : vertexWords) hasher.Update(std::as_bytes(std::span(stage)));
+		for (const auto &stage : vertexWords)
+			hasher.Update(std::as_bytes(std::span(stage)));
 		variant.CodeHash = vertexWords.empty() ? assets::Hasher::Of(std::as_bytes(spirv)) : hasher.Finish();
 		ShaderVariants[ShaderVariantKey(name, owner)] = variant;
 		return true;

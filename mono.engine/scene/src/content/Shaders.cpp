@@ -5,9 +5,9 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/content/MaterialGraphs.hpp>
 #include <engine/scene/content/MaterialLayers.hpp>
 #include <engine/scene/content/RenderPasses.hpp>
-#include <engine/scene/content/MaterialGraphs.hpp>
 #include <engine/scene/content/Shaders.hpp>
 
 #include <algorithm>
@@ -300,7 +300,8 @@ namespace engine::scene {
 					(graph == ecs::NULL_ENTITY || entity.Id < graph.Id))
 					graph = entity;
 			});
-			if (const ShaderSource *held = graph == ecs::NULL_ENTITY ? nullptr : store.Get<ShaderSource>(graph)) {
+			if (const ShaderSource *held =
+					graph == ecs::NULL_ENTITY ? nullptr : store.Get<ShaderSource>(graph)) {
 				if (!store.HasResource<CompiledGraphs>()) store.SetResource(CompiledGraphs{});
 				auto &cache = store.ResourceMutable<CompiledGraphs>()->Entries[graph.Id];
 				if (cache.Revision != held->Revision || cache.Code.empty()) {

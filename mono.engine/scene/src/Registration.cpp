@@ -1258,7 +1258,8 @@ namespace engine::scene {
 				writer.WriteName(refs[index].MaterialTexture0);
 				writer.WriteName(refs[index].MaterialTexture1);
 				writer.WriteUInt16(refs[index].ParameterMask);
-				for (const float value : refs[index].Parameters) writer.WriteFloat(value);
+				for (const float value : refs[index].Parameters)
+					writer.WriteFloat(value);
 			}
 		}
 
@@ -1271,7 +1272,8 @@ namespace engine::scene {
 				refs[index].MaterialTexture0 = reader.ReadName();
 				refs[index].MaterialTexture1 = reader.ReadName();
 				refs[index].ParameterMask = reader.ReadUInt16();
-				for (float &value : refs[index].Parameters) value = reader.ReadFloat();
+				for (float &value : refs[index].Parameters)
+					value = reader.ReadFloat();
 			}
 		}
 

@@ -31,7 +31,8 @@ namespace engine::scene {
 		}
 
 		bool Identifier(std::string_view word) {
-			if (word.empty() || !(std::isalpha(static_cast<unsigned char>(word[0])) || word[0] == '_')) return false;
+			if (word.empty() || !(std::isalpha(static_cast<unsigned char>(word[0])) || word[0] == '_'))
+				return false;
 			return std::all_of(word.begin(), word.end(), [](char c) {
 				return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
 			});
@@ -64,9 +65,20 @@ namespace engine::scene {
 		// SurfaceOutput's fields and their widths.
 		const std::unordered_map<std::string_view, Width> &Fields() {
 			static const std::unordered_map<std::string_view, Width> fields{
-				{"Albedo", 3},	 {"Normal", 3},	  {"Roughness", 1}, {"Metalness", 1}, {"Occlusion", 1},
-				{"Specular", 1}, {"Emissive", 3}, {"Alpha", 1},	 {"Height", 1},	   {"User", 1},
-				{"Custom0", 4},	 {"Custom1", 4},  {"Custom2", 4},  {"Custom3", 4},
+				{"Albedo", 3},
+				{"Normal", 3},
+				{"Roughness", 1},
+				{"Metalness", 1},
+				{"Occlusion", 1},
+				{"Specular", 1},
+				{"Emissive", 3},
+				{"Alpha", 1},
+				{"Height", 1},
+				{"User", 1},
+				{"Custom0", 4},
+				{"Custom1", 4},
+				{"Custom2", 4},
+				{"Custom3", 4},
 			};
 			return fields;
 		}
@@ -126,7 +138,10 @@ namespace engine::scene {
 			std::optional<std::string> To(const Value &value, Width width, std::string_view what) {
 				if (value.Type == width) return value.Code;
 				if (value.Type == 1) return TypeName(width) + "(" + value.Code + ")";
-				Fail(std::string(what) + " is " + TypeName(value.Type) + " where " + TypeName(width) + " is needed");
+				Fail(
+					std::string(what) + " is " + TypeName(value.Type) + " where " + TypeName(width) +
+					" is needed"
+				);
 				return std::nullopt;
 			}
 
@@ -145,7 +160,9 @@ namespace engine::scene {
 						return std::nullopt;
 					}
 				}
-				return Value{"(" + value.Code + ")." + std::string(swizzle), static_cast<Width>(swizzle.size())};
+				return Value{
+					"(" + value.Code + ")." + std::string(swizzle), static_cast<Width>(swizzle.size())
+				};
 			}
 
 			// One operand: a number, a name (optionally swizzled) or a bracket.
@@ -185,7 +202,8 @@ namespace engine::scene {
 					}
 					return Swizzle(
 						{"base." + FieldCode(field), found->second},
-						next == std::string::npos ? std::string_view{} : std::string_view(swizzle).substr(next + 1)
+						next == std::string::npos ? std::string_view{}
+												  : std::string_view(swizzle).substr(next + 1)
 					);
 				}
 				if (const auto input = Inputs().find(head); input != Inputs().end())
@@ -197,7 +215,8 @@ namespace engine::scene {
 			}
 
 			// `op operand...` until `end` (a closing bracket or the line's end).
-			std::optional<Value> Expression(const std::vector<std::string> &tokens, size_t &at, std::string_view end) {
+			std::optional<Value>
+			Expression(const std::vector<std::string> &tokens, size_t &at, std::string_view end) {
 				if (at >= tokens.size()) {
 					Fail("an expression is missing");
 					return std::nullopt;
@@ -219,15 +238,29 @@ namespace engine::scene {
 					return width;
 				};
 				// Element-wise functions: every operand widened to the widest.
-				static const std::unordered_map<std::string_view, std::pair<std::string_view, size_t>> ELEMENTWISE{
-					{"add", {"+", 2}},		 {"sub", {"-", 2}},			   {"mul", {"*", 2}},
-					{"div", {"/", 2}},		 {"min", {"min", 2}},		   {"max", {"max", 2}},
-					{"pow", {"pow", 2}},	 {"mix", {"mix", 3}},		   {"clamp", {"clamp", 3}},
-					{"step", {"step", 2}},	 {"smoothstep", {"smoothstep", 3}}, {"abs", {"abs", 1}},
-					{"fract", {"fract", 1}}, {"floor", {"floor", 1}},	   {"sin", {"sin", 1}},
-					{"cos", {"cos", 1}},	 {"sqrt", {"sqrt", 1}},		   {"saturate", {"saturate", 1}},
-					{"oneminus", {"oneminus", 1}}, {"normalize", {"normalize", 1}},
-				};
+				static const std::unordered_map<std::string_view, std::pair<std::string_view, size_t>>
+					ELEMENTWISE{
+						{"add", {"+", 2}},
+						{"sub", {"-", 2}},
+						{"mul", {"*", 2}},
+						{"div", {"/", 2}},
+						{"min", {"min", 2}},
+						{"max", {"max", 2}},
+						{"pow", {"pow", 2}},
+						{"mix", {"mix", 3}},
+						{"clamp", {"clamp", 3}},
+						{"step", {"step", 2}},
+						{"smoothstep", {"smoothstep", 3}},
+						{"abs", {"abs", 1}},
+						{"fract", {"fract", 1}},
+						{"floor", {"floor", 1}},
+						{"sin", {"sin", 1}},
+						{"cos", {"cos", 1}},
+						{"sqrt", {"sqrt", 1}},
+						{"saturate", {"saturate", 1}},
+						{"oneminus", {"oneminus", 1}},
+						{"normalize", {"normalize", 1}},
+					};
 				if (const auto found = ELEMENTWISE.find(op); found != ELEMENTWISE.end()) {
 					++at;
 					auto values = operands(found->second.second);
@@ -269,7 +302,8 @@ namespace engine::scene {
 					++at;
 					auto values = operands(2);
 					if (!values) return std::nullopt;
-					if ((*values)[0].Type != 3 || (*values)[1].Type != 3) return Fail("cross takes two vec3"), std::nullopt;
+					if ((*values)[0].Type != 3 || (*values)[1].Type != 3)
+						return Fail("cross takes two vec3"), std::nullopt;
 					return Value{"cross(" + (*values)[0].Code + ", " + (*values)[1].Code + ")", 3};
 				}
 				if (const auto width = TypeOf(op); width && *width > 1) {
@@ -292,20 +326,24 @@ namespace engine::scene {
 				}
 				if (op == "sample") {
 					++at;
-					if (at >= tokens.size() || std::find(Textures.begin(), Textures.end(), tokens[at]) == Textures.end())
+					if (at >= tokens.size() ||
+						std::find(Textures.begin(), Textures.end(), tokens[at]) == Textures.end())
 						return Fail("sample takes a declared texture"), std::nullopt;
 					const std::string texture = tokens[at++];
 					auto uv = Operand(tokens, at);
 					if (!uv) return std::nullopt;
 					if (uv->Type != 2) return Fail("sample takes vec2 coordinates"), std::nullopt;
-					return Value{"(" + texture + "Bound() ? texture(" + texture + ", " + uv->Code + ") : vec4(0.0))", 4};
+					return Value{
+						"(" + texture + "Bound() ? texture(" + texture + ", " + uv->Code + ") : vec4(0.0))", 4
+					};
 				}
 				if (op == "noise") {
 					++at;
 					auto values = operands(2);
 					if (!values) return std::nullopt;
 					auto uv = To((*values)[0], 2, "noise's coordinates");
-					if (!uv || (*values)[1].Type != 1) return Fail("noise takes vec2 coordinates and a float scale"), std::nullopt;
+					if (!uv || (*values)[1].Type != 1)
+						return Fail("noise takes vec2 coordinates and a float scale"), std::nullopt;
 					NoiseUsed = true;
 					return Value{"EngineGraphNoise(" + *uv + " * " + (*values)[1].Code + ")", 1};
 				}
@@ -319,7 +357,8 @@ namespace engine::scene {
 				if (op == "call") {
 					// `call type Module.Function args...`
 					++at;
-					if (at + 1 >= tokens.size()) return Fail("call takes a type and Module.Function"), std::nullopt;
+					if (at + 1 >= tokens.size())
+						return Fail("call takes a type and Module.Function"), std::nullopt;
 					const auto width = TypeOf(tokens[at++]);
 					const std::string target = tokens[at++];
 					const size_t dot = target.rfind('.');
@@ -357,7 +396,8 @@ namespace engine::scene {
 				if (kind == "parameter" || kind == "texture" || kind == "keyword" || kind == "base") {
 					if (Started) return Fail("declarations come before the first node or output");
 					if (kind == "parameter") {
-						if (tokens.size() < 3 || !TypeOf(tokens[1]) || !Identifier(tokens[2]) || Symbols.contains(tokens[2]))
+						if (tokens.size() < 3 || !TypeOf(tokens[1]) || !Identifier(tokens[2]) ||
+							Symbols.contains(tokens[2]))
 							return Fail("a parameter is `parameter float|vec2|vec3|vec4 name = value`");
 						Declarations += "#pragma " + std::string(Trim(text)) + "\n";
 						Symbols[tokens[2]] = {tokens[2], *TypeOf(tokens[1])};
@@ -367,9 +407,12 @@ namespace engine::scene {
 						Declarations += "#pragma texture " + tokens[1] + "\n";
 						Textures.push_back(tokens[1]);
 					} else if (kind == "keyword") {
-						if (tokens.size() != 2 || !Identifier(tokens[1])) return Fail("a keyword is `keyword NAME`");
+						if (tokens.size() != 2 || !Identifier(tokens[1]))
+							return Fail("a keyword is `keyword NAME`");
 						if (Keywords.size() >= MAX_GRAPH_KEYWORDS)
-							return Fail("a graph declares at most " + std::to_string(MAX_GRAPH_KEYWORDS) + " keywords");
+							return Fail(
+								"a graph declares at most " + std::to_string(MAX_GRAPH_KEYWORDS) + " keywords"
+							);
 						Declarations += "#pragma keyword " + tokens[1] + "\n";
 						Keywords.push_back(tokens[1]);
 					} else {
@@ -391,18 +434,21 @@ namespace engine::scene {
 					if (!value) return false;
 					if (at != tokens.size()) return Fail("'" + tokens[at] + "' is left over");
 					const std::string symbol = "graph_" + tokens[1];
-					Body += LineMark() + "\t" + TypeName(value->Type) + " " + symbol + " = " + value->Code + ";\n";
+					Body += LineMark() + "\t" + TypeName(value->Type) + " " + symbol + " = " + value->Code +
+							";\n";
 					Symbols[tokens[1]] = {symbol, value->Type};
 					return true;
 				}
 				if (kind.starts_with("output")) {
 					std::string keyword;
 					if (kind.size() > 6) {
-						if (kind[6] != '@' || std::find(Keywords.begin(), Keywords.end(), kind.substr(7)) == Keywords.end())
+						if (kind[6] != '@' ||
+							std::find(Keywords.begin(), Keywords.end(), kind.substr(7)) == Keywords.end())
 							return Fail("an output is `output Field = ...` or `output@KEYWORD Field = ...`");
 						keyword = kind.substr(7);
 					}
-					if (tokens.size() < 4 || tokens[2] != "=") return Fail("an output is `output Field = expression`");
+					if (tokens.size() < 4 || tokens[2] != "=")
+						return Fail("an output is `output Field = expression`");
 					const auto field = Fields().find(tokens[1]);
 					if (field == Fields().end()) return Fail("the surface has no field '" + tokens[1] + "'");
 					size_t at = 3;
@@ -428,8 +474,10 @@ namespace engine::scene {
 			}
 
 			static std::string_view Trim(std::string_view text) {
-				while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front()))) text.remove_prefix(1);
-				while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back()))) text.remove_suffix(1);
+				while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())))
+					text.remove_prefix(1);
+				while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))
+					text.remove_suffix(1);
 				return text;
 			}
 		};
@@ -455,7 +503,8 @@ float EngineGraphNoise(vec2 p) {
 			if (end == std::string_view::npos) end = document.size();
 			++compiler.Line;
 			std::string_view line = document.substr(at, end - at);
-			if (const size_t comment = line.find('#'); comment != std::string_view::npos) line = line.substr(0, comment);
+			if (const size_t comment = line.find('#'); comment != std::string_view::npos)
+				line = line.substr(0, comment);
 			(void)compiler.Statement(line);
 			at = end + 1;
 		}

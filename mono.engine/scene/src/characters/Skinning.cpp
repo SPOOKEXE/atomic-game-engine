@@ -178,7 +178,9 @@ namespace engine::scene {
 			// archetype. That is the shape `UpdateRespawns` uses for the same reason.
 			ENGINE_PROFILE("scene skinning rig gather");
 			std::vector<ecs::Entity> rigs;
-			store.Each<const Skeleton>([&rigs](ecs::Entity entity, const Skeleton &) { rigs.push_back(entity); });
+			store.Each<const Skeleton>([&rigs](ecs::Entity entity, const Skeleton &) {
+				rigs.push_back(entity);
+			});
 			cache.Rigs.resize(rigs.size());
 			for (size_t i = 0; i < rigs.size(); ++i) {
 				cache.Rigs[i].Rig = rigs[i];
@@ -201,7 +203,8 @@ namespace engine::scene {
 			states.size(),
 			RIGS_PER_RANGE,
 			[&reader, &states](size_t begin, size_t end) {
-				for (size_t i = begin; i < end; ++i) Compose(reader, states[i]);
+				for (size_t i = begin; i < end; ++i)
+					Compose(reader, states[i]);
 			},
 			PARALLEL_MINIMUM
 		);

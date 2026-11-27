@@ -99,7 +99,15 @@ namespace engine::scene {
 			ecs::Classes::Property<&RenderPass::Enabled>(pass, "Enabled");
 			ecs::Classes::Computed(pass, PassParametersProperty());
 			for (const std::string_view property :
-				 {"Shader", "Demand", "Output", "Stage", "Scale", "Order", "Composite", "Enabled", "Parameters"})
+				 {"Shader",
+				  "Demand",
+				  "Output",
+				  "Stage",
+				  "Scale",
+				  "Order",
+				  "Composite",
+				  "Enabled",
+				  "Parameters"})
 				(void)ecs::Classes::SetPropertiesTag(pass, property, core::Name("Rendering"));
 			return pass;
 		}
@@ -135,7 +143,8 @@ namespace engine::scene {
 				.Demand = pass.Demand,
 				.Output = pass.Output,
 				.Stage = pass.Stage,
-				.Scale = pass.Scale, .Composite = pass.Composite
+				.Scale = pass.Scale,
+				.Composite = pass.Composite
 			};
 			std::copy(std::begin(pass.Parameters), std::end(pass.Parameters), out[index].Parameters.begin());
 			out[index].ParameterMask = pass.ParameterMask;

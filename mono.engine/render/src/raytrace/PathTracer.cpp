@@ -79,7 +79,13 @@ namespace engine::render {
 		}
 
 		// A storage buffer holding `bytes`, filled through one transfer.
-		SDL_GPUBuffer *Storage(SDL_GPUDevice *device, SDL_GPUCopyPass *copy, std::vector<SDL_GPUTransferBuffer *> &transfers, const void *data, size_t size) {
+		SDL_GPUBuffer *Storage(
+			SDL_GPUDevice *device,
+			SDL_GPUCopyPass *copy,
+			std::vector<SDL_GPUTransferBuffer *> &transfers,
+			const void *data,
+			size_t size
+		) {
 			// Never empty: a binding needs a buffer even with nothing in it.
 			const size_t bytes = std::max<size_t>(size, 16);
 			SDL_GPUBufferCreateInfo info{};
@@ -107,9 +113,10 @@ namespace engine::render {
 		return State == nullptr ? 0 : State->Reference.Samples;
 	}
 
-	bool Renderer::TraceReference(const View &view, uint32_t samples, std::vector<float> &rgba, uint32_t bounces) {
-		if (State == nullptr || State->Device == nullptr || view.Target == nullptr || view.Target->Width == 0 ||
-			view.Target->Height == 0)
+	bool
+	Renderer::TraceReference(const View &view, uint32_t samples, std::vector<float> &rgba, uint32_t bounces) {
+		if (State == nullptr || State->Device == nullptr || view.Target == nullptr ||
+			view.Target->Width == 0 || view.Target->Height == 0)
 			return false;
 		ENGINE_PROFILE_CAT("reference path trace", core::ProfileCategory::Render);
 		auto &trace = State->Reference;
@@ -120,7 +127,8 @@ namespace engine::render {
 		}
 		if (trace.ColourAtlas == nullptr) trace.ColourAtlas = Atlas(device);
 		if (trace.MaterialAtlas == nullptr) trace.MaterialAtlas = Atlas(device);
-		if (trace.ColourAtlas == nullptr || trace.MaterialAtlas == nullptr || !State->EnsureSurfaceSampler()) return false;
+		if (trace.ColourAtlas == nullptr || trace.MaterialAtlas == nullptr || !State->EnsureSurfaceSampler())
+			return false;
 		const uint32_t width = view.Target->Width, height = view.Target->Height;
 
 		// Mesh trees, within the build budget.
@@ -137,12 +145,15 @@ namespace engine::render {
 			if (tree.Tree == nullptr || tree.Revision != revision) {
 				if (built >= MESH_BUILD_BUDGET) continue;
 				assets::MeshData data;
-				if (State->Meshes.Copy(instance.Mesh, data, 1u << 24, 1u << 26, owner) != MeshCopyStatus::Copied)
+				if (State->Meshes.Copy(instance.Mesh, data, 1u << 24, 1u << 26, owner) !=
+					MeshCopyStatus::Copied)
 					continue;
 				std::vector<float> positions;
 				positions.reserve(data.Vertices.size() * 3);
 				for (const auto &vertex : data.Vertices)
-					positions.insert(positions.end(), {vertex.Position[0], vertex.Position[1], vertex.Position[2]});
+					positions.insert(
+						positions.end(), {vertex.Position[0], vertex.Position[1], vertex.Position[2]}
+					);
 				tree.Tree = std::make_unique<MeshBvh>();
 				tree.Tree->Build(positions, data.Indices);
 				tree.Revision = revision;
@@ -156,10 +167,18 @@ namespace engine::render {
 				++built;
 			}
 			// Unit meshes are scaled to the part's size.
-			const glm::vec3 scale(instance.HalfExtent.X * 2.0f, instance.HalfExtent.Y * 2.0f, instance.HalfExtent.Z * 2.0f);
+			const glm::vec3 scale(
+				instance.HalfExtent.X * 2.0f, instance.HalfExtent.Y * 2.0f, instance.HalfExtent.Z * 2.0f
+			);
 			placed.push_back({tree.Tree.get(), instance.Frame, scale});
 			sources.push_back(&instance);
-			for (const float value : {instance.Frame.Position.X, instance.Frame.Position.Y, instance.Frame.Position.Z, scale.x, scale.y, scale.z})
+			for (const float value :
+				 {instance.Frame.Position.X,
+				  instance.Frame.Position.Y,
+				  instance.Frame.Position.Z,
+				  scale.x,
+				  scale.y,
+				  scale.z})
 				signature = Mix(signature, Bits(value));
 			signature = Mix(signature, key ^ revision);
 		}
@@ -176,7 +195,12 @@ namespace engine::render {
 		std::unordered_map<const MeshBvh *, std::pair<uint32_t, uint32_t>> offsets;
 		const auto pushNodes = [&](const std::vector<BvhNode> &tree) {
 			for (const BvhNode &node : tree)
-				nodes.push_back({{node.Minimum.x, node.Minimum.y, node.Minimum.z}, node.First, {node.Maximum.x, node.Maximum.y, node.Maximum.z}, node.Count});
+				nodes.push_back(
+					{{node.Minimum.x, node.Minimum.y, node.Minimum.z},
+					 node.First,
+					 {node.Maximum.x, node.Maximum.y, node.Maximum.z},
+					 node.Count}
+				);
 		};
 		pushNodes(scene.Nodes());
 		for (const BvhInstance &instance : placed) {
@@ -187,7 +211,8 @@ namespace engine::render {
 				corners.insert(corners.end(), {corner.x, corner.y, corner.z, 0.0f});
 			const auto *meshUv = meshUvs[instance.Mesh];
 			for (size_t corner = 0; corner < instance.Mesh->Corners().size(); ++corner) {
-				const glm::vec2 uv = meshUv != nullptr && corner < meshUv->size() ? (*meshUv)[corner] : glm::vec2(0.0f);
+				const glm::vec2 uv =
+					meshUv != nullptr && corner < meshUv->size() ? (*meshUv)[corner] : glm::vec2(0.0f);
 				uvs.insert(uvs.end(), {uv.x, uv.y});
 			}
 		}
@@ -200,7 +225,10 @@ namespace engine::render {
 		};
 		std::vector<Cell> colourCells, materialCells;
 		std::unordered_map<uint64_t, int32_t> colourIndex, materialIndex;
-		const auto cellFor = [&](core::Name name, core::Name owner, std::vector<Cell> &cells, std::unordered_map<uint64_t, int32_t> &index) {
+		const auto cellFor = [&](core::Name name,
+								 core::Name owner,
+								 std::vector<Cell> &cells,
+								 std::unordered_map<uint64_t, int32_t> &index) {
 			if (!name.IsValid()) return -1;
 			const uint64_t key = (uint64_t(owner.Id()) << 32) | name.Id();
 			if (const auto found = index.find(key); found != index.end()) return found->second;
@@ -209,7 +237,8 @@ namespace engine::render {
 			// The name counts whether or not it is here yet, so the picture
 			// restarts when it arrives.
 			signature = Mix(signature, key ^ (texture != nullptr ? 1u : 0u));
-			if (texture == nullptr || !State->Textures.SizeOf(name, width, height, owner) || cells.size() >= ATLAS_CELLS) {
+			if (texture == nullptr || !State->Textures.SizeOf(name, width, height, owner) ||
+				cells.size() >= ATLAS_CELLS) {
 				index[key] = -1;
 				return -1;
 			}
@@ -256,8 +285,14 @@ namespace engine::render {
 				root,
 				{instance.Scale.x, instance.Scale.y, instance.Scale.z},
 				triangles,
-				{source.Tint.R * source.SurfaceColour.R, source.Tint.G * source.SurfaceColour.G, source.Tint.B * source.SurfaceColour.B, mirror ? 1.0f : 0.0f},
-				{source.EmissiveTint.R * source.EmissiveStrength, source.EmissiveTint.G * source.EmissiveStrength, source.EmissiveTint.B * source.EmissiveStrength, 0.0f},
+				{source.Tint.R * source.SurfaceColour.R,
+				 source.Tint.G * source.SurfaceColour.G,
+				 source.Tint.B * source.SurfaceColour.B,
+				 mirror ? 1.0f : 0.0f},
+				{source.EmissiveTint.R * source.EmissiveStrength,
+				 source.EmissiveTint.G * source.EmissiveStrength,
+				 source.EmissiveTint.B * source.EmissiveStrength,
+				 0.0f},
 				{colourCell, materialCell, roughnessChannel, metalnessChannel},
 				{DEFAULT_ROUGHNESS, source.SpecularFactor, 0.0f, 0.0f},
 			});
@@ -273,33 +308,53 @@ namespace engine::render {
 			out[0] = x, out[1] = y, out[2] = z, out[3] = w;
 		};
 		set(uniforms.Eye, camera.Position.X, camera.Position.Y, camera.Position.Z);
-		set(uniforms.Right, right.X * tanHalf * aspect, right.Y * tanHalf * aspect, right.Z * tanHalf * aspect);
+		set(
+			uniforms.Right, right.X * tanHalf * aspect, right.Y * tanHalf * aspect, right.Z * tanHalf * aspect
+		);
 		set(uniforms.Up, up.X * tanHalf, up.Y * tanHalf, up.Z * tanHalf);
 		set(uniforms.Forward, look.X, look.Y, look.Z);
 		const auto &lighting = view.Lighting;
-		const glm::vec3 sun = glm::normalize(-glm::vec3(lighting.Direction.X, lighting.Direction.Y, lighting.Direction.Z));
+		const glm::vec3 sun =
+			glm::normalize(-glm::vec3(lighting.Direction.X, lighting.Direction.Y, lighting.Direction.Z));
 		set(uniforms.SunDirection, sun.x, sun.y, sun.z);
 		set(uniforms.SunColour, lighting.Direct.R, lighting.Direct.G, lighting.Direct.B);
 		set(uniforms.Sky, lighting.Ambient.R, lighting.Ambient.G, lighting.Ambient.B);
 		const uint32_t lightCount = std::min<uint32_t>(uint32_t(view.Lights.size()), MAXIMUM_LIGHTS);
 		for (uint32_t index = 0; index < lightCount; ++index) {
 			const SceneLight &light = view.Lights[index];
-			set(uniforms.LightPosition[index], light.Position.X, light.Position.Y, light.Position.Z, light.Range);
+			set(uniforms.LightPosition[index],
+				light.Position.X,
+				light.Position.Y,
+				light.Position.Z,
+				light.Range);
 			set(uniforms.LightColour[index], light.Colour.R, light.Colour.G, light.Colour.B);
-			signature = Mix(signature, Bits(light.Position.X) ^ Bits(light.Position.Y) << 1 ^ Bits(light.Position.Z) << 2);
+			signature =
+				Mix(signature,
+					Bits(light.Position.X) ^ Bits(light.Position.Y) << 1 ^ Bits(light.Position.Z) << 2);
 		}
-		for (const float value : {camera.Position.X, camera.Position.Y, camera.Position.Z, look.X, look.Y, look.Z, sun.x, sun.y, sun.z})
+		for (const float value :
+			 {camera.Position.X,
+			  camera.Position.Y,
+			  camera.Position.Z,
+			  look.X,
+			  look.Y,
+			  look.Z,
+			  sun.x,
+			  sun.y,
+			  sun.z})
 			signature = Mix(signature, Bits(value));
 
 		// The running average restarts with a new picture.
-		const bool restart = trace.Accumulation == nullptr || trace.Width != width || trace.Height != height || trace.Signature != signature;
+		const bool restart = trace.Accumulation == nullptr || trace.Width != width ||
+							 trace.Height != height || trace.Signature != signature;
 		if (trace.Accumulation == nullptr || trace.Width != width || trace.Height != height) {
 			if (trace.Accumulation != nullptr) gpu::ReleaseTexture(device, trace.Accumulation);
 			SDL_GPUTextureCreateInfo info{};
 			info.type = SDL_GPU_TEXTURETYPE_2D;
 			info.format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
-			info.usage = SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE |
-						 SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+			info.usage = SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ |
+						 SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET |
+						 SDL_GPU_TEXTUREUSAGE_SAMPLER;
 			info.width = width;
 			info.height = height;
 			info.layer_count_or_depth = 1;
@@ -396,7 +451,8 @@ namespace engine::render {
 			if (buffer != nullptr) SDL_ReleaseGPUBuffer(device, buffer);
 		if (!instances.empty()) trace.Samples += samples;
 		rgba.assign(size_t(width) * height * 4, 0.0f);
-		if (const auto *pixels = static_cast<const float *>(SDL_MapGPUTransferBuffer(device, readback, false))) {
+		if (const auto *pixels =
+				static_cast<const float *>(SDL_MapGPUTransferBuffer(device, readback, false))) {
 			for (size_t index = 0; index < size_t(width) * height; ++index) {
 				const float count = std::max(pixels[index * 4 + 3], 1.0f);
 				for (int channel = 0; channel < 3; ++channel)

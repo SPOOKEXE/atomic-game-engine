@@ -22,9 +22,9 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/gui/Registration.hpp>
-#include <engine/scene/content/MaterialGraphs.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/content/MaterialGraphs.hpp>
 #include <engine/scene/content/MaterialLayers.hpp>
 #include <engine/scene/content/RenderPasses.hpp>
 #include <engine/scene/content/Shaders.hpp>

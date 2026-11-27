@@ -53,7 +53,8 @@ namespace engine::assets {
 		writer.WriteString(data.Texture0);
 		writer.WriteString(data.Texture1);
 		writer.WriteUInt16(data.ParameterMask);
-		for (const float value : data.Parameters) writer.WriteFloat(value);
+		for (const float value : data.Parameters)
+			writer.WriteFloat(value);
 		return true;
 	}
 
@@ -158,11 +159,13 @@ namespace engine::assets {
 			texture0 = reader.ReadString();
 			texture1 = reader.ReadString();
 			parameterMask = reader.ReadUInt16();
-			for (float &value : parameters) value = reader.ReadFloat();
+			for (float &value : parameters)
+				value = reader.ReadFloat();
 			bool finite = true;
-			for (const float value : parameters) finite = finite && std::isfinite(value);
-			if (reader.Failed() || !finite || shader.size() > MAXIMUM_NAME || texture0.size() > MAXIMUM_NAME ||
-				texture1.size() > MAXIMUM_NAME) {
+			for (const float value : parameters)
+				finite = finite && std::isfinite(value);
+			if (reader.Failed() || !finite || shader.size() > MAXIMUM_NAME ||
+				texture0.size() > MAXIMUM_NAME || texture1.size() > MAXIMUM_NAME) {
 				return false;
 			}
 		}

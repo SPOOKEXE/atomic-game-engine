@@ -229,7 +229,8 @@ namespace engine::render {
 			if (authoredMaterial && shader.IsValid()) {
 				const auto found = ShaderVariants.find(ShaderVariantKey(shader, owner));
 				// After the frame block, and after the packed descriptor on a packed mesh.
-				if (found != ShaderVariants.end() && found->second.Deformed()) vertexValuesSlot = mesh.Packed ? 2 : 1;
+				if (found != ShaderVariants.end() && found->second.Deformed())
+					vertexValuesSlot = mesh.Packed ? 2 : 1;
 				if (found != ShaderVariants.end()) arraySlots = found->second.ArraySlots;
 			}
 			if (want != bound) {
@@ -407,7 +408,10 @@ namespace engine::render {
 					if (!layered) return nullptr;
 					return LayeredTexture(name, SlotContentOwner[slot], [&](core::Name layer) {
 						return TextureContentOwnerWithFallback(
-							layer, SlotContentOwner[slot], SlotImageGraphWorld[slot], SlotImageGraphFallbackWorld[slot]
+							layer,
+							SlotContentOwner[slot],
+							SlotImageGraphWorld[slot],
+							SlotImageGraphFallbackWorld[slot]
 						);
 					});
 				};
@@ -466,7 +470,8 @@ namespace engine::render {
 					SDL_GPUTextureSamplerBinding authored[13];
 					std::copy(std::begin(samplers), std::begin(samplers) + 11, authored);
 					const auto standIn = [&](uint8_t bit) {
-						SDL_GPUTexture *array = (arraySlots & bit) != 0 ? EnsureFallbackArrayTexture() : nullptr;
+						SDL_GPUTexture *array =
+							(arraySlots & bit) != 0 ? EnsureFallbackArrayTexture() : nullptr;
 						return array != nullptr ? array : FallbackTexture;
 					};
 					authored[11] = {material0 != nullptr ? material0 : standIn(1), materialSampler};
@@ -1228,8 +1233,10 @@ namespace engine::render {
 		info.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
 		info.format = format == assets::TextureFormat::RGBA8 || format == assets::TextureFormat::RGBA4_SRGB
 						  ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB
-					  : format == assets::TextureFormat::RGBA16_FLOAT || format == assets::TextureFormat::RGBA32_FLOAT ||
-							  format == assets::TextureFormat::R16_FLOAT || format == assets::TextureFormat::R32_FLOAT
+					  : format == assets::TextureFormat::RGBA16_FLOAT ||
+							  format == assets::TextureFormat::RGBA32_FLOAT ||
+							  format == assets::TextureFormat::R16_FLOAT ||
+							  format == assets::TextureFormat::R32_FLOAT
 						  ? SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT
 						  : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
 		info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;

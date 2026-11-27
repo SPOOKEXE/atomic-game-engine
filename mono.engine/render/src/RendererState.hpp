@@ -47,11 +47,11 @@
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/imagegraph/Reference.hpp>
-#include <engine/render/raytrace/Bvh.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/capture/DataFactoryHookBind.hpp>
 #include <engine/render/capture/VisibilityObservation.hpp>
 #include <engine/render/portal/PortalImageImport.hpp>
+#include <engine/render/raytrace/Bvh.hpp>
 #include <engine/render/resources/MeshTable.hpp>
 #include <engine/render/resources/ShaderCompiler.hpp>
 #include <engine/render/resources/TextureTable.hpp>

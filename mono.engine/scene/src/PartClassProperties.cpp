@@ -257,7 +257,9 @@ namespace engine::scene::part_detail {
 			if (material == nullptr) return false;
 			SurfaceAppearance values;
 			std::copy(
-				std::begin(material->Parameters), std::end(material->Parameters), std::begin(values.MaterialParameters)
+				std::begin(material->Parameters),
+				std::end(material->Parameters),
+				std::begin(values.MaterialParameters)
 			);
 			values.MaterialParameterMask = material->ParameterMask;
 			*static_cast<std::string *>(out) = FormatMaterialParameters(values);
@@ -266,10 +268,13 @@ namespace engine::scene::part_detail {
 		property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
 			auto *material = store.GetMutable<MaterialRef>(instance);
 			SurfaceAppearance values;
-			if (material == nullptr || !ParseMaterialParameters(*static_cast<const std::string *>(value), values))
+			if (material == nullptr ||
+				!ParseMaterialParameters(*static_cast<const std::string *>(value), values))
 				return false;
 			std::copy(
-				std::begin(values.MaterialParameters), std::end(values.MaterialParameters), std::begin(material->Parameters)
+				std::begin(values.MaterialParameters),
+				std::end(values.MaterialParameters),
+				std::begin(material->Parameters)
 			);
 			material->ParameterMask = values.MaterialParameterMask;
 			return true;

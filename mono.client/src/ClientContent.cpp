@@ -664,7 +664,9 @@ namespace client {
 					.Texture0 = engine::core::Name(material.Texture0),
 					.Texture1 = engine::core::Name(material.Texture1),
 				};
-				std::copy(std::begin(material.Parameters), std::end(material.Parameters), maps.Parameters.begin());
+				std::copy(
+					std::begin(material.Parameters), std::end(material.Parameters), maps.Parameters.begin()
+				);
 				maps.ParameterMask = material.ParameterMask;
 
 				// **Deliberately not asked for here**, unlike a mesh's sheets, and

@@ -6,7 +6,6 @@
 // covers what a script can actually reach, which is the part a binding can get
 // wrong while every piece under it is correct.
 
-#include <engine/scene/content/Shaders.hpp>
 #include <engine/assets/Animation.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Paths.hpp>
@@ -27,6 +26,7 @@
 #include <engine/scene/cameras/ActiveCamera.hpp>
 #include <engine/scene/characters/Animation.hpp>
 #include <engine/scene/characters/Input.hpp>
+#include <engine/scene/content/Shaders.hpp>
 #include <engine/scene/editable/EditableImage.hpp>
 #include <engine/scene/editable/EditableMesh.hpp>
 #include <engine/script/Instances.hpp>

@@ -20,7 +20,6 @@
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/imagegraph/Document.hpp>
-#include <engine/render/resources/TextureTable.hpp>
 #include <engine/render/FrameResult.hpp>
 #include <engine/render/ImageGraphBinding.hpp>
 #include <engine/render/SceneLight.hpp>
@@ -40,6 +39,7 @@
 #include <engine/render/presentation/PresentationDamage.hpp>
 #include <engine/render/resources/Flipbook.hpp>
 #include <engine/render/resources/ResourceImage.hpp>
+#include <engine/render/resources/TextureTable.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/cameras/SurfaceCameras.hpp>
@@ -1162,7 +1162,8 @@ namespace engine::render {
 		// average as RGBA floats, rows top first. A different camera or set of
 		// instances starts the average again. Up to `MESH_BUILD_BUDGET` new mesh
 		// trees are built per call; instances whose mesh waits are left out.
-		bool TraceReference(const View &view, uint32_t samples, std::vector<float> &rgba, uint32_t bounces = 3);
+		bool
+		TraceReference(const View &view, uint32_t samples, std::vector<float> &rgba, uint32_t bounces = 3);
 		// Paths per pixel in the running average.
 		uint32_t ReferenceSamples() const;
 

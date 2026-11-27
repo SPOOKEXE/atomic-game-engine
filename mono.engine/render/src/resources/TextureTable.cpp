@@ -847,14 +847,14 @@ namespace engine::render {
 		return removed;
 	}
 
-
 	void TextureTable::SetStreaming(size_t budget, size_t uploadPerFrame, uint32_t baseSide) {
 		StreamBudget = budget;
 		StreamUploadPerFrame = uploadPerFrame;
 		StreamBaseSide = std::max(baseSide, 1u);
 	}
 
-	void TextureTable::RequestDetail(const core::Name &name, core::Name owner, uint32_t level, float priority) {
+	void
+	TextureTable::RequestDetail(const core::Name &name, core::Name owner, uint32_t level, float priority) {
 		const auto found = Textures.find(TextureKey(name, owner));
 		if (found == Textures.end() || found->second.Stream == nullptr) return;
 		auto &stream = *found->second.Stream;
@@ -914,8 +914,8 @@ namespace engine::render {
 			const auto format = detail::TextureFormatForUpload(image.Format);
 			size_t bytes = 0;
 			for (uint32_t level = first; level < image.LevelCount(); ++level)
-				bytes += size_t(assets::MipExtent(image.Width, level)) * assets::MipExtent(image.Height, level) *
-						 (format ? format->UploadBytesPerPixel : 4);
+				bytes += size_t(assets::MipExtent(image.Width, level)) *
+						 assets::MipExtent(image.Height, level) * (format ? format->UploadBytesPerPixel : 4);
 			return bytes;
 		};
 		for (auto &[key, entry] : Textures) {
@@ -958,7 +958,8 @@ namespace engine::render {
 		// Coarser first (it frees memory), then finer by priority, one level at a
 		// time so no frame uploads a whole chain at once.
 		std::stable_sort(plans.begin(), plans.end(), [](const Plan &a, const Plan &b) {
-			const bool aFrees = a.Target > a.Held->Stream->Resident, bFrees = b.Target > b.Held->Stream->Resident;
+			const bool aFrees = a.Target > a.Held->Stream->Resident,
+					   bFrees = b.Target > b.Held->Stream->Resident;
 			if (aFrees != bFrees) return aFrees;
 			return a.Held->Stream->Priority > b.Held->Stream->Priority;
 		});
@@ -967,7 +968,8 @@ namespace engine::render {
 			if (plan.Target == stream.Resident) continue;
 			const uint32_t next = plan.Target < stream.Resident ? stream.Resident - 1 : plan.Target;
 			const size_t cost = chain(*stream.Source, next);
-			if (next < stream.Resident && StreamUploaded > 0 && StreamUploaded + cost > StreamUploadPerFrame) continue;
+			if (next < stream.Resident && StreamUploaded > 0 && StreamUploaded + cost > StreamUploadPerFrame)
+				continue;
 			// Never past the budget, even for one frame.
 			const size_t grows = cost > plan.Held->Bytes ? cost - plan.Held->Bytes : 0;
 			if (UploadedBytes + grows > StreamBudget || UploadedBytes + grows > MaximumBytes) continue;

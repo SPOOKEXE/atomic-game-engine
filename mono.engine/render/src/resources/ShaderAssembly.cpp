@@ -91,12 +91,17 @@ namespace engine::render {
 					directive = Trim(directive);
 					const size_t space = directive.find(' ');
 					uint32_t number = 1;
-					std::from_chars(directive.data(), directive.data() + std::min(space, directive.size()), number);
-					const std::string file(space == std::string_view::npos ? "" : Trim(directive.substr(space)));
+					std::from_chars(
+						directive.data(), directive.data() + std::min(space, directive.size()), number
+					);
+					const std::string file(
+						space == std::string_view::npos ? "" : Trim(directive.substr(space))
+					);
 					line = number;
 					for (size_t walk = end + 1; walk < at; ++walk)
 						if (code[walk] == '\n') ++line;
-					where = "#line " + std::to_string(line) + " " + (file.empty() ? "\"shader\"" : file) + "\n";
+					where =
+						"#line " + std::to_string(line) + " " + (file.empty() ? "\"shader\"" : file) + "\n";
 					break;
 				}
 				if (line == 0) {
@@ -274,8 +279,8 @@ namespace engine::render {
 						(slot == 0 ? "y" : "z") + " > 0.5; }\n";
 		}
 		for (size_t slot = 0; slot < layout.Images.size(); ++slot) {
-			const std::string scale = std::string("lighting.ImageScale") + (slot < 2 ? "0." : "1.") +
-									  (slot % 2 == 0 ? "xy" : "zw");
+			const std::string scale =
+				std::string("lighting.ImageScale") + (slot < 2 ? "0." : "1.") + (slot % 2 == 0 ? "xy" : "zw");
 			// An image no pass drew this frame reads as zero.
 			declared += "vec4 " + layout.Images[slot] + "(vec2 uv) { return " + scale +
 						".x > 0.0 ? texture(passImage" + std::to_string(slot) + ", uv * " + scale +
@@ -304,7 +309,8 @@ namespace engine::render {
 				return result;
 			}
 			// The fragment stages never see it; blanked so their lines still match.
-			const std::string body = vertex.substr(vertex.find('\n') + 1, vertex.size() - vertex.find('\n') - 2);
+			const std::string body =
+				vertex.substr(vertex.find('\n') + 1, vertex.size() - vertex.find('\n') - 2);
 			const size_t at = expansion.Out.find(body);
 			if (at != std::string::npos)
 				for (size_t index = at; index < at + body.size(); ++index)
@@ -315,7 +321,10 @@ namespace engine::render {
 				const size_t at = declared.find(" " + parameter.Name + " = (int(lighting.ParameterState");
 				const size_t start = declared.rfind('\n', at);
 				const size_t end = declared.find('\n', at);
-				values += declared.substr(start == std::string::npos ? 0 : start + 1, end - (start == std::string::npos ? 0 : start + 1) + 1);
+				values += declared.substr(
+					start == std::string::npos ? 0 : start + 1,
+					end - (start == std::string::npos ? 0 : start + 1) + 1
+				);
 			}
 			const std::array<std::pair<std::string_view, int>, 4> stages{{
 				{OPAQUE_VERTEX_GLSL, 1},

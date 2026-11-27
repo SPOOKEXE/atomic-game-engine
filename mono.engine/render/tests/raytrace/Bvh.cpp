@@ -26,7 +26,10 @@ namespace {
 		for (uint32_t t = 0; t < count; ++t) {
 			const glm::vec3 centre(where(random), where(random), where(random));
 			for (int k = 0; k < 3; ++k) {
-				soup.Positions.insert(soup.Positions.end(), {centre.x + offset(random), centre.y + offset(random), centre.z + offset(random)});
+				soup.Positions.insert(
+					soup.Positions.end(),
+					{centre.x + offset(random), centre.y + offset(random), centre.z + offset(random)}
+				);
 				soup.Indices.push_back(t * 3 + k);
 			}
 		}
@@ -41,7 +44,8 @@ namespace {
 				return glm::vec3(soup.Positions[i * 3], soup.Positions[i * 3 + 1], soup.Positions[i * 3 + 2]);
 			};
 			float d = 0, u = 0, v = 0;
-			if (RayTriangle(ray, corner(0), corner(1), corner(2), d, u, v) && d < best.Distance) best = {true, d, 0, t, u, v};
+			if (RayTriangle(ray, corner(0), corner(1), corner(2), d, u, v) && d < best.Distance)
+				best = {true, d, 0, t, u, v};
 		}
 		return best;
 	}
@@ -87,18 +91,26 @@ TEST_CASE("a scene BVH traces each instance through its frame and scale", "[rend
 	for (uint32_t index = 0; index < 12; ++index) {
 		BvhInstance instance;
 		instance.Mesh = &mesh;
-		const glm::quat rotation = glm::angleAxis(angle(random), glm::normalize(glm::vec3(where(random), where(random), where(random))));
+		const glm::quat rotation = glm::angleAxis(
+			angle(random), glm::normalize(glm::vec3(where(random), where(random), where(random)))
+		);
 		instance.Frame = core::CFrame(core::Vector3{where(random), where(random), where(random)}, rotation);
 		instance.Scale = {scale(random), scale(random), scale(random)};
 		instances.push_back(instance);
 		// The same triangles placed in the world, for brute force.
-		const glm::vec3 position(instance.Frame.Position.X, instance.Frame.Position.Y, instance.Frame.Position.Z);
+		const glm::vec3 position(
+			instance.Frame.Position.X, instance.Frame.Position.Y, instance.Frame.Position.Z
+		);
 		const uint32_t base = uint32_t(world.Positions.size() / 3);
 		for (size_t p = 0; p < soup.Positions.size(); p += 3) {
-			const glm::vec3 placed = position + rotation * (glm::vec3(soup.Positions[p], soup.Positions[p + 1], soup.Positions[p + 2]) * instance.Scale);
+			const glm::vec3 placed =
+				position +
+				rotation * (glm::vec3(soup.Positions[p], soup.Positions[p + 1], soup.Positions[p + 2]) *
+							instance.Scale);
 			world.Positions.insert(world.Positions.end(), {placed.x, placed.y, placed.z});
 		}
-		for (const uint32_t i : soup.Indices) world.Indices.push_back(base + i);
+		for (const uint32_t i : soup.Indices)
+			world.Indices.push_back(base + i);
 	}
 	SceneBvh scene;
 	scene.Build(instances);

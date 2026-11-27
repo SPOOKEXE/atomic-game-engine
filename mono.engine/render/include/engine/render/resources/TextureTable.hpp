@@ -14,10 +14,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string_view>
-#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -532,8 +532,9 @@ namespace engine::render {
 		// @param bytes  Set to what the upload cost in device memory.
 		// @return The texture, or null.
 		// `firstLevel` uploads the chain from that level down, as a smaller texture.
-		SDL_GPUTexture *
-		Upload(const assets::TextureData &image, std::string_view label, size_t &bytes, uint32_t firstLevel = 0);
+		SDL_GPUTexture *Upload(
+			const assets::TextureData &image, std::string_view label, size_t &bytes, uint32_t firstLevel = 0
+		);
 
 		// One entry from an upload and the image it came from. See the body.
 		static Entry

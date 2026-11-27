@@ -4,6 +4,7 @@
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/scene/content/TileSets.hpp>
 
@@ -11,9 +12,8 @@
 
 #include <algorithm>
 #include <array>
-#include <cstring>
-#include <engine/core/Metrics.hpp>
 #include <cmath>
+#include <cstring>
 #include <string>
 
 namespace engine::render {
@@ -22,7 +22,9 @@ namespace engine::render {
 		constexpr size_t BAKE_TARGETS = 5;
 	}
 
-	bool Renderer::Impl::AddBakeVariant(const core::Name &name, core::Name owner, std::span<const uint32_t> spirv) {
+	bool Renderer::Impl::AddBakeVariant(
+		const core::Name &name, core::Name owner, std::span<const uint32_t> spirv
+	) {
 		if (!VariantsReady || BakeVertexShader == nullptr || spirv.empty()) return false;
 		const auto hash = assets::Hasher::Of(std::as_bytes(spirv));
 		auto &held = BakePipelines[ShaderVariantKey(name, owner)];
@@ -35,7 +37,8 @@ namespace engine::render {
 		info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
 		info.num_samplers = SURFACE_FRAGMENT_SAMPLERS;
 		info.num_uniform_buffers = 3;
-		SDL_GPUShader *fragment = Binary.Form == resources::ShaderForm::Msl ? nullptr : SDL_CreateGPUShader(Device, &info);
+		SDL_GPUShader *fragment =
+			Binary.Form == resources::ShaderForm::Msl ? nullptr : SDL_CreateGPUShader(Device, &info);
 		if (fragment == nullptr) {
 			ENGINE_ERROR("bake '{}': {}", name.Text(), SDL_GetError());
 			return false;
@@ -109,7 +112,8 @@ namespace engine::render {
 					output = gpu::CreateTexture(Device, &info);
 				}
 				SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
-				if (command == nullptr || std::find(outputs.begin(), outputs.end(), nullptr) != outputs.end()) {
+				if (command == nullptr ||
+					std::find(outputs.begin(), outputs.end(), nullptr) != outputs.end()) {
 					for (auto *output : outputs)
 						if (output != nullptr) gpu::ReleaseTexture(Device, output);
 					if (command != nullptr) SDL_CancelGPUCommandBuffer(command);
@@ -121,8 +125,9 @@ namespace engine::render {
 					colour[index].load_op = SDL_GPU_LOADOP_CLEAR;
 					colour[index].store_op = SDL_GPU_STOREOP_STORE;
 				}
-				SDL_GPURenderPass *pass =
-					SDL_BeginGPURenderPass(command, colour.data(), static_cast<Uint32>(colour.size()), nullptr);
+				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(
+					command, colour.data(), static_cast<Uint32>(colour.size()), nullptr
+				);
 				SDL_BindGPUGraphicsPipeline(pass, variant->second.Pipeline);
 				BindInstanceBuffers(pass);
 				const SDL_GPUBufferBinding indices{Meshes.Indices(), 0};
@@ -155,7 +160,9 @@ namespace engine::render {
 				SDL_PushGPUFragmentUniformData(command, 2, &beams, sizeof(beams));
 				const auto draw = [&](const MeshRange &range) {
 					if (range.IndexCount > 0)
-						SDL_DrawGPUIndexedPrimitives(pass, range.IndexCount, 1, range.FirstIndex, range.VertexOffset, 0);
+						SDL_DrawGPUIndexedPrimitives(
+							pass, range.IndexCount, 1, range.FirstIndex, range.VertexOffset, 0
+						);
 				};
 				if (mesh.Runs.empty())
 					draw(mesh.Whole);
@@ -172,11 +179,22 @@ namespace engine::render {
 					const size_t bytes = size_t(size) * size * 8;
 					const bool placed = Textures.Find(name, bake.Owner) != nullptr
 											? Textures.ReplaceAdopt(
-												  name, outputs[index], size, size, bytes, bake.Owner, retired,
+												  name,
+												  outputs[index],
+												  size,
+												  size,
+												  bytes,
+												  bake.Owner,
+												  retired,
 												  assets::TextureFormat::RGBA16_FLOAT
 											  )
 											: Textures.Adopt(
-												  name, outputs[index], size, size, bytes, bake.Owner,
+												  name,
+												  outputs[index],
+												  size,
+												  size,
+												  bytes,
+												  bake.Owner,
 												  assets::TextureFormat::RGBA16_FLOAT
 											  );
 					if (!placed) gpu::ReleaseTexture(Device, outputs[index]);
@@ -192,7 +210,8 @@ namespace engine::render {
 	void Renderer::Impl::RequestTextureDetail(const View &view) {
 		if (view.Target == nullptr || view.Target->Height == 0 || view.Instances.empty()) return;
 		// Pixels across per unit of size at distance one.
-		const float focal = float(view.Target->Height) / (2.0f * std::tan(view.Camera.FieldOfViewRadians * 0.5f));
+		const float focal =
+			float(view.Target->Height) / (2.0f * std::tan(view.Camera.FieldOfViewRadians * 0.5f));
 		std::vector<core::Vector3> eyes{view.CameraFrame.Position};
 		for (const SurfaceView &surface : view.Surfaces)
 			eyes.push_back(surface.Frame.Position);
@@ -204,7 +223,9 @@ namespace engine::render {
 			float nearest = 1e30f;
 			for (const core::Vector3 &eye : eyes) {
 				const core::Vector3 offset = instance.Frame.Position - eye;
-				nearest = std::min(nearest, std::sqrt(offset.X * offset.X + offset.Y * offset.Y + offset.Z * offset.Z));
+				nearest = std::min(
+					nearest, std::sqrt(offset.X * offset.X + offset.Y * offset.Y + offset.Z * offset.Z)
+				);
 			}
 			const float projected = 2.0f * radius * focal / std::max(nearest - radius, 0.05f);
 			const core::Name owner = view.ContentOwnerOf(instance.SourceWorld);
@@ -214,7 +235,8 @@ namespace engine::render {
 					uint32_t width = 0, height = 0;
 					if (!Textures.SizeOf(texture, width, height, owner)) return;
 					const float ratio = float(std::max(width, height)) / std::max(projected, 1.0f);
-					const uint32_t level = ratio <= 1.0f ? 0u : static_cast<uint32_t>(std::floor(std::log2(ratio)));
+					const uint32_t level =
+						ratio <= 1.0f ? 0u : static_cast<uint32_t>(std::floor(std::log2(ratio)));
 					Textures.RequestDetail(texture, owner, level, projected);
 				};
 				if (scene::IsTileSet(name.Text())) {

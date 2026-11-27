@@ -331,9 +331,7 @@ TEST_CASE("shader values come from the asset, then the material, then the part",
 	const Entity material = Dress(store, part, asset);
 	ResolveMaterials(store);
 	const auto draw = [&] {
-		return engine::scene::MakeDrawInstance(
-			{}, {}, {}, store.Get<SurfaceAppearance>(part), nullptr, 1
-		);
+		return engine::scene::MakeDrawInstance({}, {}, {}, store.Get<SurfaceAppearance>(part), nullptr, 1);
 	};
 	// The asset alone names the shader and every value.
 	auto drawn = draw();

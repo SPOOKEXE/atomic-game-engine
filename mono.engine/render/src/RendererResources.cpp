@@ -14,8 +14,6 @@
 #include "resources/ShaderBinary.hpp"
 #include "resources/StartupCompilation.hpp"
 
-#include <engine/scene/content/MaterialLayout.hpp>
-#include <algorithm>
 #include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -37,7 +35,10 @@
 #include <engine/render/resources/TextureTable.hpp>
 #include <engine/resources/Shaders.hpp>
 #include <engine/scene/cameras/ActiveCamera.hpp>
+#include <engine/scene/content/MaterialLayout.hpp>
 #include <engine/scene/environment/Sunlight.hpp>
+
+#include <algorithm>
 
 // `scene::ReflectCamera` and `scene::SurfacePane`: where a mirror's camera goes
 // for a viewer that is not the eye, which is what makes the levels below the
@@ -545,7 +546,8 @@ namespace engine::render {
 
 		assets::Hasher hasher;
 		hasher.Update(std::as_bytes(spirv));
-		for (const auto &stage : vertex) hasher.Update(std::as_bytes(std::span(stage)));
+		for (const auto &stage : vertex)
+			hasher.Update(std::as_bytes(std::span(stage)));
 		const auto hash = vertex.empty() ? assets::Hasher::Of(std::as_bytes(spirv)) : hasher.Finish();
 		const auto held = State->ShaderVariants.find(Impl::ShaderVariantKey(name, owner));
 		if (held != State->ShaderVariants.end() && held->second.CodeHash == hash) return true;
@@ -979,17 +981,17 @@ namespace engine::render {
 				}
 				const auto refused = refusals.find(key);
 				if (refused != refusals.end() && refused->second == module->CodeHash) continue;
-				const bool installed =
-					family == 0	  ? AddMaterialShader(
-								  name,
-								  module->SpirV,
-								  owner,
-								  module->GBufferSpirV,
-								  module->VertexSpirV[0].empty() ? std::span<const std::vector<uint32_t>>{}
-																 : std::span(module->VertexSpirV)
-							  )
-					: family == 1 ? AddLensShader(name, module->SpirV, owner)
-								  : SetPostProcessShader(name, module->SpirV, owner);
+				const bool installed = family == 0 ? AddMaterialShader(
+														 name,
+														 module->SpirV,
+														 owner,
+														 module->GBufferSpirV,
+														 module->VertexSpirV[0].empty()
+															 ? std::span<const std::vector<uint32_t>>{}
+															 : std::span(module->VertexSpirV)
+													 )
+									   : family == 1 ? AddLensShader(name, module->SpirV, owner)
+													 : SetPostProcessShader(name, module->SpirV, owner);
 				// A generated layer prefix also gets its UV-space draw.
 				if (installed && family == 0 && !module->BakeSpirV.empty())
 					(void)AddBakeShader(name, module->BakeSpirV, owner);

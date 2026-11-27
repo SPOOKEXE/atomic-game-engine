@@ -45,12 +45,12 @@
 //
 // @tier L12 · client
 
-#include <array>
 #include <engine/assets/ContentHash.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/render/resources/ShaderCompiler.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>

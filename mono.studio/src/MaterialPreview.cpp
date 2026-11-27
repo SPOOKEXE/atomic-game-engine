@@ -22,11 +22,11 @@
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/content/MaterialGraphs.hpp>
 #include <engine/scene/content/Shaders.hpp>
-
 #include <engine/ui/Theme.hpp>
 
-#include <cmath>
 #include <glm/gtc/quaternion.hpp>
+
+#include <cmath>
 #include <imgui.h>
 #include <studio/Editor.hpp>
 
@@ -102,7 +102,8 @@ namespace studio {
 				// resolve them.
 				const engine::render::ShaderModuleResolver modules =
 					[&store](std::string_view module) -> std::optional<std::string> {
-					engine::scene::ShaderText held = engine::scene::ShaderModuleTextOf(store, engine::core::Name(module));
+					engine::scene::ShaderText held =
+						engine::scene::ShaderModuleTextOf(store, engine::core::Name(module));
 					if (!held.Found) return std::nullopt;
 					return std::move(held.Code);
 				};
@@ -123,7 +124,9 @@ namespace studio {
 					error = forward.Failed ? forward.Error : gbuffer.Error;
 					return;
 				}
-				if (!Renderer.AddMaterialShader(PREVIEW_SHADER, forward.SpirV, PREVIEW_OWNER, gbuffer.SpirV)) {
+				if (!Renderer.AddMaterialShader(
+						PREVIEW_SHADER, forward.SpirV, PREVIEW_OWNER, gbuffer.SpirV
+					)) {
 					error = "the renderer refused the compiled graph";
 				}
 			});
@@ -171,13 +174,16 @@ namespace studio {
 
 	bool Editor::RenderMaterialPreviewSlot() {
 		using namespace engine;
-		if (!MaterialPreviewWanted || Renderer.Backend().Device == nullptr || MaterialPreviewAge < CAPTURE_SPACING) {
+		if (!MaterialPreviewWanted || Renderer.Backend().Device == nullptr ||
+			MaterialPreviewAge < CAPTURE_SPACING) {
 			return false;
 		}
 		ENGINE_PROFILE_CAT("material preview", core::ProfileCategory::Render);
 		// The shapes, uploaded once.
 		if (!MaterialPreviewMeshes) {
-			const assets::BuiltinMesh shapes[] = {assets::BuiltinMesh::Sphere, assets::BuiltinMesh::Cube, assets::BuiltinMesh::Plane};
+			const assets::BuiltinMesh shapes[] = {
+				assets::BuiltinMesh::Sphere, assets::BuiltinMesh::Cube, assets::BuiltinMesh::Plane
+			};
 			for (int index = 0; index < 3; ++index) {
 				if (!Renderer.AddMesh(ShapeMesh(index), assets::MakeBuiltin(shapes[index]))) {
 					ENGINE_WARN("material preview: the renderer refused the {} mesh", SHAPES[index]);
@@ -191,7 +197,8 @@ namespace studio {
 		instance.Shader = PREVIEW_SHADER;
 		// The plane (on XZ, facing up) stands to face the camera.
 		const glm::quat turn = glm::angleAxis(MaterialPreviewOrbit, glm::vec3(0, 1, 0));
-		const glm::quat stand = MaterialPreviewShape == 2 ? glm::angleAxis(1.5707963f, glm::vec3(1, 0, 0)) : glm::quat(1, 0, 0, 0);
+		const glm::quat stand = MaterialPreviewShape == 2 ? glm::angleAxis(1.5707963f, glm::vec3(1, 0, 0))
+														  : glm::quat(1, 0, 0, 0);
 		instance.Frame = core::CFrame(core::Vector3{}, turn * stand);
 
 		scene::Camera camera;
@@ -216,7 +223,8 @@ namespace studio {
 		// Into the image not on screen, then show it.
 		const int next = MaterialPreviewShown == 0 ? 1 : 0;
 		if (!MaterialPreviewTextures[next].IsValid()) {
-			MaterialPreviewTextures[next] = core::Name(std::string("studio.material-preview/image") + std::to_string(next));
+			MaterialPreviewTextures[next] =
+				core::Name(std::string("studio.material-preview/image") + std::to_string(next));
 		}
 		if (Renderer.CaptureSceneTexture(PreviewSlot(), MaterialPreviewTextures[next])) {
 			if (void *handle = Renderer.TextureHandle(MaterialPreviewTextures[next]); handle != nullptr) {

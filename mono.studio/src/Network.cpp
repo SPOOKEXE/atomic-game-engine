@@ -687,7 +687,9 @@ namespace studio {
 					.Texture0 = engine::core::Name(material.Texture0),
 					.Texture1 = engine::core::Name(material.Texture1),
 				};
-				std::copy(std::begin(material.Parameters), std::end(material.Parameters), maps.Parameters.begin());
+				std::copy(
+					std::begin(material.Parameters), std::end(material.Parameters), maps.Parameters.begin()
+				);
 				maps.ParameterMask = material.ParameterMask;
 				EachOpenWorld([&name, &maps](engine::ecs::Store &store) {
 					engine::scene::RecordMaterial(store, name, maps);

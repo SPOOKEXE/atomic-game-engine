@@ -814,7 +814,9 @@ namespace engine::script {
 		}
 
 		// `SetMaterialParameter` on a Material: its own value, under the part's.
-		void SetMaterialRefParameter(ScriptCall &call, const std::string &name, const scene::MaterialRef &material) {
+		void SetMaterialRefParameter(
+			ScriptCall &call, const std::string &name, const scene::MaterialRef &material
+		) {
 			const scene::MaterialLayout layout = MaterialOwnLayout(call, material);
 			const scene::MaterialParameter *parameter = layout.Find(name);
 			if (parameter == nullptr) call.Raise(("the shader declares no parameter '" + name + "'").c_str());
@@ -822,7 +824,9 @@ namespace engine::script {
 			const size_t count = ReadMaterialValue(call, *parameter, values);
 			scene::SurfaceAppearance held;
 			std::copy(
-				std::begin(material.Parameters), std::end(material.Parameters), std::begin(held.MaterialParameters)
+				std::begin(material.Parameters),
+				std::end(material.Parameters),
+				std::begin(held.MaterialParameters)
 			);
 			held.MaterialParameterMask = material.ParameterMask;
 			scene::SetMaterialParameter(held, *parameter, values.data(), count);

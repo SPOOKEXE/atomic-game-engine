@@ -7,8 +7,8 @@
 #include <engine/game/Values.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/resources/ShaderCompiler.hpp>
-#include <engine/scene/content/MaterialGraphs.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/scene/content/MaterialGraphs.hpp>
 #include <engine/scene/content/Shaders.hpp>
 #include <engine/scene/editable/ImageGraph.hpp>
 #include <engine/scene/environment/Atmosphere.hpp>

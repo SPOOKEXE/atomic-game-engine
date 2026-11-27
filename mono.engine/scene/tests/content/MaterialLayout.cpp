@@ -1,11 +1,11 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/content/MaterialLayout.hpp>
 #include <engine/scene/content/TileSets.hpp>
-
-#include <array>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <array>
 
 TEST_SUITE_ID("engine.scene.materiallayout")
 

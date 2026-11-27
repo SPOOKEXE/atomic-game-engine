@@ -221,7 +221,8 @@ TEST_CASE("a stack past the live limit bakes everything under the top seven", "[
 	World world;
 	world.Module("tint", "void Layer(SurfaceInput i, inout SurfaceOutput o) { o.Albedo = vec3(1, 0, 0); }\n");
 	std::vector<ecs::Entity> layers;
-	for (int32_t order = 0; order < 10; ++order) layers.push_back(world.Layer("tint", order));
+	for (int32_t order = 0; order < 10; ++order)
+		layers.push_back(world.Layer("tint", order));
 	ResolveMaterialLayers(world.Store);
 	std::vector<LayerBake> bakes;
 	LayerBakesOf(world.Store, bakes);

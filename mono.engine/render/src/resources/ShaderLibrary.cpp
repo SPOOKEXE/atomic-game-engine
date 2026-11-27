@@ -318,7 +318,8 @@ namespace engine::render {
 					}
 					// Only a generated layer prefix is ever baked.
 					if (!result.Failed && assembled.Surface && name.Text().starts_with("bake/")) {
-						auto compiled = State->Compiler.Compile(assembled.Bake, ShaderStage::Fragment, name.Text());
+						auto compiled =
+							State->Compiler.Compile(assembled.Bake, ShaderStage::Fragment, name.Text());
 						if (compiled.Failed) {
 							result.Failed = true;
 							result.Error = std::move(compiled.Error);
@@ -328,8 +329,9 @@ namespace engine::render {
 					}
 					for (size_t stage = 0; !result.Failed && stage < assembled.Vertex.size(); ++stage) {
 						if (assembled.Vertex[stage].empty()) continue;
-						auto compiled =
-							State->Compiler.Compile(assembled.Vertex[stage], ShaderStage::Vertex, name.Text());
+						auto compiled = State->Compiler.Compile(
+							assembled.Vertex[stage], ShaderStage::Vertex, name.Text()
+						);
 						if (compiled.Failed) {
 							result.Failed = true;
 							result.Error = std::move(compiled.Error);
@@ -350,12 +352,14 @@ namespace engine::render {
 					// A change to Vertex alone is a change to the module.
 					assets::Hasher hasher;
 					hasher.Update(std::as_bytes(std::span(module.SpirV)));
-					for (const auto &stage : module.VertexSpirV) hasher.Update(std::as_bytes(std::span(stage)));
+					for (const auto &stage : module.VertexSpirV)
+						hasher.Update(std::as_bytes(std::span(stage)));
 					module.CodeHash = hasher.Finish();
 					module.Pass = assembled.Pass;
 					module.Compute = assembled.Compute;
 					module.Images.clear();
-					for (const std::string &image : assembled.Images) module.Images.emplace_back(image);
+					for (const std::string &image : assembled.Images)
+						module.Images.emplace_back(image);
 				}
 				scene::SetShaderError(store, text.Source, module.AttemptError);
 				if (changed) State->Changed.push_back(name);

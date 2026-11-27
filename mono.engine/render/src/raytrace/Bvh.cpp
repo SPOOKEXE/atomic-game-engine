@@ -29,7 +29,9 @@ namespace engine::render {
 
 		// Builds a tree over `boxes` (with `centres`), reordering `order` so
 		// each leaf's items are contiguous. Binned SAH, twelve bins per axis.
-		std::vector<BvhNode> BuildTree(const std::vector<Box> &boxes, const std::vector<glm::vec3> &centres, std::vector<uint32_t> &order) {
+		std::vector<BvhNode> BuildTree(
+			const std::vector<Box> &boxes, const std::vector<glm::vec3> &centres, std::vector<uint32_t> &order
+		) {
 			std::vector<BvhNode> nodes;
 			order.resize(boxes.size());
 			std::iota(order.begin(), order.end(), 0u);
@@ -70,7 +72,9 @@ namespace engine::render {
 					std::array<Box, BINS> bins;
 					std::array<uint32_t, BINS> counts{};
 					for (uint32_t index = task.First; index < task.First + task.Count; ++index) {
-						const int bin = std::min(BINS - 1, int((centres[order[index]][axis] - low) / (high - low) * BINS));
+						const int bin = std::min(
+							BINS - 1, int((centres[order[index]][axis] - low) / (high - low) * BINS)
+						);
 						bins[bin].Grow(boxes[order[index]]);
 						++counts[bin];
 					}
@@ -92,9 +96,13 @@ namespace engine::render {
 					continue;
 				}
 				const float low = centroid.Minimum[bestAxis], high = centroid.Maximum[bestAxis];
-				const auto middle = std::partition(order.begin() + task.First, order.begin() + task.First + task.Count, [&](uint32_t item) {
-					return std::min(BINS - 1, int((centres[item][bestAxis] - low) / (high - low) * BINS)) < bestSplit;
-				});
+				const auto middle = std::partition(
+					order.begin() + task.First, order.begin() + task.First + task.Count, [&](uint32_t item) {
+						return std::min(
+								   BINS - 1, int((centres[item][bestAxis] - low) / (high - low) * BINS)
+							   ) < bestSplit;
+					}
+				);
 				const uint32_t leftCount = uint32_t(middle - (order.begin() + task.First));
 				const uint32_t child = uint32_t(nodes.size());
 				nodes.push_back({});
@@ -108,12 +116,20 @@ namespace engine::render {
 		}
 
 		glm::vec3 Inverse(const glm::vec3 &direction) {
-			const auto safe = [](float v) { return std::abs(v) < 1e-20f ? (v < 0 ? -1e20f : 1e20f) : 1.0f / v; };
+			const auto safe = [](float v) {
+				return std::abs(v) < 1e-20f ? (v < 0 ? -1e20f : 1e20f) : 1.0f / v;
+			};
 			return {safe(direction.x), safe(direction.y), safe(direction.z)};
 		}
 	}
 
-	bool RayBox(const Ray &ray, const glm::vec3 &inverse, const glm::vec3 &minimum, const glm::vec3 &maximum, float &entry) {
+	bool RayBox(
+		const Ray &ray,
+		const glm::vec3 &inverse,
+		const glm::vec3 &minimum,
+		const glm::vec3 &maximum,
+		float &entry
+	) {
 		const glm::vec3 t0 = (minimum - ray.Origin) * inverse, t1 = (maximum - ray.Origin) * inverse;
 		const glm::vec3 near = glm::min(t0, t1), far = glm::max(t0, t1);
 		entry = std::max(std::max(near.x, near.y), std::max(near.z, ray.Minimum));
@@ -121,7 +137,15 @@ namespace engine::render {
 		return entry <= exit;
 	}
 
-	bool RayTriangle(const Ray &ray, const glm::vec3 &a, const glm::vec3 &b, const glm::vec3 &c, float &t, float &u, float &v) {
+	bool RayTriangle(
+		const Ray &ray,
+		const glm::vec3 &a,
+		const glm::vec3 &b,
+		const glm::vec3 &c,
+		float &t,
+		float &u,
+		float &v
+	) {
 		const glm::vec3 e1 = b - a, e2 = c - a;
 		const glm::vec3 p = glm::cross(ray.Direction, e2);
 		const float det = glm::dot(e1, p);
@@ -145,7 +169,8 @@ namespace engine::render {
 			return glm::vec3(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
 		};
 		for (size_t t = 0; t < triangles; ++t) {
-			for (int k = 0; k < 3; ++k) boxes[t].Grow(corner(indices[t * 3 + k]));
+			for (int k = 0; k < 3; ++k)
+				boxes[t].Grow(corner(indices[t * 3 + k]));
 			centres[t] = (boxes[t].Minimum + boxes[t].Maximum) * 0.5f;
 		}
 		BvhNodes = BuildTree(boxes, centres, TriangleOrder);
@@ -181,7 +206,16 @@ namespace engine::render {
 			}
 			for (uint32_t index = node.First; index < node.First + node.Count; ++index) {
 				float t = 0, u = 0, v = 0;
-				if (!RayTriangle(ray, TriangleCorners[index * 3], TriangleCorners[index * 3 + 1], TriangleCorners[index * 3 + 2], t, u, v)) continue;
+				if (!RayTriangle(
+						ray,
+						TriangleCorners[index * 3],
+						TriangleCorners[index * 3 + 1],
+						TriangleCorners[index * 3 + 2],
+						t,
+						u,
+						v
+					))
+					continue;
 				hit = {true, t, 0, TriangleOrder[index], u, v};
 				if constexpr (AnyHit) return hit;
 				ray.Maximum = t;
@@ -205,9 +239,15 @@ namespace engine::render {
 			const BvhInstance &instance = Instances[index];
 			const glm::vec3 low = instance.Mesh->Minimum(), high = instance.Mesh->Maximum();
 			const glm::quat rotation = instance.Frame.Rotation();
-			const glm::vec3 position(instance.Frame.Position.X, instance.Frame.Position.Y, instance.Frame.Position.Z);
+			const glm::vec3 position(
+				instance.Frame.Position.X, instance.Frame.Position.Y, instance.Frame.Position.Z
+			);
 			for (int corner = 0; corner < 8; ++corner) {
-				const glm::vec3 local((corner & 1) ? high.x : low.x, (corner & 2) ? high.y : low.y, (corner & 4) ? high.z : low.z);
+				const glm::vec3 local(
+					(corner & 1) ? high.x : low.x,
+					(corner & 2) ? high.y : low.y,
+					(corner & 4) ? high.z : low.z
+				);
 				boxes[index].Grow(position + rotation * (local * instance.Scale));
 			}
 			centres[index] = (boxes[index].Minimum + boxes[index].Maximum) * 0.5f;
@@ -238,13 +278,16 @@ namespace engine::render {
 				// Into object space: the distance along the ray is unchanged,
 				// since the direction is carried without renormalising.
 				const glm::quat inverseRotation = glm::conjugate(instance.Frame.Rotation());
-				const glm::vec3 position(instance.Frame.Position.X, instance.Frame.Position.Y, instance.Frame.Position.Z);
+				const glm::vec3 position(
+					instance.Frame.Position.X, instance.Frame.Position.Y, instance.Frame.Position.Z
+				);
 				Ray local;
 				local.Origin = (inverseRotation * (ray.Origin - position)) / instance.Scale;
 				local.Direction = (inverseRotation * ray.Direction) / instance.Scale;
 				local.Minimum = ray.Minimum;
 				local.Maximum = ray.Maximum;
-				RayHit found = AnyHit ? (instance.Mesh->Any(local) ? RayHit{true} : RayHit{}) : instance.Mesh->Closest(local);
+				RayHit found = AnyHit ? (instance.Mesh->Any(local) ? RayHit{true} : RayHit{})
+									  : instance.Mesh->Closest(local);
 				if (!found.Found) continue;
 				found.Instance = which;
 				hit = found;

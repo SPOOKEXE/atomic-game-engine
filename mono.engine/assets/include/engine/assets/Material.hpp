@@ -140,12 +140,12 @@ namespace engine::assets {
 
 		// The version. Bumped when the layout changes, never reused.
 		//
-		// **8 adds the authored shader, its textures and parameters, 7 adds dielectric IOR and thickness, 6 adds scalar specular and transmission factors, 5 adds
-		// packed PBR channels, 4 adds metalness, 3 adds emissive, 2 added the other four, and 1 still
-		// reads.** A version 1 file is a colour map and nothing else, which is exactly a material whose other
-		// four names are empty - so the older format is not a special case to translate, it is the newer one
-		// with four absent fields. That is what makes reading it a branch on how many strings to expect
-		// rather than a second parser.
+		// **8 adds the authored shader, its textures and parameters, 7 adds dielectric IOR and thickness, 6
+		// adds scalar specular and transmission factors, 5 adds packed PBR channels, 4 adds metalness, 3 adds
+		// emissive, 2 added the other four, and 1 still reads.** A version 1 file is a colour map and nothing
+		// else, which is exactly a material whose other four names are empty - so the older format is not a
+		// special case to translate, it is the newer one with four absent fields. That is what makes reading
+		// it a branch on how many strings to expect rather than a second parser.
 		static constexpr uint16_t VERSION = 8;
 
 		// The longest asset name this will read.

@@ -98,8 +98,9 @@ namespace engine::render {
 				if (!type.array.empty()) return location + " must be a single descriptor";
 				// An authored texture array sits in one of the two material slots.
 				const uint32_t binding = module.get_decoration(resource.id, spv::DecorationBinding);
-				const bool arraySlot = module.get_decoration(resource.id, spv::DecorationDescriptorSet) == 2 &&
-									   (binding == 11 || binding == 12);
+				const bool arraySlot =
+					module.get_decoration(resource.id, spv::DecorationDescriptorSet) == 2 &&
+					(binding == 11 || binding == 12);
 				if (type.image.dim != spv::Dim2D || (type.image.arrayed && !arraySlot) || type.image.ms ||
 					type.image.depth)
 					return location + " must sample a non-comparison, non-multisampled 2D texture";

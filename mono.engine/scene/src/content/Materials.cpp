@@ -212,7 +212,9 @@ namespace engine::scene {
 					appearance->Shader = core::Name{};
 					appearance->SharedTexture0 = core::Name{};
 					appearance->SharedTexture1 = core::Name{};
-					std::fill(std::begin(appearance->SharedParameters), std::end(appearance->SharedParameters), 0.0f);
+					std::fill(
+						std::begin(appearance->SharedParameters), std::end(appearance->SharedParameters), 0.0f
+					);
 					appearance->SharedParameterMask = 0;
 				}
 			}

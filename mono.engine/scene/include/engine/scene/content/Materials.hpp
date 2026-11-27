@@ -64,11 +64,11 @@
 //
 // @tier L7 · shared
 
-#include <array>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/ClassId.hpp>
 #include <engine/ecs/Entity.hpp>
 
+#include <array>
 #include <cstddef>
 #include <unordered_map>
 #include <vector>

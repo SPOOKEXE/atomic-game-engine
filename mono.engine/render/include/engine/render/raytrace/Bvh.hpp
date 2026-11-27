@@ -115,8 +115,22 @@ namespace engine::render {
 	};
 
 	// Whether a ray meets a box within its range, and where it enters.
-	bool RayBox(const Ray &ray, const glm::vec3 &inverse, const glm::vec3 &minimum, const glm::vec3 &maximum, float &entry);
+	bool RayBox(
+		const Ray &ray,
+		const glm::vec3 &inverse,
+		const glm::vec3 &minimum,
+		const glm::vec3 &maximum,
+		float &entry
+	);
 
 	// Moeller-Trumbore: the distance and barycentrics where a ray meets a triangle.
-	bool RayTriangle(const Ray &ray, const glm::vec3 &a, const glm::vec3 &b, const glm::vec3 &c, float &t, float &u, float &v);
+	bool RayTriangle(
+		const Ray &ray,
+		const glm::vec3 &a,
+		const glm::vec3 &b,
+		const glm::vec3 &c,
+		float &t,
+		float &u,
+		float &v
+	);
 }

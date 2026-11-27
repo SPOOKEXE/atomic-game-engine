@@ -7,9 +7,8 @@
 #include <engine/scene/content/Shaders.hpp>
 #include <engine/testing/Suite.hpp>
 
-#include <catch2/catch_test_macros.hpp>
-
 #include <SDL3/SDL_gpu.h>
+#include <catch2/catch_test_macros.hpp>
 
 #include <cstring>
 #include <imgui.h>
@@ -61,7 +60,8 @@ namespace studio {
 			auto *texture = static_cast<SDL_GPUTexture *>(editor.Renderer.TextureHandle(name));
 			SDL_GPUDevice *device = static_cast<SDL_GPUDevice *>(editor.Renderer.Backend().Device);
 			uint32_t width = 0, height = 0;
-			if (texture == nullptr || device == nullptr || !editor.Renderer.TextureSize(name, width, height) || width == 0)
+			if (texture == nullptr || device == nullptr ||
+				!editor.Renderer.TextureSize(name, width, height) || width == 0)
 				return out;
 			SDL_GPUTransferBufferCreateInfo info{};
 			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
@@ -84,11 +84,13 @@ namespace studio {
 			SDL_WaitForGPUFences(device, true, &fence, 1);
 			SDL_ReleaseGPUFence(device, fence);
 			const auto format = static_cast<SDL_GPUTextureFormat>(editor.Renderer.Backend().ColourFormat);
-			const bool bgra = format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM || format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB;
+			const bool bgra = format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM ||
+							  format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB;
 			out.Width = width;
 			out.Height = height;
 			out.Pixels.resize(size_t(width) * height * 4);
-			if (const auto *mapped = static_cast<const std::byte *>(SDL_MapGPUTransferBuffer(device, transfer, false))) {
+			if (const auto *mapped =
+					static_cast<const std::byte *>(SDL_MapGPUTransferBuffer(device, transfer, false))) {
 				std::memcpy(out.Pixels.data(), mapped, out.Pixels.size());
 				SDL_UnmapGPUTransferBuffer(device, transfer);
 			}
