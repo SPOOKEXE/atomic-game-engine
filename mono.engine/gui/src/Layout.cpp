@@ -2691,21 +2691,6 @@ namespace engine::gui {
 		return placed;
 	}
 
-	Screen ScreenCollectorProfile(const Screen &screen) {
-		if (!ValidDisplay(screen)) {
-			Screen invalid;
-			invalid.Width = 0.0f;
-			invalid.Height = 0.0f;
-			return invalid;
-		}
-		return CollectorProfile(screen);
-	}
-
-	Vector2 ScreenCanvasSize(const Screen &screen) {
-		const Screen logical = ScreenCollectorProfile(screen);
-		return Vector2{logical.Width, logical.Height};
-	}
-
 	Vector2 ScreenPresentationSize(const Screen &screen) {
 		if (!ValidDisplay(screen)) return Vector2::Zero;
 		return Vector2{screen.Width, screen.Height};

@@ -119,20 +119,6 @@ namespace engine::gui {
 	// @since v0.8
 	using Screen = DisplayProfile;
 
-	// The logical canvas owned by a screen collector. Insets in a display
-	// profile are expressed in host logical units, so they cross the collector
-	// transform with the dimensions. Spatial collectors do not use this helper.
-	//
-	// @since v0.25
-	Screen ScreenCollectorProfile(const Screen &screen);
-
-	// The extent a screen draw list uses. It is the same transform
-	// `ScreenCollectorProfile` applies during layout, so a backend and a hit test
-	// receive coordinates from one space.
-	//
-	// @since v0.25
-	core::Vector2 ScreenCanvasSize(const Screen &screen);
-
 	// The host presentation extent before collector transforms are applied.
 	core::Vector2 ScreenPresentationSize(const Screen &screen);
 
