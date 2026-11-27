@@ -642,7 +642,8 @@ orphan-check: build
 # Reads the relocations in every object of the preset's build and walks from
 # each program's `main` and static initialisers. A report, not a gate: some
 # unreached code is kept on purpose. `--list` names every function, `--tests`
-# adds code only tests reach, `--filter mono.engine/render` narrows the output.
+# adds code only tests reach, `--filter mono.engine/render` narrows the output,
+# `--skip-destructors` hides destructors.
 #
 # Only an unoptimised build gives a true answer, because an inlined helper has
 # no call left to find. The dev preset compiles first-party code at -O0.

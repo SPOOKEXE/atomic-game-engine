@@ -319,6 +319,13 @@ namespace deadcode {
 		}
 	}
 
+	bool IsDestructor(const std::string &name) {
+		// The Itanium ABI spells the last name of a destructor D0, D1 or D2,
+		// closing the nested name with `E` and taking no arguments (`v`).
+		return name.starts_with("_Z") &&
+			(name.ends_with("D0Ev") || name.ends_with("D1Ev") || name.ends_with("D2Ev"));
+	}
+
 	std::string Demangle(const std::string &name) {
 		int status = 0;
 		char *readable = abi::__cxa_demangle(name.c_str(), nullptr, nullptr, &status);

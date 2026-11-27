@@ -134,6 +134,7 @@ int main(int argc, char **argv) {
 	arguments.Flag("list", "Print every function under its source, not just the counts");
 	arguments.Flag("tests", "Also report functions only tests reach");
 	arguments.Value("filter", "TEXT", "Only report sources whose path contains TEXT");
+	arguments.Flag("skip-destructors", "Leave destructors out of the report");
 	arguments.Flag("fail", "Exit 1 when anything is dead");
 
 	const auto parsed = arguments.Parse(argc, argv);
@@ -238,6 +239,19 @@ int main(int argc, char **argv) {
 		auto drop = [&](std::vector<deadcode::Function> &functions) {
 			std::erase_if(functions, [&](const deadcode::Function &function) {
 				return function.Source.find(*filter) == std::string::npos;
+			});
+		};
+		drop(analysis.Dead);
+		drop(analysis.TestOnly);
+	}
+
+	// Many unreached destructors are a variant the compiler emits beside the
+	// one in use (the deleting or the complete-object form), not a class
+	// nobody destroys. This hides them all when that noise is not wanted.
+	if (arguments.Has("skip-destructors")) {
+		auto drop = [](std::vector<deadcode::Function> &functions) {
+			std::erase_if(functions, [](const deadcode::Function &function) {
+				return deadcode::IsDestructor(function.Name);
 			});
 		};
 		drop(analysis.Dead);

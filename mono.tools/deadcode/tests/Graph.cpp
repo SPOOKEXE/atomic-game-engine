@@ -150,6 +150,14 @@ TEST_CASE("library code instantiated in a first-party object is not reported", "
 	REQUIRE(Names(analysis.Dead) == std::vector<std::string>{"_ZN4game4DeadEv"});
 }
 
+TEST_CASE("destructors are recognised in every emitted form", "[deadcode]") {
+	REQUIRE(IsDestructor("_ZN4game6ServerD0Ev"));
+	REQUIRE(IsDestructor("_ZN4game6ServerD1Ev"));
+	REQUIRE(IsDestructor("_ZN4game6ServerD2Ev"));
+	REQUIRE_FALSE(IsDestructor("_ZN4game6Server4StopEv"));
+	REQUIRE_FALSE(IsDestructor("_ZN4game6ServerC1Ev"));
+}
+
 TEST_CASE("an object with two functions in one section is flagged", "[deadcode]") {
 	Fake one;
 	one.Function("alone");

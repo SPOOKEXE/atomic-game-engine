@@ -76,6 +76,9 @@ namespace deadcode {
 	// `-ffunction-sections` and its graph would be missing edges.
 	bool SharesCodeSection(const ObjectFile &object);
 
+	// True for a mangled C++ destructor, in any of its emitted forms.
+	bool IsDestructor(const std::string &name);
+
 	// The readable form of a mangled C++ name, or the name itself when it is
 	// not one.
 	std::string Demangle(const std::string &name);
