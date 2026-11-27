@@ -203,21 +203,29 @@ int main(int argc, char **argv) {
 		return static_cast<int>(a.Kind) < static_cast<int>(b.Kind);
 	});
 
+	// An object with several functions in one section hides the calls
+	// between them, so its live code can look dead. One odd target (a fixture
+	// built with its own flags) is named and kept; a whole build like that is
+	// the wrong build and is refused, because a long wrong list reads exactly
+	// like a long right one.
 	size_t ship = 0;
-	size_t coarse = 0;
+	std::vector<std::string> coarse;
 	for (const deadcode::Input &input : inputs) {
 		if (input.Kind == deadcode::Role::Ship) {
 			ship += 1;
-			coarse += deadcode::SharesCodeSection(input.Object) ? 1 : 0;
+			if (deadcode::SharesCodeSection(input.Object)) {
+				coarse.push_back(input.Source);
+			}
 		}
 	}
-	// Refused rather than reported: missing edges make live code look dead,
-	// and a long wrong list reads exactly like a long right one.
-	if (coarse > 0) {
-		std::cerr << "deadcode: " << coarse << " object(s) under " << build.string()
+	if (!coarse.empty() && coarse.size() * 10 > ship) {
+		std::cerr << "deadcode: " << coarse.size() << " of " << ship << " object(s) under " << build.string()
 				  << " put several functions in one section, so calls between them are invisible.\n"
 				  << "Use an unoptimised build, which compiles with -ffunction-sections.\n";
 		return 1;
+	}
+	for (const std::string &source : coarse) {
+		std::cerr << "deadcode: " << source << " shares code sections, so its results may list live code\n";
 	}
 	if (ship == 0) {
 		std::cerr << "deadcode: no first-party objects under " << build.string() << "\n";

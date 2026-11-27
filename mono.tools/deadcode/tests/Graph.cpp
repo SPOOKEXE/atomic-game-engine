@@ -135,6 +135,19 @@ TEST_CASE("an inline function emitted by many objects is reported once", "[deadc
 	REQUIRE(Demangle(analysis.Dead[0].Name) == "inline()");
 }
 
+TEST_CASE("library code instantiated in a first-party object is not reported", "[deadcode]") {
+	Fake program;
+	program.Function("main");
+	program.Function("_ZNSt6vectorIiE9push_backEv", WEAK);
+	program.Function("_ZN8nlohmann6detail8unescapeEv", 0);
+	program.Function("_ZdlPvm");
+	program.Function("_ZN4game4DeadEv");
+
+	const Analysis analysis = Analyse({{"a.cpp", Role::Ship, program.Object}});
+
+	REQUIRE(Names(analysis.Dead) == std::vector<std::string>{"_ZN4game4DeadEv"});
+}
+
 TEST_CASE("an object with two functions in one section is flagged", "[deadcode]") {
 	Fake one;
 	one.Function("alone");

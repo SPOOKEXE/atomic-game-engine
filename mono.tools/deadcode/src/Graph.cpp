@@ -162,10 +162,19 @@ namespace deadcode {
 					}
 				}
 			}
-			for (std::vector<Span> &spans : nodes.BySection) {
+			for (size_t section = 0; section < nodes.BySection.size(); ++section) {
+				std::vector<Span> &spans = nodes.BySection[section];
 				std::sort(spans.begin(), spans.end(), [](const Span &a, const Span &b) {
 					return a.Start < b.Start;
 				});
+				// A virtual-call thunk shares its target's section and jumps to
+				// it without a relocation. Under `-ffunction-sections` that is
+				// the only way two functions share one, so they live together.
+				if (file.Sections[section].Name.starts_with(".text.")) {
+					for (size_t i = 1; i < spans.size(); ++i) {
+						graph.Join(spans[0].Node, spans[i].Node);
+					}
+				}
 			}
 
 			for (const RelocationSet &set : file.Relocations) {
@@ -251,6 +260,48 @@ namespace deadcode {
 		}
 	}
 
+	namespace {
+
+		// Code that belongs to a library and only got emitted here: the
+		// standard library and header-only vendors instantiated inside a
+		// first-party object, and the replaceable allocation functions the
+		// runtime calls by itself. When one of these is dead it is because a
+		// first-party caller is, and that caller is already reported.
+		bool Library(std::string_view name) {
+			if (name.starts_with("_Znw") || name.starts_with("_Zna") || name.starts_with("_Zdl") ||
+				name.starts_with("_Zda")) {
+				return true;
+			}
+			if (!name.starts_with("_Z")) {
+				return false;
+			}
+			name.remove_prefix(2);
+			if (name.starts_with("N")) {
+				name.remove_prefix(1);
+				while (!name.empty() && (name[0] == 'K' || name[0] == 'V' || name[0] == 'r' || name[0] == 'R' ||
+					name[0] == 'O')) {
+					name.remove_prefix(1);
+				}
+			}
+			if (name.starts_with("St") || name.starts_with("Sa") || name.starts_with("Sb") ||
+				name.starts_with("Ss") || name.starts_with("Si") || name.starts_with("So") ||
+				name.starts_with("Sd")) {
+				return true;
+			}
+			size_t length = 0;
+			size_t digits = 0;
+			while (digits < name.size() && name[digits] >= '0' && name[digits] <= '9') {
+				length = length * 10 + size_t(name[digits] - '0');
+				digits += 1;
+			}
+			if (digits == 0 || digits + length > name.size()) {
+				return false;
+			}
+			const std::string_view first = name.substr(digits, length);
+			return first == "nlohmann" || first == "__gnu_cxx" || first == "__cxxabiv1";
+		}
+	}
+
 	std::string Demangle(const std::string &name) {
 		int status = 0;
 		char *readable = abi::__cxa_demangle(name.c_str(), nullptr, nullptr, &status);
@@ -268,7 +319,10 @@ namespace deadcode {
 		// address is the same body, not a second function.
 		std::vector<uint64_t> first(object.Sections.size(), UINT64_MAX);
 		for (const Symbol &symbol : object.Symbols) {
-			if (symbol.Type != SYMBOL_FUNC || symbol.Size == 0 || symbol.Section == SECTION_UNDEFINED ||
+			// Thunks sit in their target's section on purpose; see Analyse.
+			const bool thunk = symbol.Name.starts_with("_ZTh") || symbol.Name.starts_with("_ZTv") ||
+				symbol.Name.starts_with("_ZTc");
+			if (thunk || symbol.Type != SYMBOL_FUNC || symbol.Size == 0 || symbol.Section == SECTION_UNDEFINED ||
 				symbol.Section >= first.size()) {
 				continue;
 			}
@@ -313,7 +367,7 @@ namespace deadcode {
 			if (!node.Weak) {
 				analysis.FunctionsPerSource[source] += 1;
 			}
-			if (shipped[i]) {
+			if (shipped[i] || Library(node.Name)) {
 				continue;
 			}
 			Function function{source, node.Name, node.Size, node.Weak};
