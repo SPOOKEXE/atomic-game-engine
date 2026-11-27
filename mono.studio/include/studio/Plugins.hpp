@@ -1071,7 +1071,7 @@ namespace studio {
 	std::vector<engine::ecs::Entity> BuildPluginInstances(LoadedPlugin &plugin, engine::ecs::Store &store);
 
 	// Resolves a plugin's `require("./path")` over its instance tree, with
-	// Luau's require-by-string rule: `./` and `../` start at the requiring
+	// Luau's require-by-string rule: a leading dot or two dots start at the requiring
 	// script's parent, `@self/` at the script itself. A path that would leave
 	// the `Plugin` instance is refused with a message naming the plugin.
 	//

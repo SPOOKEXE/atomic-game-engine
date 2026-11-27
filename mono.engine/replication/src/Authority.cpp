@@ -140,20 +140,27 @@ namespace engine::replication {
 
 		// **Stable, and that is what keeps an existing row.** Everything already
 		// here was in front of everything appended, so a stable sort leaves a
-		// duplicate's existing copy first and `unique` keeps the first of a run.
+		// duplicate's existing copy first and the merge keeps the first of a run.
 		// An assigning insert would restart the clock on a value genuinely in
 		// flight, which is `Emplace`'s rule and has to survive the bulk form.
+		//
+		// The kept row still becomes `Initial`. An appearing entity has no value
+		// on the client yet, so a row a change listed earlier this tick is its
+		// first value too. Left ordinary, it sorts behind every initial row of
+		// every other component, and 20000 parts named on the tick they were
+		// created waited over 200 ticks for their names.
 		std::stable_sort(Rows.begin(), Rows.end(), [](const Row &left, const Row &right) {
 			return left.Entity < right.Entity;
 		});
-		Rows.erase(
-			std::unique(
-				Rows.begin(),
-				Rows.end(),
-				[](const Row &left, const Row &right) { return left.Entity == right.Entity; }
-			),
-			Rows.end()
-		);
+		size_t kept = 0;
+		for (size_t index = 0; index < Rows.size(); index++) {
+			if (kept > 0 && Rows[kept - 1].Entity == Rows[index].Entity) {
+				Rows[kept - 1].Value.Initial = Rows[kept - 1].Value.Initial || Rows[index].Value.Initial;
+				continue;
+			}
+			Rows[kept++] = Rows[index];
+		}
+		Rows.resize(kept);
 	}
 
 	void Authority::OutstandingSet::Erase(uint64_t entity) {

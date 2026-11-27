@@ -3,6 +3,7 @@
 #include <engine/ecs/TypeDescriptor.hpp>
 #include <engine/replication/Defaults.hpp>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -613,6 +614,13 @@ namespace engine::replication {
 					}
 				);
 			}
+			// What an instance is goes first. A new entity's first values cross
+			// one component at a time in this order, and a part with every
+			// surface but no name or parent is not yet an instance a script can
+			// find.
+			std::stable_partition(found.begin(), found.end(), [](const ReplicatedComponent &component) {
+				return PartOfAnInstance(component.Name);
+			});
 			return found;
 		}();
 		return table;
