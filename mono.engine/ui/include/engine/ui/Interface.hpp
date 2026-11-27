@@ -37,7 +37,6 @@
 
 #include <engine/core/types/Vector2.hpp>
 #include <engine/gui/DrawList.hpp>
-
 #include <engine/render/Renderer.hpp>
 
 #include <cstdint>

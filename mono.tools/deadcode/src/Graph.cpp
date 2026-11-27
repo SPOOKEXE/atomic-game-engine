@@ -1,8 +1,7 @@
-#include <deadcode/Graph.hpp>
-
 #include <algorithm>
 #include <cstdlib>
 #include <cxxabi.h>
+#include <deadcode/Graph.hpp>
 #include <numeric>
 #include <string_view>
 #include <unordered_map>
@@ -19,14 +18,15 @@ namespace deadcode {
 		// them alive.
 		bool Ignored(std::string_view name) {
 			return name.starts_with(".debug") || name.starts_with(".eh_frame") || name.starts_with(".note") ||
-				name.starts_with(".comment") || name.starts_with(".gcc_except_table") ||
-				name.starts_with(".rela") || name.starts_with(".llvm");
+				   name.starts_with(".comment") || name.starts_with(".gcc_except_table") ||
+				   name.starts_with(".rela") || name.starts_with(".llvm");
 		}
 
 		// Sections the loader runs on its own. Whatever they name is a root.
 		bool RunsAtStartup(std::string_view name) {
 			return name.starts_with(".init_array") || name.starts_with(".fini_array") ||
-				name.starts_with(".preinit_array") || name.starts_with(".ctors") || name.starts_with(".dtors");
+				   name.starts_with(".preinit_array") || name.starts_with(".ctors") ||
+				   name.starts_with(".dtors");
 		}
 
 		struct Node {
@@ -102,9 +102,10 @@ namespace deadcode {
 				return SIZE_MAX;
 			}
 			const std::vector<Span> &spans = nodes.BySection[section];
-			auto after = std::upper_bound(spans.begin(), spans.end(), offset, [](uint64_t value, const Span &span) {
-				return value < span.Start;
-			});
+			auto after =
+				std::upper_bound(spans.begin(), spans.end(), offset, [](uint64_t value, const Span &span) {
+					return value < span.Start;
+				});
 			if (after != spans.begin()) {
 				const Span &span = *(after - 1);
 				if (offset < span.End || (span.Start == span.End && offset == span.Start)) {
@@ -131,8 +132,9 @@ namespace deadcode {
 			std::map<std::pair<uint16_t, uint64_t>, size_t> byAddress;
 			for (size_t i = 0; i < file.Symbols.size(); ++i) {
 				const Symbol &symbol = file.Symbols[i];
-				const bool defined = symbol.Section != SECTION_UNDEFINED && symbol.Section < SECTION_RESERVED &&
-					symbol.Section < file.Sections.size();
+				const bool defined = symbol.Section != SECTION_UNDEFINED &&
+									 symbol.Section < SECTION_RESERVED &&
+									 symbol.Section < file.Sections.size();
 				if (!defined || (symbol.Type != SYMBOL_FUNC && symbol.Type != SYMBOL_OBJECT)) {
 					continue;
 				}
@@ -140,9 +142,13 @@ namespace deadcode {
 				auto found = byAddress.find(key);
 				size_t node = 0;
 				if (found == byAddress.end()) {
-					node = graph.Add({object, symbol.Name, symbol.Size, symbol.Type == SYMBOL_FUNC, symbol.Bind == 2});
+					node = graph.Add(
+						{object, symbol.Name, symbol.Size, symbol.Type == SYMBOL_FUNC, symbol.Bind == 2}
+					);
 					byAddress.emplace(key, node);
-					nodes.BySection[symbol.Section].push_back({symbol.Value, symbol.Value + symbol.Size, node});
+					nodes.BySection[symbol.Section].push_back(
+						{symbol.Value, symbol.Value + symbol.Size, node}
+					);
 				} else {
 					node = found->second;
 					// Prefer the global spelling, which is the one a reader
@@ -198,9 +204,11 @@ namespace deadcode {
 						// A section-relative reference. PC-relative forms carry
 						// the distance to the end of the 4-byte field, so the
 						// place they mean is 4 bytes on.
-						const bool relative = relocation.Type == R_X86_64_PC32 || relocation.Type == R_X86_64_PLT32;
+						const bool relative =
+							relocation.Type == R_X86_64_PC32 || relocation.Type == R_X86_64_PLT32;
 						const int64_t place = relocation.Addend + (relative ? 4 : 0);
-						target.Node = Cover(graph, nodes, object, symbol.Section, place < 0 ? 0 : uint64_t(place));
+						target.Node =
+							Cover(graph, nodes, object, symbol.Section, place < 0 ? 0 : uint64_t(place));
 					} else if (symbol.Bind != BIND_LOCAL) {
 						target.Name = symbol.Name;
 					} else if (nodes.BySymbol[relocation.Symbol] != SIZE_MAX) {
@@ -286,8 +294,8 @@ namespace deadcode {
 			}
 			if (name.starts_with("N")) {
 				name.remove_prefix(1);
-				while (!name.empty() && (name[0] == 'K' || name[0] == 'V' || name[0] == 'r' || name[0] == 'R' ||
-					name[0] == 'O')) {
+				while (!name.empty() && (name[0] == 'K' || name[0] == 'V' || name[0] == 'r' ||
+										 name[0] == 'R' || name[0] == 'O')) {
 					name.remove_prefix(1);
 				}
 			}
@@ -306,7 +314,9 @@ namespace deadcode {
 				return false;
 			}
 			const std::string_view first = name.substr(digits, length);
-			static constexpr std::string_view VENDORS[] = {"nlohmann", "__gnu_cxx", "__cxxabiv1", "CryptoPP", "asio"};
+			static constexpr std::string_view VENDORS[] = {
+				"nlohmann", "__gnu_cxx", "__cxxabiv1", "CryptoPP", "asio"
+			};
 			for (const std::string_view vendor : VENDORS) {
 				if (first == vendor) {
 					return true;
@@ -314,8 +324,9 @@ namespace deadcode {
 			}
 			// stb's implementation headers, compiled as C++ with internal
 			// linkage, all prefix their names.
-			return first.starts_with("stb") || first == "ttLONG" || first == "ttULONG" || first == "ttSHORT" ||
-				first == "ttUSHORT" || first == "ttBYTE" || first == "ttCHAR" || first == "ttFixed";
+			return first.starts_with("stb") || first == "ttLONG" || first == "ttULONG" ||
+				   first == "ttSHORT" || first == "ttUSHORT" || first == "ttBYTE" || first == "ttCHAR" ||
+				   first == "ttFixed";
 		}
 	}
 
@@ -323,7 +334,7 @@ namespace deadcode {
 		// The Itanium ABI spells the last name of a destructor D0, D1 or D2,
 		// closing the nested name with `E` and taking no arguments (`v`).
 		return name.starts_with("_Z") &&
-			(name.ends_with("D0Ev") || name.ends_with("D1Ev") || name.ends_with("D2Ev"));
+			   (name.ends_with("D0Ev") || name.ends_with("D1Ev") || name.ends_with("D2Ev"));
 	}
 
 	std::string Demangle(const std::string &name) {
@@ -345,9 +356,9 @@ namespace deadcode {
 		for (const Symbol &symbol : object.Symbols) {
 			// Thunks sit in their target's section on purpose; see Analyse.
 			const bool thunk = symbol.Name.starts_with("_ZTh") || symbol.Name.starts_with("_ZTv") ||
-				symbol.Name.starts_with("_ZTc");
-			if (thunk || symbol.Type != SYMBOL_FUNC || symbol.Size == 0 || symbol.Section == SECTION_UNDEFINED ||
-				symbol.Section >= first.size()) {
+							   symbol.Name.starts_with("_ZTc");
+			if (thunk || symbol.Type != SYMBOL_FUNC || symbol.Size == 0 ||
+				symbol.Section == SECTION_UNDEFINED || symbol.Section >= first.size()) {
 				continue;
 			}
 			uint64_t &address = first[symbol.Section];

@@ -30,9 +30,8 @@
 //
 // @tier L0 · shared
 
-#include <deadcode/Elf.hpp>
-
 #include <cstdint>
+#include <deadcode/Elf.hpp>
 #include <map>
 #include <string>
 #include <vector>

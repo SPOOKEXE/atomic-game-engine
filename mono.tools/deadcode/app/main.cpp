@@ -1,10 +1,9 @@
 #include <engine/core/Arguments.hpp>
 
-#include <deadcode/Elf.hpp>
-#include <deadcode/Graph.hpp>
-
 #include <algorithm>
 #include <cstdio>
+#include <deadcode/Elf.hpp>
+#include <deadcode/Graph.hpp>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -52,8 +51,9 @@ namespace {
 		rest.resize(rest.size() - 2);
 
 		out.Source = relative.substr(0, files) + "/" + rest;
-		const bool test = target.starts_with("test_") || target == "mono_testmain" || target == "mono_suites" ||
-			rest.starts_with("tests/") || rest.starts_with("fuzz/") || rest.starts_with("fault/");
+		const bool test = target.starts_with("test_") || target == "mono_testmain" ||
+						  target == "mono_suites" || rest.starts_with("tests/") ||
+						  rest.starts_with("fuzz/") || rest.starts_with("fault/");
 		out.Kind = test ? deadcode::Role::Test : deadcode::Role::Ship;
 		return true;
 	}
@@ -69,8 +69,12 @@ namespace {
 		return true;
 	}
 
-	void PrintGroup(const char *heading, const std::vector<deadcode::Function> &functions,
-		const std::map<std::string, size_t> &perSource, bool list) {
+	void PrintGroup(
+		const char *heading,
+		const std::vector<deadcode::Function> &functions,
+		const std::map<std::string, size_t> &perSource,
+		bool list
+	) {
 		std::map<std::string, std::vector<const deadcode::Function *>> bySource;
 		uint64_t bytes = 0;
 		for (const deadcode::Function &function : functions) {
@@ -92,8 +96,14 @@ namespace {
 			(all ? whole : partial).push_back(source);
 		}
 
-		std::printf("%s: %zu function(s), %llu bytes, in %zu source(s), %zu of them entirely\n", heading,
-			functions.size(), static_cast<unsigned long long>(bytes), bySource.size(), whole.size());
+		std::printf(
+			"%s: %zu function(s), %llu bytes, in %zu source(s), %zu of them entirely\n",
+			heading,
+			functions.size(),
+			static_cast<unsigned long long>(bytes),
+			bySource.size(),
+			whole.size()
+		);
 
 		auto print = [&](const std::string &source, bool entire) {
 			const auto &entries = bySource[source];
@@ -101,15 +111,22 @@ namespace {
 			if (entire) {
 				std::printf("  %s  whole file, %zu function(s)\n", source.c_str(), total->second);
 			} else {
-				std::printf("  %s  %zu of %zu\n", source.c_str(), entries.size(),
-					total == perSource.end() ? entries.size() : total->second);
+				std::printf(
+					"  %s  %zu of %zu\n",
+					source.c_str(),
+					entries.size(),
+					total == perSource.end() ? entries.size() : total->second
+				);
 			}
 			if (!list) {
 				return;
 			}
 			for (const deadcode::Function *function : entries) {
-				std::printf("      %s%s\n", deadcode::Demangle(function->Name).c_str(),
-					function->Inline ? "  [inline]" : "");
+				std::printf(
+					"      %s%s\n",
+					deadcode::Demangle(function->Name).c_str(),
+					function->Inline ? "  [inline]" : ""
+				);
 			}
 		};
 		for (const std::string &source : whole) {

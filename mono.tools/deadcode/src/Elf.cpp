@@ -1,6 +1,5 @@
-#include <deadcode/Elf.hpp>
-
 #include <cstring>
+#include <deadcode/Elf.hpp>
 
 namespace deadcode {
 
@@ -51,7 +50,12 @@ namespace deadcode {
 		out = {};
 		Reader read{bytes};
 
-		if (bytes.size() < 64 || std::memcmp(bytes.data(), "\x7f" "ELF", 4) != 0) {
+		if (bytes.size() < 64 || std::memcmp(
+									 bytes.data(),
+									 "\x7f"
+									 "ELF",
+									 4
+								 ) != 0) {
 			error = "not an ELF file";
 			return false;
 		}

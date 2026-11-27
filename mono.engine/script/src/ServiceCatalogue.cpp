@@ -140,7 +140,10 @@ namespace engine::script {
 			 SoundServiceSurface},
 
 			// Read only, so it needs nothing beyond the world grant.
-			{{"PhysicsService", ServiceAvailability::Always, ServiceLanguages::Both, ScriptCapabilities::World},
+			{{"PhysicsService",
+			  ServiceAvailability::Always,
+			  ServiceLanguages::Both,
+			  ScriptCapabilities::World},
 			 PhysicsServiceSurface},
 
 			// --- the four that stopped being Luau's at v0.16 --------------------

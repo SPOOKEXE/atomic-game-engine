@@ -25,7 +25,9 @@ namespace {
 		CollisionGroups::Reset();
 		CollisionGroups::Register("Players");
 		CollisionGroups::Register("Projectiles");
-		CollisionGroups::SetCollidable(engine::core::Name("Players"), engine::core::Name("Projectiles"), false);
+		CollisionGroups::SetCollidable(
+			engine::core::Name("Players"), engine::core::Name("Projectiles"), false
+		);
 	}
 }
 
