@@ -2854,6 +2854,15 @@
 			"constants": []
 		},
 		{
+			"name": "PhysicsService",
+			"members": [
+				{"kind":"property","name":"CollisionGroupCount","type":"number","writable":false},
+				{"kind":"method","name":"GetCollisionGroup","parameters":[{"name":"name","type":"string"}],"returns":"CollisionGroup?"},
+				{"kind":"method","name":"GetCollisionGroups","parameters":[],"returns":"{CollisionGroup}"}
+			],
+			"tags": ["Service"]
+		},
+		{
 			"name": "PointerSignal",
 			"tags": ["Signal"],
 			"members": [
@@ -4232,6 +4241,13 @@
 			"languages": ["luau","javascript"]
 		},
 		{
+			"name": "PhysicsService",
+			"type": "PhysicsService",
+			"capabilities": ["world"],
+			"availability": "always",
+			"languages": ["luau","javascript"]
+		},
+		{
 			"name": "Players",
 			"type": "Players",
 			"capabilities": [],
@@ -4542,6 +4558,11 @@
 			"datatype": "NumberSequenceKeypoint"
 		},
 		{
+			"name": "PhysicsService",
+			"kind": "value",
+			"type": "PhysicsService"
+		},
+		{
 			"name": "ProceduralService",
 			"kind": "value",
 			"type": "ProceduralService"
@@ -4740,6 +4761,13 @@
 		{
 			"name": "BusStatus",
 			"type": "\"Conflict\" | \"NoSuchChannel\" | \"NoSuchWorld\" | \"NotFound\" | \"Ok\" | \"OverBudget\" | \"Overflow\" | \"TooManyChannels\" | \"Unknown\" | \"Unsupported\" | \"WorldNotReady\""
+		},
+		{
+			"name": "CollisionGroup",
+			"fields": [
+				{"name":"CollidesWith","type":"{string}"},
+				{"name":"Name","type":"string"}
+			]
 		},
 		{
 			"name": "ComputeAccess",
@@ -4995,7 +5023,7 @@
 		{
 			"name": "DataModel",
 			"fields": [
-				{"name":"GetService","type":"<T>(self: DataModel, service: (\"ChangeHistoryService\" | \"CollectionService\" | \"ComputeService\" | \"ContentService\" | \"ContextActionService\" | \"CrossWorldService\" | \"DataSceneService\" | \"DataStoreService\" | \"Debris\" | \"HttpService\" | \"Lighting\" | \"MemoryStoreService\" | \"MessagingService\" | \"NodeGraphService\" | \"Players\" | \"ProceduralService\" | \"ReplicatedFirst\" | \"ReplicatedStorage\" | \"RunService\" | \"Selection\" | \"ServerScriptService\" | \"ServerStorage\" | \"SettingsService\" | \"SoundService\" | \"StarterCharacterScripts\" | \"StarterGui\" | \"StarterPack\" | \"StarterPlayer\" | \"StarterPlayerScripts\" | \"Teams\" | \"TeleportService\" | \"TweenService\" | \"UpdateCadenceService\" | \"UserInputService\" | \"Workspace\") & T) -> index<Services, T>"},
+				{"name":"GetService","type":"<T>(self: DataModel, service: (\"ChangeHistoryService\" | \"CollectionService\" | \"ComputeService\" | \"ContentService\" | \"ContextActionService\" | \"CrossWorldService\" | \"DataSceneService\" | \"DataStoreService\" | \"Debris\" | \"HttpService\" | \"Lighting\" | \"MemoryStoreService\" | \"MessagingService\" | \"NodeGraphService\" | \"PhysicsService\" | \"Players\" | \"ProceduralService\" | \"ReplicatedFirst\" | \"ReplicatedStorage\" | \"RunService\" | \"Selection\" | \"ServerScriptService\" | \"ServerStorage\" | \"SettingsService\" | \"SoundService\" | \"StarterCharacterScripts\" | \"StarterGui\" | \"StarterPack\" | \"StarterPlayer\" | \"StarterPlayerScripts\" | \"Teams\" | \"TeleportService\" | \"TweenService\" | \"UpdateCadenceService\" | \"UserInputService\" | \"Workspace\") & T) -> index<Services, T>"},
 				{"name":"JobId","type":"string"},
 				{"name":"Workspace","type":"Workspace"}
 			]
@@ -5373,6 +5401,7 @@
 				{"name":"MemoryStoreService","type":"MemoryStoreService"},
 				{"name":"MessagingService","type":"MessagingService"},
 				{"name":"NodeGraphService","type":"NodeGraphService"},
+				{"name":"PhysicsService","type":"PhysicsService"},
 				{"name":"Players","type":"Players"},
 				{"name":"ProceduralService","type":"ProceduralService"},
 				{"name":"ReplicatedFirst","type":"ReplicatedFirst"},

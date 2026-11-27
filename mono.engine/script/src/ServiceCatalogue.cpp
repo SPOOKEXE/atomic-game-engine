@@ -42,7 +42,7 @@ namespace engine::script {
 		// studio row installs after the debugger pointer is set and before
 		// `luaL_sandbox` freezes the globals - which is why it is walked in a
 		// second pass rather than moved up the list.
-		constexpr std::array<Row, 20> ROWS{{
+		constexpr std::array<Row, 21> ROWS{{
 			// --- the bus, which is the only route out of a world ---------------
 			//
 			// **All four described once since v0.16, and the last of them is what
@@ -138,6 +138,10 @@ namespace engine::script {
 
 			{{"SoundService", ServiceAvailability::Always, ServiceLanguages::Both, ScriptCapabilities::Audio},
 			 SoundServiceSurface},
+
+			// Read only, so it needs nothing beyond the world grant.
+			{{"PhysicsService", ServiceAvailability::Always, ServiceLanguages::Both, ScriptCapabilities::World},
+			 PhysicsServiceSurface},
 
 			// --- the four that stopped being Luau's at v0.16 --------------------
 			//

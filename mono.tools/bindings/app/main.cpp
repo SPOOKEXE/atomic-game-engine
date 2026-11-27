@@ -2337,11 +2337,33 @@ declare ComputeService: ComputeService
 declare UpdateCadenceService: UpdateCadenceService
 declare NodeGraphService: NodeGraphService
 declare ProceduralService: ProceduralService
+-- One collision group's properties, as `PhysicsService` hands them back. A
+-- record and not a live object: read it again to see a later change.
+export type CollisionGroup = {
+	Name: string,
+	-- Every group this one collides with, itself included when it does.
+	CollidesWith: { string },
+}
+
+-- Collision groups, read only. Registration and the collide matrix are set by
+-- C++ and Studio, because the registry is shared by every world.
+declare extern type PhysicsService with
+	-- How many groups are registered, at least one: `Default` always exists.
+	read CollisionGroupCount: number
+
+	-- The named group, or nil when nothing registered it.
+	function GetCollisionGroup(self, name: string): CollisionGroup?
+
+	-- Every group, in registration order, `Default` first.
+	function GetCollisionGroups(self): { CollisionGroup }
+end
+
 declare DataSceneService: DataSceneService
 declare ContentService: ContentService
 declare CollectionService: CollectionService
 declare HttpService: HttpService
 declare SoundService: SoundService
+declare PhysicsService: PhysicsService
 declare TweenService: TweenService
 declare Debris: Debris
 
@@ -3360,6 +3382,7 @@ declare task: {
 		// property survives, since a bare global read is a `GETIMPORT` - a
 		// typecheck error.
 		out << "\tSoundService: SoundService,\n";
+		out << "\tPhysicsService: PhysicsService,\n";
 		out << "\tUserInputService: UserInputServiceType,\n";
 		out << "\tMemoryStoreService: MemoryStoreService,\n";
 		out << "\tDataStoreService: DataStoreService,\n";
@@ -3791,6 +3814,27 @@ declare interface SoundService {
 	// position with no facing, so they are absent from the enum rather than
 	// refused by this method.
 	SetListener(listenerType: Enum.ListenerType, listener?: Instance | null): void;
+}
+
+// One collision group's properties, as `PhysicsService` hands them back. A
+// record and not a live object: read it again to see a later change.
+declare interface CollisionGroup {
+	Name: string;
+	// Every group this one collides with, itself included when it does.
+	CollidesWith: string[];
+}
+
+// Collision groups, read only. Registration and the collide matrix are set by
+// C++ and Studio, because the registry is shared by every world.
+declare interface PhysicsService {
+	// How many groups are registered, at least one: `Default` always exists.
+	readonly CollisionGroupCount: number;
+
+	// The named group, or null when nothing registered it.
+	GetCollisionGroup(name: string): CollisionGroup | null;
+
+	// Every group, in registration order, `Default` first.
+	GetCollisionGroups(): CollisionGroup[];
 }
 
 declare type EngineAttribute =
@@ -4928,6 +4972,7 @@ declare const ContextActionService: ContextActionService;
 declare const SettingsService: SettingsService;
 declare const UserInputService: UserInputService;
 declare const SoundService: SoundService;
+declare const PhysicsService: PhysicsService;
 
 // The world this script runs on. `game` is the universe above it.
 declare const workspace: Workspace;
@@ -5653,6 +5698,7 @@ declare const task: {
 		out << "\t\t(service: \"ContextActionService\"): ContextActionService;\n";
 		out << "\t\t(service: \"UserInputService\"): UserInputService;\n";
 		out << "\t\t(service: \"SoundService\"): SoundService;\n";
+		out << "\t\t(service: \"PhysicsService\"): PhysicsService;\n";
 
 		// Studio's selection, a plugin host global that `GetService` finds first.
 		out << "\t\t(service: \"Selection\"): SelectionService;\n";

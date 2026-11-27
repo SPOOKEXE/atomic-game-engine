@@ -379,6 +379,27 @@ declare interface SoundService {
 	SetListener(listenerType: Enum.ListenerType, listener?: Instance | null): void;
 }
 
+// One collision group's properties, as `PhysicsService` hands them back. A
+// record and not a live object: read it again to see a later change.
+declare interface CollisionGroup {
+	Name: string;
+	// Every group this one collides with, itself included when it does.
+	CollidesWith: string[];
+}
+
+// Collision groups, read only. Registration and the collide matrix are set by
+// C++ and Studio, because the registry is shared by every world.
+declare interface PhysicsService {
+	// How many groups are registered, at least one: `Default` always exists.
+	readonly CollisionGroupCount: number;
+
+	// The named group, or null when nothing registered it.
+	GetCollisionGroup(name: string): CollisionGroup | null;
+
+	// Every group, in registration order, `Default` first.
+	GetCollisionGroups(): CollisionGroup[];
+}
+
 declare type EngineAttribute =
 	| boolean
 	| number
@@ -3833,6 +3854,7 @@ declare const ContextActionService: ContextActionService;
 declare const SettingsService: SettingsService;
 declare const UserInputService: UserInputService;
 declare const SoundService: SoundService;
+declare const PhysicsService: PhysicsService;
 
 // The world this script runs on. `game` is the universe above it.
 declare const workspace: Workspace;
@@ -3990,6 +4012,7 @@ declare const game: {
 		(service: "ContextActionService"): ContextActionService;
 		(service: "UserInputService"): UserInputService;
 		(service: "SoundService"): SoundService;
+		(service: "PhysicsService"): PhysicsService;
 		(service: "Selection"): SelectionService;
 	};
 };

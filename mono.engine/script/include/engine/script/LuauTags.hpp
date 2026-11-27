@@ -138,5 +138,9 @@ namespace engine::script {
 
 		// `DateTime`, an `int64_t` of Unix milliseconds.
 		TAG_DATETIME = 29,
+
+		// `PhysicsService`, a userdata for `TAG_INPUT_SERVICE`'s reason: its
+		// `CollisionGroupCount` changes as groups register. No payload.
+		TAG_PHYSICS_SERVICE = 30,
 	};
 }

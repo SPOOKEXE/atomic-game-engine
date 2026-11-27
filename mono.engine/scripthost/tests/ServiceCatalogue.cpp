@@ -315,6 +315,7 @@ TEST_CASE("every service member is reachable in both languages", "[scripting][se
 		  "WindowFocusReleased",
 		  "LastInputTypeChanged"}},
 		{"SoundService", {"GetListener", "SetListener"}, {"Volume"}},
+		{"PhysicsService", {"GetCollisionGroup", "GetCollisionGroups"}, {"CollisionGroupCount"}},
 		{"ContextActionService",
 		 {"BindAction",
 		  "BindActionAtPriority",

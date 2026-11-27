@@ -4277,11 +4277,33 @@ declare ComputeService: ComputeService
 declare UpdateCadenceService: UpdateCadenceService
 declare NodeGraphService: NodeGraphService
 declare ProceduralService: ProceduralService
+-- One collision group's properties, as `PhysicsService` hands them back. A
+-- record and not a live object: read it again to see a later change.
+export type CollisionGroup = {
+	Name: string,
+	-- Every group this one collides with, itself included when it does.
+	CollidesWith: { string },
+}
+
+-- Collision groups, read only. Registration and the collide matrix are set by
+-- C++ and Studio, because the registry is shared by every world.
+declare extern type PhysicsService with
+	-- How many groups are registered, at least one: `Default` always exists.
+	read CollisionGroupCount: number
+
+	-- The named group, or nil when nothing registered it.
+	function GetCollisionGroup(self, name: string): CollisionGroup?
+
+	-- Every group, in registration order, `Default` first.
+	function GetCollisionGroups(self): { CollisionGroup }
+end
+
 declare DataSceneService: DataSceneService
 declare ContentService: ContentService
 declare CollectionService: CollectionService
 declare HttpService: HttpService
 declare SoundService: SoundService
+declare PhysicsService: PhysicsService
 declare TweenService: TweenService
 declare Debris: Debris
 
@@ -4460,6 +4482,7 @@ type Services = {
 	SettingsService: SettingsServiceType,
 	Selection: SelectionService,
 	SoundService: SoundService,
+	PhysicsService: PhysicsService,
 	UserInputService: UserInputServiceType,
 	MemoryStoreService: MemoryStoreService,
 	DataStoreService: DataStoreService,

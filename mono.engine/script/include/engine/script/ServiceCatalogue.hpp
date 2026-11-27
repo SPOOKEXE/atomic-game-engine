@@ -301,6 +301,11 @@ namespace engine::script {
 	// @since v0.15
 	const ServiceSurface &CrossWorldServiceSurface();
 
+	// `PhysicsService`, read-only collision groups. Each group is a record of
+	// its properties (`Name`, `CollidesWith`) and `CollisionGroupCount` is live.
+	// @since v0.26
+	const ServiceSurface &PhysicsServiceSurface();
+
 	// `SettingsService`, the client-only script seam for named ESC menu rows.
 	// `SetMenuAction` returns the filtered activation signal, while remove and
 	// clear affect presentation without owning a second callback table.
