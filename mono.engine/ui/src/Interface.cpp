@@ -488,21 +488,6 @@ namespace engine::ui {
 		return ImGui::GetIO().WantCaptureKeyboard;
 	}
 
-	void Interface::SubmitSpatial(
-		const gui::DrawList &list,
-		const core::Vector2 &canvas,
-		const core::Vector2 &targetPixels,
-		ecs::Store &store,
-		double seconds
-	) {
-		State->SpatialSeconds = seconds;
-		State->Spatial.Submit(list, canvas, targetPixels, store);
-	}
-
-	void Interface::SetSpatialViewportSource(std::function<render::InterfaceImage(ecs::Entity)> resolve) {
-		State->Spatial.SetViewportSource(std::move(resolve));
-	}
-
 	render::OverlayRecordStatus Interface::LayerAvailability(render::OverlayLayer layer) const {
 		return layer == render::OverlayLayer::Spatial ? State->Spatial.LayerAvailability(layer)
 													  : render::OverlayRecordStatus::Unknown;

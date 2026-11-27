@@ -331,10 +331,6 @@ namespace engine::render {
 		SealedThrough = last;
 		return true;
 	}
-	SpatialInputQueue::Status SpatialInputQueue::Preflight(Renderer &renderer) {
-		RendererDepth depth(renderer);
-		return Preflight(depth);
-	}
 	SpatialInputQueue::Status SpatialInputQueue::Preflight(SpatialInputDepth &depth) {
 		if (LastReady) return Status::Pending;
 		if (DeferredFailure != Failure::None || ReleasePending) return Status::Ready;
@@ -439,16 +435,6 @@ namespace engine::render {
 		return Status::Ready;
 	}
 
-	std::optional<uint64_t> SpatialInputQueue::HeadHostToken() const {
-		if (LastReady) return ReadyCache.HostToken;
-		if (DeferredFailure != Failure::None)
-			return ContactActive ? ContactOwner : (Events.empty() ? 0 : Events.front().HostToken);
-		if (!Batches.empty() && Batches.front().End) return Batches.front().Host;
-		if (ReleasePending) return ContactOwner;
-		if (Events.empty()) return {};
-		return Events.front().HostToken;
-	}
-
 	bool SpatialInputQueue::RequestCancel() {
 		if (LastReady) return false;
 		DeferredFailure = Failure::ExternalCancel;
@@ -494,11 +480,6 @@ namespace engine::render {
 		return ReadyCache;
 	}
 
-	SpatialInputQueue::Result
-	SpatialInputQueue::Poll(Renderer &renderer, ecs::Entity captured, bool capturedSpatial) {
-		RendererDepth depth(renderer);
-		return Poll(depth, captured, capturedSpatial);
-	}
 	SpatialInputQueue::Result
 	SpatialInputQueue::Poll(SpatialInputDepth &depth, ecs::Entity captured, bool capturedSpatial) {
 		if (LastReady) return ReadyCache;
@@ -713,10 +694,6 @@ namespace engine::render {
 		return !LastReady || Acknowledge(LastReady);
 	}
 
-	bool SpatialInputQueue::RetireHost(Renderer &renderer, uint64_t hostToken, uint64_t viewport) {
-		RendererDepth depth(renderer);
-		return RetireHost(depth, hostToken, viewport);
-	}
 	bool SpatialInputQueue::RetireHost(SpatialInputDepth &depth, uint64_t hostToken, uint64_t viewport) {
 		if (LastReady) return false;
 		// A pending failure is delivered to the contact owner or the head event's

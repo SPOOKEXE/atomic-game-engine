@@ -296,6 +296,9 @@ namespace engine::net::quic {
 		//
 		// @return The time, or infinity when nothing is pending.
 		// @since v0.19
+		//
+		// Kept with no caller yet: part of the QUIC surface a protocol-timed
+		// flush needs. `just dead-code` lists it (and `Unstamp`) until then.
 		double ExpirySeconds() const;
 
 		// Begins a polite close.

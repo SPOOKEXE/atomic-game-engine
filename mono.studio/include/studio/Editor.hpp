@@ -3332,9 +3332,9 @@ namespace studio {
 
 		// Writes the whole game, adopting the path.
 		//
-		// **Adopting is what separates this from `ExportActiveWorld`**: the
-		// title changes, the modified marker clears, and Ctrl+S writes here from
-		// then on.
+		// **Adopting is what separates this from an export**: the title
+		// changes, the modified marker clears, and Ctrl+S writes here from then
+		// on.
 		//
 		// @param path Where to write.
 		// @return `false` when it could not be written.
@@ -3345,26 +3345,8 @@ namespace studio {
 		// the key and the palette all open.
 		void BeginSaveAs();
 
-		// Writes the active world alone, without adopting the path.
-		//
-		// @param path Where to write.
-		// @return `false` when it could not be written.
-		bool ExportActiveWorld(const std::filesystem::path &path);
-
 		// Writes one captured world alone, without adopting the path.
 		bool ExportWorldFile(engine::world::WorldId world, const std::filesystem::path &path);
-
-		// Writes the universe and every world in it, without adopting the path.
-		//
-		// **Separate from Save As rather than a second name for it.** Save As
-		// adopts: the title changes, the modified marker clears and Ctrl+S
-		// writes there from then on. An export is a copy handed to somebody
-		// else, and an author who exported one and then pressed Ctrl+S would
-		// otherwise have overwritten the copy instead of their own file.
-		//
-		// @param path Where to write.
-		// @return `false` when the file would not be written.
-		bool ExportUniverse(const std::filesystem::path &path);
 
 		// Starts an export after applying its optional processed-asset policy.
 		// Asset grounding is pumped across frames and writes the document only

@@ -630,6 +630,11 @@ namespace engine::effects {
 	}
 
 	namespace {
+		// Where an emitter parented to `parent` emits from, in world space.
+		// An `Attachment` gives its resolved world frame and a part its
+		// `Transform`, both already resolved because `ResolveAttachments` runs
+		// first. Any other parent gives the origin, which is visible and so
+		// better than emitting nothing.
 		core::CFrame FrameOfParent(const ecs::Store &store, ecs::Entity parent) {
 			if (parent == ecs::NULL_ENTITY) {
 				return {};
@@ -646,10 +651,6 @@ namespace engine::effects {
 			}
 			return {};
 		}
-	}
-
-	core::CFrame EmitterFrame(const ecs::Store &store, ecs::Entity emitter) {
-		return FrameOfParent(store, store.ParentOf(emitter));
 	}
 
 	namespace {

@@ -58,20 +58,6 @@ namespace engine::render {
 		float offset,
 		const core::Vector3 &first,
 		const core::Vector3 &second,
-		PortalBodyDraws &out
-	) {
-		return SplitPortalBodyDraws(
-			body, joints, through, normal, offset, first, second, normal * offset, out
-		);
-	}
-	bool SplitPortalBodyDraws(
-		std::span<const scene::DrawInstance> body,
-		std::span<const core::CFrame> joints,
-		const scene::SeamTransform &through,
-		const core::Vector3 &normal,
-		float offset,
-		const core::Vector3 &first,
-		const core::Vector3 &second,
 		const core::Vector3 &centre,
 		PortalBodyDraws &out
 	) {

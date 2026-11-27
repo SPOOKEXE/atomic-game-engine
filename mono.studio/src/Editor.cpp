@@ -5299,10 +5299,6 @@ namespace studio {
 		return true;
 	}
 
-	bool Editor::ExportActiveWorld(const std::filesystem::path &path) {
-		return ExportWorldFile(Active, path);
-	}
-
 	bool Editor::ExportWorldFile(WorldId world, const std::filesystem::path &path) {
 		if (!world.IsValid()) {
 			Say("no world to export", LogLevel::Warning);
@@ -5317,34 +5313,6 @@ namespace studio {
 		}
 
 		Say("exported '" + std::string(Label(Universe->NameOf(world))) + "' to " + path.string());
-		return true;
-	}
-
-	bool Editor::ExportUniverse(const std::filesystem::path &path) {
-		// **The universe and every world under it.** This shares `SaveGame`'s
-		// writer and differs from
-		// Save As in what it does to the editor afterwards, which is nothing.
-		//
-		// That difference is the whole reason it is a separate action rather
-		// than a second name for Save As. Save As *adopts* the path: the title
-		// bar changes, the modified marker clears, and Ctrl+S from then on
-		// writes there. Exporting is handing a copy to somebody - a build
-		// server, a teammate, a backup - and an author who exported a copy and
-		// then pressed Ctrl+S expecting to save their own file would have
-		// written over the copy instead. `ExportActiveWorld` has always drawn
-		// the same line one level down.
-		if (!FlushExportBuffers()) return false;
-
-		std::string error;
-		if (!engine::game::SaveUniverse(
-				*Universe, GameName, RenderingProfiles, path, UniverseOptions(true), error
-			)) {
-			Say("export failed: " + error, LogLevel::Error);
-			return false;
-		}
-
-		Say("exported the universe - " + std::to_string(Universe->Count()) + " world(s) - to " +
-			path.string());
 		return true;
 	}
 

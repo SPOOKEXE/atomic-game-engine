@@ -173,19 +173,15 @@ namespace engine::render {
 		);
 		// Seal the contiguous unsealed prefix for one host and Store.
 		bool SealBatch(uint64_t hostToken, uint64_t storeIdentity);
-		// Acquire immutable prerequisites without blocking or mutating a Store.
-		// Retry Pending; readiness does not guarantee a required sample is valid.
-		Status Preflight(Renderer &renderer);
-		// Preflight using an invocation-scoped depth source.
+		// Acquire immutable prerequisites without blocking or mutating a Store,
+		// through an invocation-scoped depth source. Retry Pending; readiness
+		// does not guarantee a required sample is valid.
 		Status Preflight(SpatialInputDepth &depth);
-		// The head token identifies the host router that owns the next event.
-		std::optional<uint64_t> HeadHostToken() const;
 		// Request ordered cancellation on the next Poll; fails while a result is
 		// borrowed.
 		bool RequestCancel();
-		// Resolve only the FIFO head; capturedCollector comes from the live router.
-		Result Poll(Renderer &renderer, ecs::Entity capturedCollector = {}, bool capturedSpatial = false);
-		// Resolve the FIFO head using an invocation-scoped depth source.
+		// Resolve only the FIFO head, using an invocation-scoped depth source;
+		// capturedCollector comes from the live router.
 		Result
 		Poll(SpatialInputDepth &depth, ecs::Entity capturedCollector = {}, bool capturedSpatial = false);
 		// Acknowledge the returned event ID, including BatchEnd, before callbacks.
@@ -199,11 +195,10 @@ namespace engine::render {
 		bool Reset(Renderer &renderer);
 		// Release queued work using an invocation-scoped depth source; retry on failure.
 		bool Reset(SpatialInputDepth &depth);
-		// Retire one host after its router is cancelled or forgotten; preserves other
-		// hosts. Refused while a result is borrowed, or while a pending failure would
-		// still be delivered to this host's contact or events.
-		bool RetireHost(Renderer &renderer, uint64_t hostToken, uint64_t viewport);
-		// Retire one host using an invocation-scoped depth source.
+		// Retire one host after its router is cancelled or forgotten, using an
+		// invocation-scoped depth source; preserves other hosts. Refused while a
+		// result is borrowed, or while a pending failure would still be delivered
+		// to this host's contact or events.
 		bool RetireHost(SpatialInputDepth &depth, uint64_t hostToken, uint64_t viewport);
 		// One physical primary pointer is shared by this queue; after cancellation it
 		// cannot start again until its release.

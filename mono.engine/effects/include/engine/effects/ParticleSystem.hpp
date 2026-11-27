@@ -203,20 +203,6 @@ namespace engine::effects {
 	};
 	static_assert(sizeof(EmitterSlot) == 12);
 
-	// Where an emitter emits from, in world space.
-	//
-	// **One column read and never a walk.** An emitter parented to an
-	// `Attachment` takes that attachment's resolved world frame, and one parented
-	// to a part takes the part's `Transform` - both of which are already there by
-	// the time this runs, because `ResolveAttachments` is registered ahead of it.
-	// An emitter parented to neither emits from the origin, which is visible and
-	// therefore better than emitting nothing.
-	//
-	// @param store   The world.
-	// @param emitter The emitter instance.
-	// @return Its world-space frame.
-	core::CFrame EmitterFrame(const ecs::Store &store, ecs::Entity emitter);
-
 	// How big the volume an emitter spawns inside is, as a half-extent.
 	//
 	// The parent part's `Bounds`, which is Roblox's arrangement: resizing a part

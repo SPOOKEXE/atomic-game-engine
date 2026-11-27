@@ -33,6 +33,9 @@ namespace engine::gui::detail {
 	CanvasGraph MirrorCanvas(const ecs::Store &store, ecs::Entity canvas);
 
 	// The link a pair of port entities describes, in graph terms.
+	//
+	// Kept with no caller: wire pulling is broken and will be rebuilt on top
+	// of this. `just dead-code` lists it until then.
 	std::optional<ang::Link> LinkBetween(const ecs::Store &store, ecs::Entity output, ecs::Entity input);
 
 	// Whether two port value types may be wired, under ang's rule: exact, or `any` at either end.

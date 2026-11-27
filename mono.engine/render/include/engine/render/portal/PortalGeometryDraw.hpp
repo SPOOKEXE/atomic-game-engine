@@ -34,19 +34,7 @@ namespace engine::render {
 		float offset,
 		PortalBodyDraws &out
 	);
-	// As above, with the finite aperture axes and centre from the source seam.
-	bool SplitPortalBodyDraws(
-		std::span<const scene::DrawInstance> body,
-		std::span<const core::CFrame> joints,
-		const scene::SeamTransform &through,
-		const core::Vector3 &normal,
-		float offset,
-		const core::Vector3 &first,
-		const core::Vector3 &second,
-		PortalBodyDraws &out
-	);
-	// As above, with an explicit aperture centre. Use this for any mouth whose
-	// centre is not the closest point on its cut plane.
+	// As above, with the finite aperture axes and an explicit aperture centre.
 	bool SplitPortalBodyDraws(
 		std::span<const scene::DrawInstance> body,
 		std::span<const core::CFrame> joints,

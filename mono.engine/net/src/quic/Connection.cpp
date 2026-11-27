@@ -62,6 +62,8 @@ namespace engine::net::quic {
 			return STAMP_BASE + static_cast<uint64_t>(seconds * 1e9);
 		}
 
+		// The inverse of `Stamp`. Kept for `Connection::ExpirySeconds`, which
+		// has no caller yet.
 		double Unstamp(ngtcp2_tstamp stamp) {
 			if (stamp <= STAMP_BASE) {
 				return 0.0;
