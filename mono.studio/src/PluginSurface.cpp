@@ -52,14 +52,15 @@
 
 #include "PluginImageGraph.hpp"
 #include "PluginSurfaceInternal.hpp"
+#include "RenderPipelineDocumentAdapter.hpp"
 #include "SourceEditor.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/gui/Components.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
@@ -1438,6 +1439,154 @@ namespace studio {
 				const std::string_view lost = engine::graph::WhatIsLost(from, to);
 				if (!lost.empty()) {
 					result = HostValue::Of(lost);
+				}
+				return true;
+			}
+
+			// `GetNodes(profile)`: every node as `{ Name, Kind, Scope, Enabled,
+			// X, Y, Moved, Reads, Writes, Parameters }`, in document order.
+			// `Reads` and `Writes` are `{ { Port, Resource } }`, with `Resource`
+			// nil for an empty row. Nil for an unknown profile.
+			if (method == "GetNodes") {
+				const engine::graph::PipelineDocument *document =
+					profiles.Find(engine::core::Name(At(arguments, 0).AsText()));
+				if (document == nullptr) return true;
+				const auto bindings = [](const std::vector<render_pipeline::Binding> &rows) {
+					std::vector<HostValue> items;
+					for (const render_pipeline::Binding &row : rows) {
+						HostValue item(HostTag::Map);
+						item.Entries.emplace_back("Port", HostValue::Of(std::string_view(row.Port)));
+						if (row.Resource.IsValid())
+							item.Entries.emplace_back("Resource", HostValue::Of(row.Resource.Text()));
+						items.push_back(std::move(item));
+					}
+					return HostValue::List(std::move(items));
+				};
+				std::vector<HostValue> nodes;
+				for (const render_pipeline::AuthoredNode &node : render_pipeline::AuthoredNodes(*document)) {
+					HostValue item(HostTag::Map);
+					item.Entries.emplace_back("Name", HostValue::Of(node.Name.Text()));
+					item.Entries.emplace_back("Kind", HostValue::Of(node.Kind.Text()));
+					item.Entries.emplace_back(
+						"Scope", HostValue::Of(std::string_view(engine::graph::Describe(node.Scope)))
+					);
+					item.Entries.emplace_back("Enabled", HostValue::Of(node.Enabled));
+					item.Entries.emplace_back("X", HostValue::Of(static_cast<double>(node.X)));
+					item.Entries.emplace_back("Y", HostValue::Of(static_cast<double>(node.Y)));
+					item.Entries.emplace_back("Moved", HostValue::Of(node.Moved));
+					item.Entries.emplace_back("Reads", bindings(node.Reads));
+					item.Entries.emplace_back("Writes", bindings(node.Writes));
+					HostValue parameters(HostTag::Map);
+					for (const engine::graph::NodeParameter &parameter : node.Parameters)
+						parameters.Entries.emplace_back(
+							std::string(parameter.Key.Text()),
+							HostValue::Of(std::string_view(parameter.Value))
+						);
+					item.Entries.emplace_back("Parameters", std::move(parameters));
+					nodes.push_back(std::move(item));
+				}
+				result = HostValue::List(std::move(nodes));
+				return true;
+			}
+
+			// `GetNodeKinds()`: every registered kind as `{ Kind, Label, Summary,
+			// Category, Source, Repeatable, Inputs, Outputs }`, sorted by kind.
+			// A port is `{ Name, Kind, Format, Required, Summary }`.
+			if (method == "GetNodeKinds") {
+				const auto ports = [](const std::vector<engine::graph::PortSpec> &specs) {
+					std::vector<HostValue> items;
+					for (const engine::graph::PortSpec &port : specs) {
+						HostValue item(HostTag::Map);
+						item.Entries.emplace_back("Name", HostValue::Of(port.Name.Text()));
+						item.Entries.emplace_back(
+							"Kind", HostValue::Of(std::string_view(engine::graph::Describe(port.Kind)))
+						);
+						item.Entries.emplace_back(
+							"Format", HostValue::Of(std::string_view(engine::graph::Describe(port.Format)))
+						);
+						item.Entries.emplace_back("Required", HostValue::Of(port.Required));
+						item.Entries.emplace_back("Summary", HostValue::Of(std::string_view(port.Summary)));
+						items.push_back(std::move(item));
+					}
+					return HostValue::List(std::move(items));
+				};
+				std::vector<HostValue> kinds;
+				for (const engine::graph::NodeKindSpec &spec : engine::graph::NodeCatalogue::All()) {
+					HostValue item(HostTag::Map);
+					item.Entries.emplace_back("Kind", HostValue::Of(spec.Kind.Text()));
+					item.Entries.emplace_back(
+						"Label",
+						HostValue::Of(std::string_view(spec.Label.empty() ? spec.Kind.Text() : spec.Label))
+					);
+					item.Entries.emplace_back("Summary", HostValue::Of(std::string_view(spec.Summary)));
+					item.Entries.emplace_back(
+						"Category", HostValue::Of(std::string_view(engine::graph::Describe(spec.Category)))
+					);
+					item.Entries.emplace_back("Source", HostValue::Of(spec.Source));
+					item.Entries.emplace_back("Repeatable", HostValue::Of(spec.Repeatable));
+					item.Entries.emplace_back("Inputs", ports(spec.Inputs));
+					item.Entries.emplace_back("Outputs", ports(spec.Outputs));
+					kinds.push_back(std::move(item));
+				}
+				result = HostValue::List(std::move(kinds));
+				return true;
+			}
+
+			// The edits. Each takes the profile first, applies one change to a
+			// copy, and lands it as one undoable step in Studio's history, so a
+			// plugin's `ChangeHistoryService` recording groups them as it does
+			// instance edits. Every world selecting the profile renders the edit.
+			const bool edit = method == "AddNode" || method == "MoveNode" || method == "SetNodeEnabled" ||
+							  method == "ConnectPorts" || method == "DisconnectPort";
+			if (edit) {
+				const engine::core::Name profile(At(arguments, 0).AsText());
+				const engine::graph::PipelineDocument *found = profiles.Find(profile);
+				if (found == nullptr) {
+					failure = std::string(method) + ": no rendering profile named '" +
+							  std::string(At(arguments, 0).AsText()) + "'";
+					return false;
+				}
+				engine::graph::PipelineDocument document = *found;
+				const auto name = [&](size_t index) {
+					return engine::core::Name(At(arguments, index).AsText());
+				};
+				std::string error;
+				bool done = false;
+				if (method == "AddNode") {
+					done = render_pipeline::AddNode(
+						document,
+						name(1),
+						name(2),
+						static_cast<float>(At(arguments, 3).AsNumber()),
+						static_cast<float>(At(arguments, 4).AsNumber()),
+						error
+					);
+				} else if (method == "MoveNode") {
+					done = render_pipeline::MoveNode(
+						document,
+						name(1),
+						static_cast<float>(At(arguments, 2).AsNumber()),
+						static_cast<float>(At(arguments, 3).AsNumber()),
+						error
+					);
+				} else if (method == "SetNodeEnabled") {
+					done = render_pipeline::SetNodeEnabled(
+						document, name(1), At(arguments, 2).AsBoolean(), error
+					);
+				} else if (method == "ConnectPorts") {
+					engine::core::Name resource;
+					done = render_pipeline::ConnectPorts(
+						document, name(1), name(2), name(3), name(4), resource, error
+					);
+					if (done) result = HostValue::Of(resource.Text());
+				} else {
+					done = render_pipeline::DisconnectPort(document, name(1), name(2), error);
+				}
+				if (!done ||
+					!Owner.EditRenderingProfile(profile, document, "Plugin: " + std::string(method), error)) {
+					failure = std::string(method) + ": " + error;
+					result = {};
+					return false;
 				}
 				return true;
 			}

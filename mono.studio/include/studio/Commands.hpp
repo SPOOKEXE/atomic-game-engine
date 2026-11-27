@@ -138,6 +138,10 @@ namespace studio {
 
 		// A world name and its authored portal destinations change together.
 		RenameWorld,
+
+		// One of the universe's rendering profiles changed, as a whole document.
+		// Local to this editor and not part of the peer protocol.
+		RenderingProfile,
 	};
 
 	// What to do with a recording that has finished.
@@ -305,6 +309,12 @@ namespace studio {
 			// Store incarnation whose world is no longer available.
 			uint64_t UnavailableWorld = 0;
 		};
+		// `RenderingProfile`: which profile, and its text before and after.
+		// Empty text means the profile did not exist on that side.
+		engine::core::Name ProfileName;
+		std::string ProfileBefore;
+		std::string ProfileAfter;
+
 		// The world name before the rename.
 		engine::core::Name WorldNameBefore;
 		// The world name after the rename.
@@ -391,6 +401,24 @@ namespace studio {
 		) {
 			WorldRenameCoordinator = std::move(coordinator);
 		}
+		// Applies one rendering profile's text, or removes the profile for empty
+		// text. Undo and redo of a `RenderingProfile` command call this; it must
+		// leave state unchanged when it returns false.
+		void
+		SetRenderingProfileApplier(std::function<bool(engine::core::Name, const std::string &)> applier) {
+			RenderingProfileApplier = std::move(applier);
+		}
+
+		// Records one rendering profile replacement that has already been
+		// applied. `world` is the world the edit is attributed to.
+		void RecordRenderingProfile(
+			engine::world::WorldId world,
+			engine::core::Name profile,
+			std::string before,
+			std::string after,
+			std::string description
+		);
+
 		// Runs after a committed rename to invalidate presentation state.
 		void
 		SetWorldRenameFinalizer(std::function<void(engine::world::WorldId, engine::core::Name)> finalizer) {
@@ -1072,6 +1100,7 @@ namespace studio {
 		Watcher Listener;
 		std::function<bool(engine::world::WorldId, engine::core::Name, engine::core::Name)>
 			WorldRenameCoordinator;
+		std::function<bool(engine::core::Name, const std::string &)> RenderingProfileApplier;
 		std::function<void(engine::world::WorldId, engine::core::Name)> WorldRenameFinalizer;
 
 		// What an id currently names: a world and a handle within it.

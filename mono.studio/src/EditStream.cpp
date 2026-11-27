@@ -529,9 +529,11 @@ namespace studio {
 		});
 
 		for (const Command &command : commands) {
-			// Procedural authority history is a world resource edit local to this
-			// editor. It has no instance path and is not part of the peer protocol.
-			if (command.Kind == CommandKind::ProceduralAuthority) {
+			// Procedural authority and rendering profile history are edits local
+			// to this editor. Neither has an instance path or is part of the peer
+			// protocol.
+			if (command.Kind == CommandKind::ProceduralAuthority ||
+				command.Kind == CommandKind::RenderingProfile) {
 				continue;
 			}
 			if (!command.World.IsValid()) {

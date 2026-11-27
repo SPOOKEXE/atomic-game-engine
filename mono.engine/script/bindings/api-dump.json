@@ -2994,8 +2994,15 @@
 		{
 			"name": "RenderPipelineService",
 			"members": [
+				{"kind":"method","name":"AddNode","parameters":[{"name":"profile","type":"string"},{"name":"name","type":"string"},{"name":"kind","type":"string"},{"name":"x","type":"number?"},{"name":"y","type":"number?"}],"returns":"()"},
+				{"kind":"method","name":"ConnectPorts","parameters":[{"name":"profile","type":"string"},{"name":"from","type":"string"},{"name":"output","type":"string"},{"name":"to","type":"string"},{"name":"input","type":"string"}],"returns":"string"},
+				{"kind":"method","name":"DisconnectPort","parameters":[{"name":"profile","type":"string"},{"name":"node","type":"string"},{"name":"port","type":"string"}],"returns":"()"},
+				{"kind":"method","name":"GetNodeKinds","parameters":[],"returns":"{RenderPipelineNodeKind}"},
 				{"kind":"method","name":"GetNodePositions","parameters":[{"name":"profile","type":"string"}],"returns":"{ [string]: { X: number, Y: number } }?"},
+				{"kind":"method","name":"GetNodes","parameters":[{"name":"profile","type":"string"}],"returns":"{RenderPipelineNode}?"},
 				{"kind":"method","name":"GetProfiles","parameters":[],"returns":"{string}"},
+				{"kind":"method","name":"MoveNode","parameters":[{"name":"profile","type":"string"},{"name":"name","type":"string"},{"name":"x","type":"number"},{"name":"y","type":"number"}],"returns":"()"},
+				{"kind":"method","name":"SetNodeEnabled","parameters":[{"name":"profile","type":"string"},{"name":"name","type":"string"},{"name":"enabled","type":"boolean"}],"returns":"()"},
 				{"kind":"method","name":"WhatIsLost","parameters":[{"name":"from","type":"string"},{"name":"to","type":"string"}],"returns":"string?"}
 			],
 			"tags": ["Service"]
@@ -5400,6 +5407,51 @@
 		{
 			"name": "ProceduralTicket",
 			"type": "string"
+		},
+		{
+			"name": "RenderPipelineBinding",
+			"fields": [
+				{"name":"Port","type":"string"},
+				{"name":"Resource","type":"string?"}
+			]
+		},
+		{
+			"name": "RenderPipelineNode",
+			"fields": [
+				{"name":"Enabled","type":"boolean"},
+				{"name":"Kind","type":"string"},
+				{"name":"Moved","type":"boolean"},
+				{"name":"Name","type":"string"},
+				{"name":"Parameters","type":"{ [string]: string }"},
+				{"name":"Reads","type":"{RenderPipelineBinding}"},
+				{"name":"Scope","type":"string"},
+				{"name":"Writes","type":"{RenderPipelineBinding}"},
+				{"name":"X","type":"number"},
+				{"name":"Y","type":"number"}
+			]
+		},
+		{
+			"name": "RenderPipelineNodeKind",
+			"fields": [
+				{"name":"Category","type":"string"},
+				{"name":"Inputs","type":"{RenderPipelinePort}"},
+				{"name":"Kind","type":"string"},
+				{"name":"Label","type":"string"},
+				{"name":"Outputs","type":"{RenderPipelinePort}"},
+				{"name":"Repeatable","type":"boolean"},
+				{"name":"Source","type":"boolean"},
+				{"name":"Summary","type":"string"}
+			]
+		},
+		{
+			"name": "RenderPipelinePort",
+			"fields": [
+				{"name":"Format","type":"string"},
+				{"name":"Kind","type":"string"},
+				{"name":"Name","type":"string"},
+				{"name":"Required","type":"boolean"},
+				{"name":"Summary","type":"string"}
+			]
 		},
 		{
 			"name": "Services",

@@ -10,6 +10,7 @@
 #include "DataFactoryHost.hpp"
 #include "ExternalEditor.hpp"
 #include "ImageComposer.hpp"
+#include "RenderPipelineDocumentAdapter.hpp"
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/control/Surface.hpp>
@@ -8958,7 +8959,9 @@ TEST_CASE("plugins read rendering profiles through RenderPipelineService", "[stu
 		CHECK(listed);
 
 		const auto profile = engine::script::HostValue::Of(std::string_view("Moved"));
-		REQUIRE(surface->Call("RenderPipelineService.GetNodePositions", std::span(&profile, 1), result, failure));
+		REQUIRE(
+			surface->Call("RenderPipelineService.GetNodePositions", std::span(&profile, 1), result, failure)
+		);
 		REQUIRE(result.Entries.size() == 1);
 		CHECK(result.Entries[0].first == "Lighting");
 		CHECK(result.Entries[0].second.Entries[0].second.AsNumber() == 12.0);
@@ -8966,7 +8969,9 @@ TEST_CASE("plugins read rendering profiles through RenderPipelineService", "[stu
 
 		const auto missing = engine::script::HostValue::Of(std::string_view("Missing"));
 		result = {};
-		REQUIRE(surface->Call("RenderPipelineService.GetNodePositions", std::span(&missing, 1), result, failure));
+		REQUIRE(
+			surface->Call("RenderPipelineService.GetNodePositions", std::span(&missing, 1), result, failure)
+		);
 		CHECK(result.Tag == engine::script::HostTag::Nil);
 
 		const std::array formats{
@@ -8986,4 +8991,124 @@ TEST_CASE("plugins read rendering profiles through RenderPipelineService", "[stu
 		CHECK_FALSE(surface->Call("RenderPipelineService.WhatIsLost", bad, result, failure));
 		CHECK(failure.find("NOPE") != std::string::npos);
 	});
+}
+
+TEST_CASE("plugins edit rendering profiles as undoable steps", "[studio][tools][plugins]") {
+	using engine::graph::NodeCatalogue;
+	using engine::graph::NodeKindSpec;
+	using engine::graph::ResourceKind;
+	using engine::script::HostTag;
+	using engine::script::HostValue;
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	engine::graph::RegisterRenderNodeKinds();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+	studio::ToolsProbe::PrepareCommands(editor);
+	editor.RenderingProfiles.Set(engine::core::Name("Plugin"), engine::graph::PipelineDocument{});
+
+	// Two repeatable kinds that can be wired colour to colour.
+	const auto colour = [](const std::vector<engine::graph::PortSpec> &ports) {
+		return std::find_if(ports.begin(), ports.end(), [](const auto &port) {
+			return port.Kind == ResourceKind::Colour;
+		});
+	};
+	const NodeKindSpec *producer = nullptr;
+	const NodeKindSpec *consumer = nullptr;
+	for (const NodeKindSpec &spec : NodeCatalogue::All()) {
+		if (!spec.Repeatable) continue;
+		if (producer == nullptr && colour(spec.Outputs) != spec.Outputs.end()) producer = &spec;
+		if (consumer == nullptr && colour(spec.Inputs) != spec.Inputs.end()) consumer = &spec;
+	}
+	REQUIRE(producer != nullptr);
+	REQUIRE(consumer != nullptr);
+	const std::string producerKind(producer->Kind.Text());
+	const std::string consumerKind(consumer->Kind.Text());
+	const std::string output(colour(producer->Outputs)->Name.Text());
+	const std::string input(colour(consumer->Inputs)->Name.Text());
+
+	const auto world = editor.Universe->Worlds().front();
+	studio::LoadedPlugin plugin;
+	editor.Universe->Enter(world, [&](Store &store) {
+		const auto surface = studio::MakePluginSurface(editor, plugin, store);
+		std::string failure;
+		const auto call = [&](std::string_view method, std::vector<HostValue> arguments, HostValue &result) {
+			result = {};
+			failure.clear();
+			return surface->Call("RenderPipelineService." + std::string(method), arguments, result, failure);
+		};
+		const auto text = [](std::string_view value) { return HostValue::Of(value); };
+		HostValue result;
+
+		REQUIRE(call("GetNodeKinds", {}, result));
+		CHECK(result.Items.size() == NodeCatalogue::All().size());
+
+		const bool added = call(
+			"AddNode", {text("Plugin"), text("Source"), text(producerKind), HostValue::Of(10.0)}, result
+		);
+		INFO(failure);
+		REQUIRE(added);
+		REQUIRE(call("AddNode", {text("Plugin"), text("Sink"), text(consumerKind)}, result));
+		REQUIRE(call(
+			"ConnectPorts", {text("Plugin"), text("Source"), text(output), text("Sink"), text(input)}, result
+		));
+		const std::string resource(result.AsText());
+		CHECK(resource == "Source." + output);
+		REQUIRE(
+			call("MoveNode", {text("Plugin"), text("Sink"), HostValue::Of(40.0), HostValue::Of(8.0)}, result)
+		);
+		REQUIRE(call("SetNodeEnabled", {text("Plugin"), text("Sink"), HostValue::Of(false)}, result));
+
+		REQUIRE(call("GetNodes", {text("Plugin")}, result));
+		REQUIRE(result.Items.size() == 2);
+		const HostValue &sink = result.Items[1];
+		const auto field = [](const HostValue &record, std::string_view key) -> const HostValue & {
+			static const HostValue nil;
+			for (const auto &[name, value] : record.Entries)
+				if (name == key) return value;
+			return nil;
+		};
+		CHECK(field(sink, "Name").AsText() == "Sink");
+		CHECK(field(sink, "X").AsNumber() == 40.0);
+		CHECK_FALSE(field(sink, "Enabled").AsBoolean());
+		const bool wired = std::any_of(
+			field(sink, "Reads").Items.begin(), field(sink, "Reads").Items.end(), [&](const HostValue &row) {
+				return field(row, "Port").AsText() == input && field(row, "Resource").AsText() == resource;
+			}
+		);
+		CHECK(wired);
+
+		// Refusals name what is wrong and change nothing.
+		const std::string before =
+			engine::graph::Write(*editor.RenderingProfiles.Find(engine::core::Name("Plugin")));
+		CHECK_FALSE(call("AddNode", {text("Plugin"), text("Sink"), text(consumerKind)}, result));
+		CHECK(failure.find("already exists") != std::string::npos);
+		CHECK_FALSE(call("AddNode", {text("Plugin"), text("Other"), text("no-such-kind")}, result));
+		CHECK_FALSE(call(
+			"ConnectPorts", {text("Plugin"), text("Source"), text("nope"), text("Sink"), text(input)}, result
+		));
+		CHECK_FALSE(
+			call("MoveNode", {text("Missing"), text("Sink"), HostValue::Of(0.0), HostValue::Of(0.0)}, result)
+		);
+		CHECK(engine::graph::Write(*editor.RenderingProfiles.Find(engine::core::Name("Plugin"))) == before);
+
+		REQUIRE(call("DisconnectPort", {text("Plugin"), text("Sink"), text(input)}, result));
+	});
+
+	// Each edit is its own step: undo walks them back, redo replays one.
+	const auto nodes = [&] {
+		return studio::render_pipeline::AuthoredNodes(
+			*editor.RenderingProfiles.Find(engine::core::Name("Plugin"))
+		);
+	};
+	studio::ToolsProbe::UndoEdit(editor); // disconnect
+	studio::ToolsProbe::UndoEdit(editor); // disable
+	CHECK(nodes()[1].Enabled);
+	studio::ToolsProbe::UndoEdit(editor); // move
+	studio::ToolsProbe::UndoEdit(editor); // connect
+	studio::ToolsProbe::UndoEdit(editor); // second add
+	CHECK(nodes().size() == 1);
+	studio::ToolsProbe::RedoEdit(editor);
+	CHECK(nodes().size() == 2);
 }

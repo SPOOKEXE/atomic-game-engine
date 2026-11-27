@@ -1160,6 +1160,24 @@ namespace studio {
 		Push(std::move(command));
 	}
 
+	void CommandLog::RecordRenderingProfile(
+		WorldId world,
+		engine::core::Name profile,
+		std::string before,
+		std::string after,
+		std::string description
+	) {
+		if (!world.IsValid() || !profile.IsValid() || before == after) return;
+		Command command;
+		command.Kind = CommandKind::RenderingProfile;
+		command.World = world;
+		command.ProfileName = profile;
+		command.ProfileBefore = std::move(before);
+		command.ProfileAfter = std::move(after);
+		command.Description = std::move(description);
+		Push(std::move(command));
+	}
+
 	bool CommandLog::RenameWorld(WorldId world, engine::core::Name desired) {
 		if (Universe == nullptr || !world.IsValid() || !desired.IsValid() || !Recording_ || Replaying ||
 			Open.InProgress() || BatchDepth != 0 || !WorldRenameCoordinator || Universe->TickInFlight())
@@ -1285,6 +1303,12 @@ namespace studio {
 			return false;
 		}
 		if (command.Kind == CommandKind::RenameWorld) return ApplyWorldRename(command, forward);
+		if (command.Kind == CommandKind::RenderingProfile) {
+			return RenderingProfileApplier &&
+				   RenderingProfileApplier(
+					   command.ProfileName, forward ? command.ProfileAfter : command.ProfileBefore
+				   );
+		}
 
 		// **A rebuild is a create and its reverse is a destroy, so the two kinds
 		// are one operation read in two directions.** Writing them as four cases
@@ -1523,6 +1547,7 @@ namespace studio {
 				return;
 			}
 			case CommandKind::RenameWorld:
+			case CommandKind::RenderingProfile:
 				return;
 
 			case CommandKind::UiDocumentImport: {
@@ -1601,10 +1626,11 @@ namespace studio {
 	void CommandLog::AppendReplayPublication(
 		std::vector<Command> &publication, const Command &command, bool forward
 	) {
-		// World renames, UI component edits and procedural authority are not
-		// part of the peer protocol.
+		// World renames, UI component edits, procedural authority and rendering
+		// profiles are not part of the peer protocol.
 		if (Universe == nullptr || !command.World.IsValid() || command.Kind == CommandKind::RenameWorld ||
-			command.Kind == CommandKind::UiComponent || command.Kind == CommandKind::ProceduralAuthority)
+			command.Kind == CommandKind::UiComponent || command.Kind == CommandKind::ProceduralAuthority ||
+			command.Kind == CommandKind::RenderingProfile)
 			return;
 		const auto subjectPath = [&](Command &published) {
 			published.PublicationSubject.clear();

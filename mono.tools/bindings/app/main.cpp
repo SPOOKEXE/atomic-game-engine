@@ -2472,7 +2472,68 @@ declare extern type RenderPipelineService with
 	-- What wiring a `from` output into a `to` input drops, such as
 	-- `("RGBA16F", "RGBA8")`, or nil when nothing is lost.
 	function WhatIsLost(self, from: string, to: string): string?
+	-- Every node in document order. `Resource` is nil for an empty row. Nil
+	-- for an unknown profile.
+	function GetNodes(self, profile: string): { RenderPipelineNode }?
+	-- Every registered node kind, sorted by `Kind`.
+	function GetNodeKinds(self): { RenderPipelineNodeKind }
+
+	-- The edits. Each is one undoable step in Studio's history, groups into a
+	-- `ChangeHistoryService` recording like any other edit, and raises with
+	-- the reason when refused. Every world selecting the profile renders it.
+
+	-- Adds a node of a registered kind at `(x, y)` with every port unwired.
+	function AddNode(self, profile: string, name: string, kind: string, x: number?, y: number?): ()
+	function MoveNode(self, profile: string, name: string, x: number, y: number): ()
+	function SetNodeEnabled(self, profile: string, name: string, enabled: boolean): ()
+	-- Wires an output into an input of the same resource kind, and answers
+	-- the resource they now share. An unwired output gets a new resource
+	-- named `<node>.<port>`.
+	function ConnectPorts(self, profile: string, from: string, output: string, to: string, input: string): string
+	-- Leaves one port's row empty.
+	function DisconnectPort(self, profile: string, node: string, port: string): ()
 end
+
+-- One port binding of a pipeline node.
+export type RenderPipelineBinding = { Port: string, Resource: string? }
+
+-- One node of a rendering profile, as `RenderPipelineService:GetNodes` reads it.
+export type RenderPipelineNode = {
+	Name: string,
+	Kind: string,
+	Scope: string,
+	Enabled: boolean,
+	X: number,
+	Y: number,
+	-- Whether the node has been placed at all; an unplaced node sits at 0, 0.
+	Moved: boolean,
+	Reads: { RenderPipelineBinding },
+	Writes: { RenderPipelineBinding },
+	Parameters: { [string]: string },
+}
+
+-- One slot of a node kind.
+export type RenderPipelinePort = {
+	Name: string,
+	Kind: string,
+	Format: string,
+	Required: boolean,
+	Summary: string,
+}
+
+-- One registered node kind and its slots.
+export type RenderPipelineNodeKind = {
+	Kind: string,
+	Label: string,
+	Summary: string,
+	Category: string,
+	-- Produces something from nothing, so it needs no input.
+	Source: boolean,
+	-- May appear more than once in one profile.
+	Repeatable: boolean,
+	Inputs: { RenderPipelinePort },
+	Outputs: { RenderPipelinePort },
+}
 
 -- `DockWidgetPluginGuiInfo.new(...)`, a plain table here rather than a userdata.
 type DockWidgetPluginGuiInfo = {
@@ -5086,6 +5147,69 @@ declare interface RenderPipelineService {
 	// What wiring a `from` output into a `to` input drops, such as
 	// `("RGBA16F", "RGBA8")`, or null when nothing is lost.
 	WhatIsLost(from: string, to: string): string | null;
+	// Every node in document order. Null for an unknown profile.
+	GetNodes(profile: string): RenderPipelineNode[] | null;
+	// Every registered node kind, sorted by `Kind`.
+	GetNodeKinds(): RenderPipelineNodeKind[];
+
+	// The edits. Each is one undoable step in Studio's history, groups into a
+	// `ChangeHistoryService` recording like any other edit, and throws with
+	// the reason when refused. Every world selecting the profile renders it.
+
+	// Adds a node of a registered kind at `(x, y)` with every port unwired.
+	AddNode(profile: string, name: string, kind: string, x?: number, y?: number): void;
+	MoveNode(profile: string, name: string, x: number, y: number): void;
+	SetNodeEnabled(profile: string, name: string, enabled: boolean): void;
+	// Wires an output into an input of the same resource kind, and returns
+	// the resource they now share. An unwired output gets a new resource named
+	// `<node>.<port>`.
+	ConnectPorts(profile: string, from: string, output: string, to: string, input: string): string;
+	// Leaves one port's row empty.
+	DisconnectPort(profile: string, node: string, port: string): void;
+}
+
+// One port binding of a pipeline node. `Resource` is absent for an empty row.
+declare interface RenderPipelineBinding {
+	Port: string;
+	Resource?: string;
+}
+
+// One node of a rendering profile, as `RenderPipelineService.GetNodes` reads it.
+declare interface RenderPipelineNode {
+	Name: string;
+	Kind: string;
+	Scope: string;
+	Enabled: boolean;
+	X: number;
+	Y: number;
+	// Whether the node has been placed at all; an unplaced node sits at 0, 0.
+	Moved: boolean;
+	Reads: RenderPipelineBinding[];
+	Writes: RenderPipelineBinding[];
+	Parameters: { [key: string]: string };
+}
+
+// One slot of a node kind.
+declare interface RenderPipelinePort {
+	Name: string;
+	Kind: string;
+	Format: string;
+	Required: boolean;
+	Summary: string;
+}
+
+// One registered node kind and its slots.
+declare interface RenderPipelineNodeKind {
+	Kind: string;
+	Label: string;
+	Summary: string;
+	Category: string;
+	// Produces something from nothing, so it needs no input.
+	Source: boolean;
+	// May appear more than once in one profile.
+	Repeatable: boolean;
+	Inputs: RenderPipelinePort[];
+	Outputs: RenderPipelinePort[];
 }
 
 declare const RenderPipelineService: RenderPipelineService;

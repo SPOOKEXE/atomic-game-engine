@@ -2080,6 +2080,21 @@ namespace studio {
 		void LoadRenderPipeline(WorldId world, engine::core::Name pipeline);
 		bool SaveRenderPipeline();
 
+		// Replaces one rendering profile with `after` as one undoable step in
+		// `Commands`, which is how plugin edits through `RenderPipelineService`
+		// land. Refuses, filling `error`, when there is no history to record into.
+		bool EditRenderingProfile(
+			engine::core::Name profile,
+			const engine::graph::PipelineDocument &after,
+			std::string description,
+			std::string &error
+		);
+
+		// Sets one profile from its text, or removes it for empty text, and
+		// reloads the pipeline editor when it has that profile open. What undo
+		// and redo of a `RenderingProfile` command call.
+		bool ApplyRenderingProfileText(engine::core::Name profile, const std::string &text);
+
 		// The pipeline as a grid: passes across, resources down, what each does
 		// to each where they meet.
 		//
