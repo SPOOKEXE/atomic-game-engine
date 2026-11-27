@@ -3296,6 +3296,10 @@ declare interface ContentService {
 
 	GetTriangleCount(mesh: string): number;
 
+	// The lens shaders the engine ships, which `ShaderLens.Shader` may name
+	// without a `LensShader` instance.
+	GetBuiltInLensShaders(): string[];
+
 	// A received mesh's geometry and skeleton, or null before it arrives and on
 	// a headless server. `Vertices` feeds `EditableMesh.SetGeometryFromBuffer`.
 	ReadMesh(mesh: string): MeshReadout | null;

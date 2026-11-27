@@ -47,6 +47,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/content/MeshCatalogue.hpp>
 #include <engine/scene/content/PublishedCatalogue.hpp>
+#include <engine/scene/content/ShaderLens.hpp>
 #include <engine/scene/content/TextureCatalogue.hpp>
 #include <engine/script/MeshSource.hpp>
 #include <engine/script/ScriptCall.hpp>
@@ -176,6 +177,13 @@ namespace engine::script {
 				}
 			}
 			ReturnSorted(call, std::move(names));
+		}
+
+		// `ContentService:GetBuiltInLensShaders()`: the names a
+		// `ShaderLens.Shader` may use without a `LensShader` instance, in the
+		// order the engine declares them.
+		void GetBuiltInLensShaders(ScriptCall &call) {
+			call.ReturnStrings(scene::BuiltInLensShaderNames());
 		}
 
 		// `ContentService:GetFlipbook(texture)` -> `{Side, Frames, FrameRate}` or nil
@@ -330,7 +338,7 @@ namespace engine::script {
 			call.ReturnRecord(record, buffers);
 		}
 
-		constexpr std::array<ServiceMethod, 8> CONTENT_METHODS{{
+		constexpr std::array<ServiceMethod, 9> CONTENT_METHODS{{
 			{"ReadMesh", ReadMesh},
 			{"GetMeshes", GetMeshes},
 			{"GetPublishedMeshes", GetPublishedMeshes},
@@ -339,6 +347,7 @@ namespace engine::script {
 			{"GetTextures", GetTextures},
 			{"GetFlipbook", GetFlipbook},
 			{"GetTriangleCount", GetTriangleCount},
+			{"GetBuiltInLensShaders", GetBuiltInLensShaders},
 		}};
 	}
 

@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace engine::ecs {
@@ -97,4 +98,21 @@ namespace engine::scene {
 
 	// Collects distinct lens shader names in stable Name-id order.
 	size_t DemandedLensShaders(const ecs::Store &store, std::vector<core::Name> &out);
+
+	// The lens shaders this engine ships, which a `ShaderLens.Shader` may name.
+	// The renderer compiles them from `<name>.frag` and scripts read the list
+	// through `ContentService:GetBuiltInLensShaders`.
+	//
+	// Kept apart from material shaders: a lens uses the lens-pass binding
+	// contract, so an incompatible shader fails at the library boundary instead
+	// of reaching a device pipeline by accident.
+	//
+	// @return The names, in declaration order.
+	std::span<const std::string_view> BuiltInLensShaderNames();
+
+	// Whether the engine ships a lens shader under this name.
+	//
+	// @param name The name a `ShaderLens` selects.
+	// @return `true` when `BuiltInLensShaderNames` contains it.
+	bool IsBuiltInLensShader(std::string_view name);
 }

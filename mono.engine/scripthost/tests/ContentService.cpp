@@ -439,3 +439,14 @@ TEST_CASE("ReadMesh and typed array buffers work from JavaScript", "[scripting][
 	REQUIRE(mesh != engine::ecs::NULL_ENTITY);
 	CHECK(store.Get<engine::scene::EditableMesh>(mesh)->Indices == std::vector<uint32_t>{0, 2, 1});
 }
+
+TEST_CASE("a script can list the built-in lens shaders", "[scripting][content]") {
+	Store store = Fresh("content_lenses");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	REQUIRE(runtime != nullptr);
+
+	MustRun(*runtime, R"(
+		local lenses = ContentService:GetBuiltInLensShaders()
+		assert(table.find(lenses, "gravitational-lens"), "the shipped lens is listed")
+	)");
+}

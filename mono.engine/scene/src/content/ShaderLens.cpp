@@ -3,6 +3,7 @@
 #include <engine/scene/content/ShaderLens.hpp>
 
 #include <algorithm>
+#include <array>
 
 namespace engine::scene {
 
@@ -80,5 +81,17 @@ namespace engine::scene {
 		});
 		out.erase(std::unique(out.begin(), out.end()), out.end());
 		return out.size();
+	}
+
+	namespace {
+		constexpr std::array<std::string_view, 1> BUILT_IN_LENSES{"gravitational-lens"};
+	}
+
+	std::span<const std::string_view> BuiltInLensShaderNames() {
+		return BUILT_IN_LENSES;
+	}
+
+	bool IsBuiltInLensShader(std::string_view name) {
+		return std::find(BUILT_IN_LENSES.begin(), BUILT_IN_LENSES.end(), name) != BUILT_IN_LENSES.end();
 	}
 }

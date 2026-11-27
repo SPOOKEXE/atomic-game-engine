@@ -171,17 +171,8 @@ namespace engine::render {
 	// @return `true` when `BuiltInShaderNames` contains it.
 	bool IsBuiltInShader(std::string_view name);
 
-	// The lens shaders this engine ships. These use the lens-pass binding contract,
-	// which is intentionally distinct from material shaders.
-	//
-	// @return The names, in declaration order.
-	std::span<const std::string_view> BuiltInLensShaderNames();
-
-	// Whether the engine ships a lens shader under this name.
-	//
-	// @param name The name a `ShaderLens` selects.
-	// @return `true` when `BuiltInLensShaderNames` contains it.
-	bool IsBuiltInLensShader(std::string_view name);
+	// The built-in lens shaders are listed by `scene::BuiltInLensShaderNames`,
+	// beside `ShaderLens`, so scripts can read the list without the renderer.
 
 	// Every shader a world's materials name, resolved and kept.
 	//

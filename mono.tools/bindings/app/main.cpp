@@ -1687,6 +1687,10 @@ declare extern type ContentService with
 	-- rather than a part - so a layout can be sized before anything is built.
 	function GetTriangleCount(self, mesh: string): number
 
+	-- The lens shaders the engine ships, which `ShaderLens.Shader` may name
+	-- without a `LensShader` instance.
+	function GetBuiltInLensShaders(self): { string }
+
 	-- A received mesh's geometry and skeleton, or nil before it arrives and
 	-- on a headless server. `Vertices` is consecutive blocks that `Layout`
 	-- describes, so it feeds `EditableMesh:SetGeometryFromBuffer` directly.
@@ -4409,6 +4413,10 @@ declare interface ContentService {
 	GetFlipbook(texture: string): { Side: number; Frames: number; FrameRate: number } | null;
 
 	GetTriangleCount(mesh: string): number;
+
+	// The lens shaders the engine ships, which `ShaderLens.Shader` may name
+	// without a `LensShader` instance.
+	GetBuiltInLensShaders(): string[];
 
 	// A received mesh's geometry and skeleton, or null before it arrives and on
 	// a headless server. `Vertices` feeds `EditableMesh.SetGeometryFromBuffer`.

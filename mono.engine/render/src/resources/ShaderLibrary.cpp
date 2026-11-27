@@ -78,11 +78,6 @@ namespace engine::render {
 		// list and the directory are added to in one change or neither.
 		constexpr std::array<std::string_view, 2> BUILT_IN{"unlit", "toon"};
 
-		// Lens programs are only useful through ShaderLens. Keeping this list
-		// separate from material programs makes an incompatible shader fail at
-		// the library boundary instead of reaching a device pipeline by accident.
-		constexpr std::array<std::string_view, 1> BUILT_IN_LENSES{"gravitational-lens"};
-
 		// The staged SPIR-V for a built-in, as words.
 		//
 		// **Whole-file rather than streamed**, because a shader module is a few
@@ -119,14 +114,6 @@ namespace engine::render {
 
 	bool IsBuiltInShader(std::string_view name) {
 		return std::find(BUILT_IN.begin(), BUILT_IN.end(), name) != BUILT_IN.end();
-	}
-
-	std::span<const std::string_view> BuiltInLensShaderNames() {
-		return BUILT_IN_LENSES;
-	}
-
-	bool IsBuiltInLensShader(std::string_view name) {
-		return std::find(BUILT_IN_LENSES.begin(), BUILT_IN_LENSES.end(), name) != BUILT_IN_LENSES.end();
 	}
 
 	struct ShaderLibrary::Impl {
@@ -479,7 +466,7 @@ namespace engine::render {
 
 			ShaderModule module;
 			module.StoreIdentity = store.Identity();
-			if (IsBuiltInLensShader(name.Text())) {
+			if (scene::IsBuiltInLensShader(name.Text())) {
 				module.BuiltIn = true;
 				module.SpirV = ReadWords(
 					resources::Shader(std::string(name.Text()) + ".frag", resources::ShaderForm::SpirV),
