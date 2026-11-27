@@ -54,6 +54,19 @@ STUDIO:
 - [_] Add preference options for external editors for the game - temporary two way sync in filesystem?
 - [_] Remake all the demos, prune non-required ones, make each demo meaningful and display many features at once for automated tests.
 - [_] BUG: portal does not render lights that travel through (same and maybe other) portals. The portal light demo has it.
+- [_] Bring native cloth simulation to the engine from private plugin. Create lattices and a interface surrounding groups of lattices, adding ways to combine the edge of a lattice to another, edit properties like rigidity, elasticity, anchor points for cloth (i.e. they dont move from this location/attachment, they're stuck there), and a way to attach it to a mesh edge/vertex/etc so it follows it, etc, far easier.
+- [_] Bring native soft-bodies to the engine from private plugin. Create meshes that act as soft bodies, creasing layers, soft layers that give way to objects, deforms the mesh, has physics colliders, maybe a "true position" and "deform position" preview modes where it shows a adornee of the mesh in its true location without soft-body deforming and then adornee of its soft-body deformed location.
+- [_] Make new demos and move current for cloth simulation and the native soft-bodies from plugin.
+- [_] Add an engine-level way to get the location of a vertex in a mesh in real-time (only track selected ones when it exists). Need a way to check if the mesh is still alive as well. Maybe something like MeshTracker (with settings to disable options like surface normal direction + color) -> TrackedVertex/TrackedTriangle -> State + Position + Surfance Normal (direction) + Color, etc. Also accounts for pbr items.
+- [_] Build the raycast library up using what the plugin lacks (and what luau code ended up needing) as new luau library (functions). Both standalone math and other class items.
+- [_] Build up the SurfacePoint in the engine as well, could fall under MeshTracker or another service.
+- [_] Build up the Triangle library in the engine as well as part of this (closestBarycentric, closest). Both standalone math and MeshTracker/other class items.
+- [_] Also build out splines and curves as data types.
+- [_] Also build out inverse-kinematic and forward-kinematic library in luau as c++ bindings (math.invkin and math.fwdkin or whatever names)
+- [_] Also build out ways to build bone graphs with IK/FK support on them (so they can be animated but also coded to work). Maybe a IKCustomBoneController and IKHierarchyBoneController with related functions to attach bones, define hierarchy (its .Parent and :GetChildren() to determine hierarchy via RootBone property, or custom by calling functions and defining the hierarchy that way, that is why its split into two so we can just use a different component to store data and use one computation location to handle both types), etc. Maybe worth exposing a way to have the engine automatically do whatever interpolation using ticking, or allow the user to tick themselves via code, and ways to pull the interpolation data of bones in both scenarios like :GetBoneInterpolations() which gives last frame + current frame interpolation values.
+- [_] Native PNG for scripting and engine (buffer in for pixels, png bytes out) or (png bytes in, buffer out for pixels), To and From PNG/Buffer/Array(2D)/flat array with width/height params
+- [_] Native Gltf for scripting and engine, same behavior above but whatever gltf needs
+- [_] Build geometry nodes into the engine as well from the plugin. Basically points along the mesh that track where it is when it deforms, and can be used to help animate and whatnot by cloth simulation / soft-body manipulation via scripting or engine.
 
 IMAGECOMPOSER:
 - [_] PBR textures support subgraphs
@@ -129,6 +142,8 @@ RENDER (docs/render-hooks.toml, planned cleanup):
 
 ENGINE:
 - [_] localization support
+- [_] Plan a consolidation of services and functions to better-named locations (i.e. resolve what mesh-related functions go where - MeshTracker, MeshPart entities/components, PBR, etc)
+- [_] Maybe move all the mathematical helper functions (i.e. standalone computations) under one math library like math.raycast.nearest, math.triangles.closestTo, etc. Also make/use particular data types for those functions as well in a expected format, like defining Triangle/Quad/Mesh, using  and expecting a certain layout with a optional validate function (IsBufferCompatible) etc.
 
 ### v0.26.4
 
