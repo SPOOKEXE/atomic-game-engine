@@ -305,6 +305,7 @@ namespace engine::render {
 			.FlipbookCumulativeEnds = {},
 			.SourcePixels = {},
 			.CopyStatus = TextureCopyStatus::Unsupported,
+			.Stream = {},
 		};
 		entry.FlipbookCumulativeEnds.reserve(image.FlipbookFrameDurations.size());
 		float elapsed = 0.0f;

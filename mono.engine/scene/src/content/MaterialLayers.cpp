@@ -572,7 +572,7 @@ namespace engine::scene {
 					ClearOpacities(*held, state, *stale);
 				if (state.Shader.IsValid()) release(state.Shader);
 				if (state.BakeShader.IsValid()) release(state.BakeShader);
-				state = {signature, shader, std::move(composed.Opacities), {}};
+				state = {signature, shader, std::move(composed.Opacities), {}, {}, {}, 0, 0};
 				state.BakeShader = bakeShader;
 				state.BakeOutput = baking ? core::Name("bake/" + std::to_string(id)) : core::Name{};
 			}

@@ -135,11 +135,11 @@ namespace engine::render {
 		struct Expansion {
 			const ShaderModuleResolver &Modules;
 			bool Surface = false;
-			std::string Out;
-			std::string Error;
+			std::string Out{};
+			std::string Error{};
 			// Each module is expanded once, as its own include guard.
-			std::unordered_set<std::string> Seen;
-			std::vector<std::string> Stack;
+			std::unordered_set<std::string> Seen{};
+			std::vector<std::string> Stack{};
 
 			bool Fail(std::string message) {
 				if (Error.empty()) Error = std::move(message);

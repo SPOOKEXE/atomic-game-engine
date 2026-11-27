@@ -6,9 +6,9 @@
 
 namespace engine::scene {
 	namespace {
-		constexpr uint32_t MAGIC = 0x31545043;
+		constexpr uint32_t TOPOLOGY_MAGIC = 0x31545043;
 		constexpr size_t MAX_NAME = 256;
-		bool Text(std::string_view text) {
+		bool TopologyNameFits(std::string_view text) {
 			return !text.empty() && text.size() <= MAX_NAME && text.find('\0') == std::string_view::npos;
 		}
 		core::Vector3 Vector(const std::array<float, 3> &value) {
@@ -20,10 +20,11 @@ namespace engine::scene {
 			return true;
 		}
 		bool Valid(const CameraPortalMouth &mouth) {
-			if (!Text(mouth.Name) || !Text(mouth.DestinationWorld) || !Text(mouth.PanePath) ||
-				!Text(mouth.FarPath) || !Finite(mouth.Centre) || !Finite(mouth.Normal) ||
-				!Finite(mouth.First) || !Finite(mouth.Second) || !Finite(mouth.Up) ||
-				!Finite(mouth.Destination) || !std::isfinite(mouth.Scale) || mouth.Scale <= 0)
+			if (!TopologyNameFits(mouth.Name) || !TopologyNameFits(mouth.DestinationWorld) ||
+				!TopologyNameFits(mouth.PanePath) || !TopologyNameFits(mouth.FarPath) ||
+				!Finite(mouth.Centre) || !Finite(mouth.Normal) || !Finite(mouth.First) ||
+				!Finite(mouth.Second) || !Finite(mouth.Up) || !Finite(mouth.Destination) ||
+				!std::isfinite(mouth.Scale) || mouth.Scale <= 0)
 				return false;
 			const auto normal = Vector(mouth.Normal);
 			const auto first = Vector(mouth.First);
@@ -49,7 +50,7 @@ namespace engine::scene {
 			return std::abs(norm - 1) <= .001;
 		}
 		bool Valid(const CameraPortalTopology &topology) {
-			if (!Text(topology.World) || topology.Revision == 0 ||
+			if (!TopologyNameFits(topology.World) || topology.Revision == 0 ||
 				topology.Mouths.size() > MAX_CAMERA_PORTAL_SEAMS)
 				return false;
 			std::unordered_set<std::string_view> names;
@@ -71,9 +72,9 @@ namespace engine::scene {
 			for (float &value : values)
 				value = reader.ReadFloat();
 		}
-		std::string ReadText(core::ByteReader &reader) {
+		std::string ReadTopologyName(core::ByteReader &reader) {
 			const auto text = reader.ReadString();
-			if (reader.Failed() || !Text(text)) {
+			if (reader.Failed() || !TopologyNameFits(text)) {
 				reader.Fail();
 				return {};
 			}
@@ -83,7 +84,8 @@ namespace engine::scene {
 	bool CopyCameraPortalMouth(
 		std::string_view name, const PortalSeam &seam, CameraPortalMouth &out, std::string &error
 	) {
-		if (!seam.Crosses || !Text(name) || !seam.DestinationWorld.IsValid()) return Refuse(error);
+		if (!seam.Crosses || !TopologyNameFits(name) || !seam.DestinationWorld.IsValid())
+			return Refuse(error);
 		CameraPortalMouth mouth;
 		mouth.Name = name;
 		mouth.DestinationWorld = seam.DestinationWorld.Text();
@@ -111,7 +113,7 @@ namespace engine::scene {
 	) {
 		if (!Valid(topology)) return Refuse(error);
 		core::ByteWriter writer;
-		writer.WriteUInt32(MAGIC);
+		writer.WriteUInt32(TOPOLOGY_MAGIC);
 		writer.WriteUInt16(2);
 		writer.WriteUInt16(0);
 		writer.WriteString(topology.World);
@@ -141,10 +143,10 @@ namespace engine::scene {
 	) {
 		if (bytes.size() > MAX_CAMERA_PORTAL_TOPOLOGY_BYTES) return Refuse(error);
 		core::ByteReader reader(bytes);
-		if (reader.ReadUInt32() != MAGIC || reader.ReadUInt16() != 2 || reader.ReadUInt16() != 0)
+		if (reader.ReadUInt32() != TOPOLOGY_MAGIC || reader.ReadUInt16() != 2 || reader.ReadUInt16() != 0)
 			return Refuse(error);
 		CameraPortalTopology topology;
-		topology.World = ReadText(reader);
+		topology.World = ReadTopologyName(reader);
 		topology.Revision = reader.ReadUInt64();
 		const auto count = reader.ReadUInt32();
 		// Each entry needs four nonempty strings, 23 floats and one policy byte.
@@ -153,10 +155,10 @@ namespace engine::scene {
 		topology.Mouths.reserve(count);
 		for (uint32_t index = 0; index < count; ++index) {
 			CameraPortalMouth mouth;
-			mouth.Name = ReadText(reader);
-			mouth.DestinationWorld = ReadText(reader);
-			mouth.PanePath = ReadText(reader);
-			mouth.FarPath = ReadText(reader);
+			mouth.Name = ReadTopologyName(reader);
+			mouth.DestinationWorld = ReadTopologyName(reader);
+			mouth.PanePath = ReadTopologyName(reader);
+			mouth.FarPath = ReadTopologyName(reader);
 			Read(reader, mouth.Centre);
 			Read(reader, mouth.Normal);
 			Read(reader, mouth.First);

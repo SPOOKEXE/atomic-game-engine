@@ -149,7 +149,8 @@ namespace engine::script {
 		FieldList(ScriptCall &call, const ScriptValue &record, std::string_view key) {
 			static const std::vector<ScriptValue> NONE;
 			const ScriptValue *value = Field(record, key);
-			if (value == nullptr || value->Tag == ValueTag::Nil || IsRecord(*value) && value->Items.empty()) {
+			if (value == nullptr || value->Tag == ValueTag::Nil ||
+				(IsRecord(*value) && value->Items.empty())) {
 				return NONE;
 			}
 			if (value->Tag != ValueTag::Array) {
@@ -271,11 +272,11 @@ namespace engine::script {
 		};
 
 		struct GraphObject {
-			std::shared_ptr<RegistryObject> Types;
-			ang::Graph Document;
+			std::shared_ptr<RegistryObject> Types{};
+			ang::Graph Document{};
 			bool ReadOnly = false;
 			// The image graph this was opened from: its outputs, inputs and bindings.
-			std::optional<imagegraph::Document> Image;
+			std::optional<imagegraph::Document> Image{};
 		};
 
 		struct HookEvent {

@@ -35,7 +35,7 @@ namespace engine::scene {
 				   std::isfinite(value);
 		}
 
-		bool Identifier(std::string_view name) {
+		bool LayoutIdentifier(std::string_view name) {
 			return !name.empty() && !std::isdigit(static_cast<unsigned char>(name.front())) &&
 				   !name.starts_with("gl_") && name.size() <= 64;
 		}
@@ -75,7 +75,7 @@ namespace engine::scene {
 			if (comment != std::string_view::npos) text = text.substr(0, comment);
 			if (kind == "image") {
 				const std::string_view name = Word(text);
-				if (!Identifier(name) || !Trim(text).empty()) {
+				if (!LayoutIdentifier(name) || !Trim(text).empty()) {
 					fail("an image is `#pragma image name`");
 				} else if (layout.Find(name) != nullptr || layout.FindTexture(name) >= 0 ||
 						   std::find(layout.Images.begin(), layout.Images.end(), name) !=
@@ -105,7 +105,7 @@ namespace engine::scene {
 					}
 					text.remove_prefix(close + 1);
 				}
-				if (!Identifier(name) || !Trim(text).empty()) {
+				if (!LayoutIdentifier(name) || !Trim(text).empty()) {
 					fail("a texture is `#pragma texture name`");
 				} else if (layout.Find(name) != nullptr || layout.FindTexture(name) >= 0) {
 					fail("'" + std::string(name) + "' is declared twice");
@@ -125,7 +125,7 @@ namespace engine::scene {
 								   : type == "vec4" ? 4u
 													: 0u;
 			const std::string_view name = Word(text);
-			if (parameter.Components == 0 || !Identifier(name)) {
+			if (parameter.Components == 0 || !LayoutIdentifier(name)) {
 				fail("a parameter is `#pragma parameter float|vec2|vec3|vec4 name = value`");
 				continue;
 			}

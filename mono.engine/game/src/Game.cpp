@@ -535,7 +535,7 @@ namespace engine::game {
 			bool MeshContent = false;
 			// Set when `Property` is a reference field of this saved script
 			// component rather than a property of the instance's class.
-			ecs::ComponentId Component;
+			ecs::ComponentId Component{};
 		};
 
 		bool RestoreDocumentReference(

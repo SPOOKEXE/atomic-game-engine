@@ -409,7 +409,15 @@ namespace engine::render {
 			Storage(device, copy, transfers, uvs.data(), uvs.size() * sizeof(float)),
 		};
 		SDL_EndGPUCopyPass(copy);
-		const SDL_GPUStorageTextureReadWriteBinding target{.texture = trace.Accumulation};
+		const SDL_GPUStorageTextureReadWriteBinding target{
+			.texture = trace.Accumulation,
+			.mip_level = 0,
+			.layer = 0,
+			.cycle = false,
+			.padding1 = 0,
+			.padding2 = 0,
+			.padding3 = 0
+		};
 		SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, &target, 1, nullptr, 0);
 		SDL_BindGPUComputePipeline(pass, trace.Pipeline);
 		const SDL_GPUTextureSamplerBinding atlases[2] = {

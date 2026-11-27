@@ -233,14 +233,14 @@ namespace engine::render {
 	// `engine-surface-main.glsl` for what each holds).
 	struct SurfaceBake {
 		// A `bake/` surface the shader library holds.
-		core::Name Shader;
-		core::Name Mesh;
-		core::Name Output;
+		core::Name Shader{};
+		core::Name Mesh{};
+		core::Name Output{};
 		// The content namespace of the shader, mesh and textures.
-		core::Name Owner;
+		core::Name Owner{};
 		uint32_t Size = 1024;
-		core::Name MaterialTexture0;
-		core::Name MaterialTexture1;
+		core::Name MaterialTexture0{};
+		core::Name MaterialTexture1{};
 		std::array<float, 16> Parameters{};
 		uint16_t ParameterMask = 0;
 		// What it was baked from; a new value bakes again.

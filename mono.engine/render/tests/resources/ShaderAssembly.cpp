@@ -227,7 +227,7 @@ TEST_CASE("a composed layer stack compiles over maps, a Surface and a Light", "[
 		{"paint", paint, "", 1.0f, scene::LayerBlend::Add},
 		{"mud", mud, "masks.r@attribute1", 1.0f, scene::LayerBlend::Height},
 	};
-	for (const std::string base : {std::string(), std::string(PLAIN), std::string(LIT)}) {
+	for (const std::string &base : {std::string(), std::string(PLAIN), std::string(LIT)}) {
 		const auto composed = scene::ComposeLayers(base, layers);
 		REQUIRE(composed.Error.empty());
 		const auto assembled = AssembleShader("layered", composed.Source, modules);
@@ -353,6 +353,6 @@ discard cut
 )";
 	const auto graph = scene::CompileMaterialGraph(dissolve, "dissolve");
 	REQUIRE(graph.Error.empty());
-	for (const std::string prefix : {std::string(), std::string("#define GLOW 1\n")})
+	for (const std::string &prefix : {std::string(), std::string("#define GLOW 1\n")})
 		Compiles(AssembleShader("dissolve", prefix + graph.Source, {}));
 }

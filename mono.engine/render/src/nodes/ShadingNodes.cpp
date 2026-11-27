@@ -2868,7 +2868,15 @@ namespace engine::render {
 			if (compute) {
 				// The clear above starts the image empty; the dispatch writes what it stores.
 				SDL_EndGPURenderPass(draw);
-				const SDL_GPUStorageTextureReadWriteBinding written{.texture = target};
+				const SDL_GPUStorageTextureReadWriteBinding written{
+					.texture = target,
+					.mip_level = 0,
+					.layer = 0,
+					.cycle = false,
+					.padding1 = 0,
+					.padding2 = 0,
+					.padding3 = 0
+				};
 				SDL_GPUComputePass *dispatch =
 					SDL_BeginGPUComputePass(recording.Command, &written, 1, nullptr, 0);
 				if (dispatch == nullptr) return false;

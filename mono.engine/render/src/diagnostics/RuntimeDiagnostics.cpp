@@ -16,7 +16,6 @@ namespace engine::render {
 		using core::AABB;
 		using core::CFrame;
 		using core::Color3;
-		using core::Ray;
 		using core::Vector3;
 
 		constexpr float MINIMUM_DISTANCE = 0.01f;
@@ -46,7 +45,7 @@ namespace engine::render {
 			float Leave = 0.0f;
 		};
 
-		std::optional<RayBound> RayBoxDistance(const Ray &ray, const AABB &bounds, float maximum) {
+		std::optional<RayBound> RayBoxDistance(const core::Ray &ray, const AABB &bounds, float maximum) {
 			float enter = 0.0f;
 			float leave = maximum;
 			const std::array<float, 3> origin{ray.Origin.X, ray.Origin.Y, ray.Origin.Z};
@@ -81,7 +80,7 @@ namespace engine::render {
 		};
 
 		ProbeBounds TraceBounds(
-			const Ray &ray,
+			const core::Ray &ray,
 			float maximum,
 			std::span<const scene::DrawInstance> instances,
 			const scene::DrawInstance *ignored = nullptr
@@ -274,7 +273,7 @@ namespace engine::render {
 			for (size_t index = 0; index < directionCount; index++) {
 				const Vector3 &direction = directions[index];
 				if (direction == Vector3::Zero) continue;
-				const Ray ray{light.Position, direction};
+				const core::Ray ray{light.Position, direction};
 				const ProbeBounds bounds = TraceBounds(ray, light.Range, instances);
 				float travelled = 0.0f;
 				for (size_t pass = 0; pass < bounds.Count; ++pass) {
@@ -317,7 +316,7 @@ namespace engine::render {
 				}
 
 				const float remaining = light.Range - bounds.ReflectionDistance;
-				const Ray bounced{reflectionPoint + reflected * MINIMUM_DISTANCE, reflected};
+				const core::Ray bounced{reflectionPoint + reflected * MINIMUM_DISTANCE, reflected};
 				const ProbeBounds rebound = TraceBounds(bounced, remaining, instances, bounds.Reflection);
 				const float reflectedDistance = std::min(remaining, rebound.Stop + MINIMUM_DISTANCE);
 				AddProbe(Paths, reflectionPoint, reflected, reflectedDistance, LightProbeEvent::Reflection);

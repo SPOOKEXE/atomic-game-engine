@@ -59,9 +59,9 @@ namespace engine::scene {
 
 	// One pass as the renderer receives it.
 	struct ResolvedPass {
-		core::Name Shader;
-		core::Name Demand;
-		core::Name Output;
+		core::Name Shader{};
+		core::Name Demand{};
+		core::Name Output{};
 		PassStage Stage = PassStage::Lighting;
 		float Scale = 1.0f;
 		bool Composite = true;

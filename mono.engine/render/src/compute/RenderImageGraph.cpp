@@ -714,7 +714,6 @@ namespace engine::render {
 		uint64_t budget = ImageGraphGpuState::JOB_SLICE_WORK, dispatches = 0;
 		const auto format =
 			wide ? SDL_GPU_TEXTUREFORMAT_R16G16B16A16_UNORM : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-		bool waiting = false;
 		while (budget > 0 && job.Position < job.Execution.Order.size()) {
 			const size_t index = job.Execution.Order[job.Position];
 			const auto &node = graph.Document.Nodes[index];
@@ -723,7 +722,6 @@ namespace engine::render {
 			if (const auto *source = std::get_if<imagegraph::Source>(&node.Value);
 				source && !sourceTextures[index]) {
 				graph.NeededSource = SourceBinding(graph, *source)->Texture;
-				waiting = true;
 				break;
 			}
 			const bool blur = std::holds_alternative<imagegraph::Blur>(node.Value);
