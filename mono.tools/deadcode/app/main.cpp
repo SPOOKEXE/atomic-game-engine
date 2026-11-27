@@ -53,7 +53,7 @@ namespace {
 
 		out.Source = relative.substr(0, files) + "/" + rest;
 		const bool test = target.starts_with("test_") || target == "mono_testmain" || target == "mono_suites" ||
-			rest.starts_with("tests/");
+			rest.starts_with("tests/") || rest.starts_with("fuzz/") || rest.starts_with("fault/");
 		out.Kind = test ? deadcode::Role::Test : deadcode::Role::Ship;
 		return true;
 	}

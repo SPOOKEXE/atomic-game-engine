@@ -65,41 +65,41 @@ namespace {
 TEST_CASE("a function nothing calls is dead and its callees with it", "[deadcode]") {
 	Fake program;
 	const uint32_t main = program.Function("main");
-	const uint32_t used = program.Function("used", 0);
-	const uint32_t orphan = program.Function("orphan");
-	const uint32_t helper = program.Function("helper", 0);
+	const uint32_t used = program.Function("_Z4usedv", 0);
+	const uint32_t orphan = program.Function("_Z6orphanv");
+	const uint32_t helper = program.Function("_Z6helperv", 0);
 	program.Call(main, used);
 	program.Call(orphan, helper);
 
 	const Analysis analysis = Analyse({{"a.cpp", Role::Ship, program.Object}});
 
-	REQUIRE(Names(analysis.Dead) == std::vector<std::string>{"helper", "orphan"});
+	REQUIRE(Names(analysis.Dead) == std::vector<std::string>{"_Z6helperv", "_Z6orphanv"});
 	REQUIRE(analysis.FunctionsPerSource.at("a.cpp") == 4);
 }
 
 TEST_CASE("calls between objects are joined by name", "[deadcode]") {
 	Fake program;
 	const uint32_t main = program.Function("main");
-	program.Call(main, program.Undefined("library"));
+	program.Call(main, program.Undefined("_Z7libraryv"));
 
 	Fake library;
-	library.Function("library");
-	library.Function("unused");
+	library.Function("_Z7libraryv");
+	library.Function("_Z6unusedv");
 
 	const Analysis analysis =
 		Analyse({{"main.cpp", Role::Ship, program.Object}, {"lib.cpp", Role::Ship, library.Object}});
 
-	REQUIRE(Names(analysis.Dead) == std::vector<std::string>{"unused"});
+	REQUIRE(Names(analysis.Dead) == std::vector<std::string>{"_Z6unusedv"});
 }
 
 TEST_CASE("static initialisers and vendor callbacks are roots", "[deadcode]") {
 	Fake program;
 	program.Function("main");
-	program.Startup(program.Function("initialiser", 0));
-	program.Function("callback");
+	program.Startup(program.Function("_Z11initialiserv", 0));
+	program.Function("_Z8callbackv");
 
 	Fake vendor;
-	vendor.Undefined("callback");
+	vendor.Undefined("_Z8callbackv");
 
 	const Analysis analysis =
 		Analyse({{"a.cpp", Role::Ship, program.Object}, {"vendor", Role::Vendor, vendor.Object}});
@@ -109,16 +109,16 @@ TEST_CASE("static initialisers and vendor callbacks are roots", "[deadcode]") {
 
 TEST_CASE("code only a test reaches is reported apart from dead code", "[deadcode]") {
 	Fake library;
-	library.Function("tested");
+	library.Function("_Z6testedv");
 
 	Fake test;
-	test.Call(test.Function("main"), test.Undefined("tested"));
+	test.Call(test.Function("main"), test.Undefined("_Z6testedv"));
 
 	const Analysis analysis =
 		Analyse({{"lib.cpp", Role::Ship, library.Object}, {"tests/t.cpp", Role::Test, test.Object}});
 
 	REQUIRE(analysis.Dead.empty());
-	REQUIRE(Names(analysis.TestOnly) == std::vector<std::string>{"tested"});
+	REQUIRE(Names(analysis.TestOnly) == std::vector<std::string>{"_Z6testedv"});
 }
 
 TEST_CASE("an inline function emitted by many objects is reported once", "[deadcode]") {
@@ -141,6 +141,8 @@ TEST_CASE("library code instantiated in a first-party object is not reported", "
 	program.Function("_ZNSt6vectorIiE9push_backEv", WEAK);
 	program.Function("_ZN8nlohmann6detail8unescapeEv", 0);
 	program.Function("_ZdlPvm");
+	program.Function("deflate");
+	program.Function("_ZL13stbtt__isfontPh", 0);
 	program.Function("_ZN4game4DeadEv");
 
 	const Analysis analysis = Analyse({{"a.cpp", Role::Ship, program.Object}});

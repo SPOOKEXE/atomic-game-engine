@@ -263,19 +263,27 @@ namespace deadcode {
 	namespace {
 
 		// Code that belongs to a library and only got emitted here: the
-		// standard library and header-only vendors instantiated inside a
-		// first-party object, and the replaceable allocation functions the
-		// runtime calls by itself. When one of these is dead it is because a
-		// first-party caller is, and that caller is already reported.
+		// standard library and vendor headers compiled inside a first-party
+		// object, and the replaceable allocation functions the runtime calls
+		// by itself. When one of these is dead it is because a first-party
+		// caller is, and that caller is already reported.
+		//
+		// An unmangled name is C. First-party program code is C++ and never
+		// `extern "C"` (only fuzz and fault fixtures are), so a C function
+		// in a program object came from a vendor implementation header.
 		bool Library(std::string_view name) {
 			if (name.starts_with("_Znw") || name.starts_with("_Zna") || name.starts_with("_Zdl") ||
 				name.starts_with("_Zda")) {
 				return true;
 			}
 			if (!name.starts_with("_Z")) {
-				return false;
+				return name != "main";
 			}
 			name.remove_prefix(2);
+			// `L` marks internal linkage; the name that follows is the same.
+			if (name.starts_with("L")) {
+				name.remove_prefix(1);
+			}
 			if (name.starts_with("N")) {
 				name.remove_prefix(1);
 				while (!name.empty() && (name[0] == 'K' || name[0] == 'V' || name[0] == 'r' || name[0] == 'R' ||
@@ -298,7 +306,16 @@ namespace deadcode {
 				return false;
 			}
 			const std::string_view first = name.substr(digits, length);
-			return first == "nlohmann" || first == "__gnu_cxx" || first == "__cxxabiv1";
+			static constexpr std::string_view VENDORS[] = {"nlohmann", "__gnu_cxx", "__cxxabiv1", "CryptoPP", "asio"};
+			for (const std::string_view vendor : VENDORS) {
+				if (first == vendor) {
+					return true;
+				}
+			}
+			// stb's implementation headers, compiled as C++ with internal
+			// linkage, all prefix their names.
+			return first.starts_with("stb") || first == "ttLONG" || first == "ttULONG" || first == "ttSHORT" ||
+				first == "ttUSHORT" || first == "ttBYTE" || first == "ttCHAR" || first == "ttFixed";
 		}
 	}
 
