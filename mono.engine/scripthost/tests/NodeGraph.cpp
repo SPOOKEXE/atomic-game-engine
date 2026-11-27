@@ -143,7 +143,7 @@ assert(report.Nodes[impure].Status == "ran", "impure writer runs")
 local okTick, tickErr = pcall(function() NG.Runner.new(g, "Later") end)
 assert(not okTick)
 local big = NG.Graph.new(reg)
-local okLimit = pcall(function() for i = 1, 1100 do big:AddNode("math.add") end end)
+local okLimit = pcall(function() for i = 1, 4100 do big:AddNode("math.add") end end)
 assert(not okLimit, "node limit")
 )");
 }

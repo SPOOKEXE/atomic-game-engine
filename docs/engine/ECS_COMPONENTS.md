@@ -209,6 +209,7 @@ state until v0.19.
 | `scene.Collider` | 28 | 4 | yes | yes | . | . | The collision shape: kind, extent or baked geometry name, layer and mask, and whether contacts are only reported rather than solved. Read by both physics phases every tick. |
 | `scene.CollisionShapes` | 48 | 8 | yes | . | . | . | Resource: the world's table of baked convex hulls and triangle meshes, looked up by the name a `Collider::Geometry` field carries. |
 | `scene.Color3Value` | 12 | 4 | yes | yes | . | . | The colour stored by a `Color3Value` instance. |
+| `scene.CompiledGraphs` | 56 | 8 | yes | . | . | . | Per-world singleton cache of each `MaterialGraph` compiled to shader code, keyed by entity and rebuilt when the graph's revision moves. Derived and never saved. |
 | `scene.Constraint` | 120 | 8 | yes | yes | . | . | A generic six-degree-of-freedom joint between two attachments: a motion mode and a limit per axis, plus the drive target, stiffness, damping and force caps. Each Roblox constraint class is a prototype of this one row. |
 | `scene.ControllerState` | 512 | 4 | yes | yes | . | . | Resource: this host's mapped gamepad and raw joystick state for up to eight local devices, including connection changes and sticky button edges consumed by gameplay and scripts. |
 | `scene.DepthOfFieldEffect` | 20 | 4 | yes | yes | . | . | On a child of `Lighting`: whether depth of field contributes and its blur intensity, focus distance, focus range and radius. |
@@ -228,12 +229,14 @@ state until v0.19.
 | `scene.LODAuto` | 36 | 4 | yes | . | . | . | Automatically produced coarse mesh artifacts, their triangle ratios, generation strategy, level count, projected quad-area target, and optional final billboard texture. |
 | `scene.LODCustom` | 36 | 4 | yes | . | . | . | Per-level authored mesh overrides and an optional final billboard texture. Nil fields inherit the matching `scene.LODAuto` field and valid fields take precedence. |
 | `scene.LODSettings` | 12 | 4 | yes | . | . | . | Per-item LOD distance floors. An all-zero row inherits the active view's default mesh LOD distances. |
+| `scene.LayeredShaders` | 112 | 8 | yes | . | . | . | Per-world singleton holding the surfaces `ResolveMaterials` generates from layer stacks, and what each part's stack was built from. Derived and never saved. |
 | `scene.Light` | 28 | 4 | yes | yes | . | . | A point, spot or surface light: colour, brightness, range, cone angle, face and enabled flag. The client walks these rows and fills its lighting uniforms. |
 | `scene.LightingService` | 44 | 4 | yes | yes | . | . | On the single `Lighting` service instance: ambient and outdoor ambient colour, sun brightness, time of day, geographic latitude and the default render feature policy. |
 | `scene.LocalPlayer` | 8 | 8 | yes | yes | . | . | Resource: the `Player` this host is looking through, or null on a server. It backs the `Players.LocalPlayer` property. |
 | `scene.LocalTransparency` | 4 | 4 | yes | . | . | . | A per-viewer override of `Visual::Transparency`, written only through `SetLocalTransparency`, that fades a part standing between the camera and what it is watching. |
-| `scene.MaterialCatalogue` | 80 | 8 | yes | . | . | . | Resource: the derived table of texture sets per material name, filled by the content pump and read by `ResolveMaterials`. It is not authored and not saved. |
-| `scene.MaterialRef` | 8 | 4 | yes | . | . | . | On a `Material` instance: which material asset it names and which shader draws the parts wearing it. `ResolveMaterials` reads it onto every such part. |
+| `scene.MaterialCatalogue` | 104 | 8 | yes | . | . | . | Resource: the derived table of texture sets per material name, filled by the content pump and read by `ResolveMaterials`. It is not authored and not saved. |
+| `scene.MaterialLayer` | 20 | 4 | yes | . | . | . | On a `MaterialLayer` instance: the shader module holding its Layer function, the mask it reads, and how it blends over the layers below it. |
+| `scene.MaterialRef` | 88 | 4 | yes | . | yes | . | On a `Material` instance: which material asset it names and which shader draws the parts wearing it. `ResolveMaterials` reads it onto every such part. |
 | `scene.MeshCatalogue` | 280 | 8 | yes | . | . | . | Resource: what the content pump learned about each loaded mesh - triangle count and the texture sheets its submeshes name. It backs `MeshPart.TrianglesCount`. |
 | `scene.Motion` | 24 | 4 | yes | yes | . | 12 | Linear and angular velocity in world space. Physics integrates it every tick for every body carrying `Simulated`; gravity and the control pass write it. |
 | `scene.NetworkOwner` | 8 | 8 | yes | yes | . | . | Which `Player` simulates this body; a null handle means the server does. `ReclaimAbandonedOwnership` scans it every tick and clears owners that have gone. |
@@ -264,11 +267,13 @@ state until v0.19.
 | `scene.PreviousTransform` | 28 | 4 | yes | yes | . | . | Where `Transform::Frame` stood when the current tick began. The presentation pass blends between the two so drawing stays smooth between ticks. |
 | `scene.PublishedCatalogue` | 24 | 8 | yes | . | . | . | Resource: the published mesh names in manifest order, as the content pump saw them. It backs `ContentService:GetPublishedMeshes`. |
 | `scene.RenderEffects` | 88 | 4 | yes | . | . | . | A bounded list of compute and post-processing graph nodes attached to one visual, with selection masks, ordering, revisions, stages, and enabled state; Studio offers compatible enabled visual nodes from the active profile plus `None` to clear a slot. |
+| `scene.RenderPass` | 92 | 4 | yes | . | yes | . | On a `RenderPass` instance: a full-screen shader run after lighting or transparent draws, the surface that asks for it, and the image it writes. |
 | `scene.Rendered` | 4 | 1 | yes | yes | . | . | Marks exactly the entities a draw list should contain, added and removed only by `SyncRendered`; the `Mark` byte is that walk's own scratch and is zero between passes. |
 | `scene.RenderedSignature` | 136 | 8 | yes | . | . | . | Resource: a rolling hash of the instance tree `SyncRendered` last ran against, so the walk can early-out on a frame where nothing structural moved. |
 | `scene.RigKeypoint` | 36 | 4 | yes | . | . | . | One authored named semantic point under a skeleton: its joint slot and joint-local frame. The data-rig export derives its current world frame from the named joint pose. |
 | `scene.RigidBody` | 40 | 4 | yes | yes | . | . | Mass, linear and angular damping, and body kind for a physics body. Gravity queries it every tick and the contact solver reads it per contact. |
 | `scene.Service` | 4 | 1 | yes | yes | . | . | On each service instance: who may see its children, and whether an author is allowed to delete or reparent it. Checked at install and at lookup. |
+| `scene.ShaderDiagnostics` | 56 | 8 | yes | . | . | . | Per-world singleton of why each shader script's latest text did not compile, by entity id. Process-local, so its saved form is empty. |
 | `scene.ShaderLens` | 32 | 4 | yes | . | . | . | A placed spherical HDR image-warp region. Its lens shader name and numeric controls are authored world data; the renderer resolves a bounded value snapshot before presentation. |
 | `scene.ShaderSource` | 40 | 8 | yes | . | . | . | The fragment-stage GLSL a `ShaderScript` holds, verbatim and not interned, with a revision bumped on every write so a compiler knows when to rebuild. |
 | `scene.Simulated` | 0 | 1 | . | . | . | . | Tag meaning physics owns this body's motion. `Anchored = false` adds it and `Anchored = true` removes it; every dynamic query filters on its presence. |
@@ -279,10 +284,9 @@ state until v0.19.
 | `scene.SpawnLocation` | 16 | 4 | yes | yes | . | . | On a spawn pad: which team colour it serves, whether it takes anyone regardless, and whether it is a spawn at all. `FindSpawn` reads all three. |
 | `scene.SplitCollisionCell` | 32 | 8 | yes | yes | . | . | One cell of a split mesh collider: the owning part, the `EditableMesh` it names and the revision it was cut from. Cells bake on their own, only when a body is near. |
 | `scene.StarsEffect` | 44 | 4 | yes | yes | . | . | On a child of `Lighting`: the procedural point-star field drawn per pixel in the sky pass, with density, size, brightness, tint, twinkle and horizon fade. |
-| `scene.SubsurfaceSettings` | 1 | 1 | yes | yes | . | . | The skin blur resolution `Lighting.SubsurfaceQuality` selects, Full or Half. A `Lighting` service without one blurs at Full. |
 | `scene.Sun` | 24 | 4 | yes | yes | . | . | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses. |
 | `scene.Surface` | 4 | 4 | yes | . | . | . | The physical material name a part feels like, resolved against the world's `SurfaceTable` once per contact. Separate, on purpose, from what the part looks like. |
-| `scene.SurfaceAppearance` | 116 | 4 | yes | . | . | . | The seven texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the PBR paths read it. |
+| `scene.SurfaceAppearance` | 252 | 4 | yes | . | yes | . | The seven texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the PBR paths read it. |
 | `scene.SurfaceBounces` | 4 | 4 | yes | . | . | . | Resource: how deep a mirror may show another mirror, or zero to let the engine decide. Set through the `workspace.SurfaceBounces` property. |
 | `scene.SurfaceCamera` | 20 | 4 | yes | yes | . | . | Authored camera subtype for a mirror or portal pane: render-texture size, redraw cap, tag filter, post-grade, projection face and surface slot; unlike a plain Camera, it is not a viewer-local runtime class. |
 | `scene.SurfaceLens` | 84 | 4 | yes | yes | . | . | The off-axis frustum, oblique clip plane and pane mapping `AimSurfaceCameras` fits to a mirror or portal every frame. Derived from where the local eye stands, never authored. |
@@ -377,4 +381,4 @@ state until v0.19.
 
 ---
 
-290 components registered by the engine, 0 without a purpose line.
+294 components registered by the engine, 0 without a purpose line.

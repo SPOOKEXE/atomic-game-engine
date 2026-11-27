@@ -88,10 +88,15 @@ scene.AuthoredAffordance | Opt-in bounded gameplay semantics on a BasePart, read
 scene.CameraCharacterHold | Local character and Humanoid camera hold while the source rig retires and the successor rig is pending.
 scene.CameraBodyPose | Local last-presented body rows, joint palette and root pose retained while a replica's source rows retire.
 scene.ActiveCamera | Resource: which entity the world is currently looked through, and the aspect ratio of whatever is drawing it. The matrices are not here: every consumer builds them against its own target with `ResolveCamera`.
+scene.CompiledGraphs | Per-world singleton cache of each `MaterialGraph` compiled to shader code, keyed by entity and rebuilt when the graph's revision moves. Derived and never saved.
+scene.LayeredShaders | Per-world singleton holding the surfaces `ResolveMaterials` generates from layer stacks, and what each part's stack was built from. Derived and never saved.
+scene.MaterialLayer | On a `MaterialLayer` instance: the shader module holding its Layer function, the mask it reads, and how it blends over the layers below it.
 scene.ParticleCollisionLog | Recent `PhysicalParticleField` hits, appended by `particles.physical` and read by each script runtime past its own cursor as `OnParticleCollision`. Bounded, local to each machine, never saved or replicated.
 scene.PhysicalParticleField | An emitter of particles that collide with anchored parts and fire `OnParticleCollision`: spawn box, velocity, acceleration, rate, lifetime, radius, response (bounce, stick or die), caps and seed. Live particles are stepped on each machine and never cross the wire.
 scene.PhysicalParticleSource | On a `PhysicalParticleField`: the `WeatherCompute` whose clock steps the particles and whose precipitation (rain, snow, hail or all) scales the spawn rate, with a scale.
 scene.PhysicalParticleWorld | The live particles of every physical field in Q16 fixed point, stepped by `particles.physical` and drawn as small spheres. A record outlives its destroyed field until its last particle is gone. Never saved or replicated.
+scene.RenderPass | On a `RenderPass` instance: a full-screen shader run after lighting or transparent draws, the surface that asks for it, and the image it writes.
+scene.ShaderDiagnostics | Per-world singleton of why each shader script's latest text did not compile, by entity id. Process-local, so its saved form is empty.
 scene.ViewEye | Temporary per-view camera frame used during presentation without changing the camera's authored transform.
 scene.AnimationBuffer | World-owned canonical animation bytes and the revision presentation uses to decode a procedural clip once per edit.
 scene.AnimationClip | On an `Animation` instance: which asset or `AnimationBuffer` supplies the clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable.
@@ -185,7 +190,6 @@ scene.SkyboxTextures | Six CDN texture names on a `SkyboxTextures` instance, one
 scene.Skeleton | On a skinned drawable: what the file called the rig, and how many palette slots the mesh's vertex joint indices may name. `Bone` rows under it are the joints.
 scene.Sound | What a sound is rather than a sound playing: asset name, volume, stereo pan, roll-off distances, looped and playing. The client's mixer walks these rows every frame.
 scene.SpawnLocation | On a spawn pad: which team colour it serves, whether it takes anyone regardless, and whether it is a spawn at all. `FindSpawn` reads all three.
-scene.SubsurfaceSettings | The skin blur resolution `Lighting.SubsurfaceQuality` selects, Full or Half. A `Lighting` service without one blurs at Full.
 scene.Surface | The physical material name a part feels like, resolved against the world's `SurfaceTable` once per contact. Separate, on purpose, from what the part looks like.
 scene.Sun | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses.
 scene.SurfaceAppearance | The seven texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the PBR paths read it.
