@@ -637,6 +637,20 @@ orphan-check: build
     fi
     echo "orphans ok - every output in {{build}} is still produced by the build"
 
+# First-party functions that no program can reach.
+#
+# Reads the relocations in every object of the preset's build and walks from
+# each program's `main` and static initialisers. A report, not a gate: some
+# unreached code is kept on purpose. `--list` names every function, `--tests`
+# adds code only tests reach, `--filter mono.engine/render` narrows the output.
+#
+# Only an unoptimised build gives a true answer, because an inlined helper has
+# no call left to find. The dev preset compiles first-party code at -O0.
+[group('check')]
+[doc("Report functions no program can reach.")]
+dead-code *args: build
+    ./{{build}}/tools/deadcode {{build}} {{args}}
+
 # Delete build outputs the graph no longer produces, in every preset.
 #
 # Safe by construction: ninja removes only what its own graph says is dead, so

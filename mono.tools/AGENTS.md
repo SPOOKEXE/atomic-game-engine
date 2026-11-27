@@ -7,6 +7,7 @@ The developer-facing tools. Nothing here ships in a game binary.
 | `testrunner/` | the selective test runner - a C++ library, a thin main, and its own tests |
 | `architecture/` | a CMake script, and the checked-in expectation it reads |
 | `sourcecheck/` | the four architecture rules that are visible in source text rather than in the target graph |
+| `deadcode/` | reachability over a build's object files, for `just dead-code` |
 | `docgen/` | the documentation filter, and the `docs` target it feeds - see its own `AGENTS.md` |
 
 ## No scripting runtime

@@ -231,6 +231,7 @@ Examples: `just run --stats`, `just host --ticks 300`,
 | `docs-pages-check` | Check generated module pages. |
 | `schema-dump` | Write `docs/schema.toml` and `docs/schema-data.toml`. |
 | `linecount [args...]` | Run the source line-count tool. |
+| `dead-code [args...]` | Report functions no program can reach (`--list`, `--tests`, `--filter TEXT`). |
 
 Documentation is written to `.cache/build/<preset>/docs/`; use
 `just docs-serve` to browse it locally.

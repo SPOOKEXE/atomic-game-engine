@@ -331,7 +331,11 @@ else()
 		list(APPEND MONO_COMPILE_OPTIONS -Werror)
 	endif()
 	if(NOT MONO_OPTIMISE)
-		list(APPEND MONO_COMPILE_OPTIONS -O0 -fno-omit-frame-pointer)
+		# One section per function, so every call between two functions leaves
+		# a relocation in the object. `just dead-code` builds its call graph
+		# from those; a call inside one shared `.text` needs none and is
+		# invisible. It only reads unoptimised builds, so only they pay for it.
+		list(APPEND MONO_COMPILE_OPTIONS -O0 -fno-omit-frame-pointer -ffunction-sections)
 	else()
 		# -O3, stated here rather than inherited from RelWithDebInfo's -O2.
 		#

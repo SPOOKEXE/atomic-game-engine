@@ -79,6 +79,7 @@ outside `mono.engine/`; `mono.cdn` is a program-band entry the `server` links.
 | `docsearch` | an MCP server over stdio for full-text search of the built docs | no |
 | `mcpbridge` | the stdio end of the control protocol: a byte pump to the control socket | no |
 | `linecount` | line counts | yes |
+| `deadcode` | functions no program reaches, from object-file relocations | yes, links nothing |
 | `emdash` | fixtures for `just em-dash-check` | no target |
 
 "No" in the last column means the tool is a target outside the checked graph;

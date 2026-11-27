@@ -81,6 +81,10 @@ endif()
 # links no device, so every preset checks the same rules over the same tree.
 add_subdirectory(sourcecheck)
 
+# Functions no program reaches, from the relocations in a build's objects.
+# Unconditional, like `sourcecheck`: it reads files and links no device.
+add_subdirectory(deadcode)
+
 # Asset compiler; shared-tier and device-free.
 add_subdirectory(assetc)
 

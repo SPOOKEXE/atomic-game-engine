@@ -61,6 +61,7 @@
     "v0.19 gives `msl` its one first-party edge: `core`, for the log. It was the only module here linking nothing of ours, and the index assignment it exists to perform is invisible - a texture on the wrong `[[texture(n)]]` samples somebody else's map on macOS and draws correctly on Linux. Both callers already link `core` (`mono.tools/shadercross` names it directly), so no program closure changed and no other row moved. What the empty row was protecting was that nothing in `msl` has an opinion about shaders, and that still holds.",
     "bake names imagegraph as a lateral L9 edge for bounded pixel adapters. render sees imagegraph downward for live GPU images; client sees that graph through render. server and cdn still link no renderer or bake.",
     "graphcore is the L2 shared bounded declaration and dependency compiler. graph and imagegraph retain their own runtime and domain semantics above it; their consumers gain only this downward core-only edge.",
+    "`deadcode` reports functions no program reaches, from the relocations in a build's object files. Its row links nothing for `sourcecheck`'s reason: it reads files, so it needs no engine module, and it is `shared` and unconditional. Its executable links `core` for `Arguments` the way `linecount` does.",
     "v0.26 gives `script` a lateral L9 edge to `imagegraph`: `ImageGraph:SetGraphDocument` refuses a script-authored graph with the reader and admission checks signed content passes through, at the call. imagegraph links only `core` and `graphcore`, so every row that gained it stays headless where it was."
   ],
   "modules": {
@@ -262,6 +263,10 @@
     "core": {
       "tier": "shared",
       "layer": 1,
+      "links": []
+    },
+    "deadcode": {
+      "tier": "shared",
       "links": []
     },
     "delivery": {
