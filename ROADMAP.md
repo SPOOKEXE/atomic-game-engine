@@ -67,6 +67,7 @@ STUDIO:
 - [_] Native PNG for scripting and engine (buffer in for pixels, png bytes out) or (png bytes in, buffer out for pixels), To and From PNG/Buffer/Array(2D)/flat array with width/height params
 - [_] Native Gltf for scripting and engine, same behavior above but whatever gltf needs
 - [_] Build geometry nodes into the engine as well from the plugin. Basically points along the mesh that track where it is when it deforms, and can be used to help animate and whatnot by cloth simulation / soft-body manipulation via scripting or engine.
+- [_] Completely fix NodeGraph UI element and functionality in full (Nodes + Ports + Connecting ports + Dragging around + Insertion + Viewing + Supported Node Visualisations (progress bars, state text, coloring the outline), etc). Really polish and ensure its functioning properly with all interactions.
 
 IMAGECOMPOSER:
 - [_] PBR textures support subgraphs
