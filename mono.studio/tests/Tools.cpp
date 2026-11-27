@@ -8927,3 +8927,63 @@ TEST_CASE("each scene brings back the panels it had open", "[studio][tools][pane
 	studio::ToolsProbe::TrackScenePanels(editor);
 	CHECK(studio::ToolsProbe::PinnedViewports(editor, keep) == 0);
 }
+
+TEST_CASE("plugins read rendering profiles through RenderPipelineService", "[studio][tools][plugins]") {
+	Context context;
+	TemporaryConfig config;
+	engine::scene::RegisterSceneClasses();
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareUnsavedGame(editor);
+
+	engine::graph::PipelineDocument document;
+	engine::graph::Edit move;
+	move.Kind = engine::graph::EditKind::Move;
+	move.Name = engine::core::Name("Lighting");
+	move.X = 12.0f;
+	move.Y = -4.0f;
+	document.Record(move);
+	editor.RenderingProfiles.Set(engine::core::Name("Moved"), document);
+
+	const auto world = editor.Universe->Worlds().front();
+	studio::LoadedPlugin plugin;
+	editor.Universe->Enter(world, [&](Store &store) {
+		const auto surface = studio::MakePluginSurface(editor, plugin, store);
+		engine::script::HostValue result;
+		std::string failure;
+
+		REQUIRE(surface->Call("RenderPipelineService.GetProfiles", {}, result, failure));
+		const bool listed = std::any_of(result.Items.begin(), result.Items.end(), [](const auto &item) {
+			return item.AsText() == "Moved";
+		});
+		CHECK(listed);
+
+		const auto profile = engine::script::HostValue::Of(std::string_view("Moved"));
+		REQUIRE(surface->Call("RenderPipelineService.GetNodePositions", std::span(&profile, 1), result, failure));
+		REQUIRE(result.Entries.size() == 1);
+		CHECK(result.Entries[0].first == "Lighting");
+		CHECK(result.Entries[0].second.Entries[0].second.AsNumber() == 12.0);
+		CHECK(result.Entries[0].second.Entries[1].second.AsNumber() == -4.0);
+
+		const auto missing = engine::script::HostValue::Of(std::string_view("Missing"));
+		result = {};
+		REQUIRE(surface->Call("RenderPipelineService.GetNodePositions", std::span(&missing, 1), result, failure));
+		CHECK(result.Tag == engine::script::HostTag::Nil);
+
+		const std::array formats{
+			engine::script::HostValue::Of(std::string_view("RGBA16F")),
+			engine::script::HostValue::Of(std::string_view("RGBA8")),
+		};
+		result = {};
+		REQUIRE(surface->Call("RenderPipelineService.WhatIsLost", formats, result, failure));
+		CHECK_FALSE(result.AsText().empty());
+
+		const std::array same{formats[1], formats[1]};
+		result = {};
+		REQUIRE(surface->Call("RenderPipelineService.WhatIsLost", same, result, failure));
+		CHECK(result.Tag == engine::script::HostTag::Nil);
+
+		const std::array bad{formats[0], engine::script::HostValue::Of(std::string_view("NOPE"))};
+		CHECK_FALSE(surface->Call("RenderPipelineService.WhatIsLost", bad, result, failure));
+		CHECK(failure.find("NOPE") != std::string::npos);
+	});
+}

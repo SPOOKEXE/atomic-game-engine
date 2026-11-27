@@ -58,6 +58,8 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
+#include <engine/graph/PipelineCatalogue.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
@@ -229,6 +231,11 @@ namespace studio {
 					Plugin.Vm->Release(Plugin.OnSelectionChanged);
 				Plugin.OnSelectionChanged = handler.Callback;
 				return true;
+			}
+			if (name.rfind("RenderPipelineService.", 0) == 0) {
+				return RenderPipelines(
+					name.substr(std::string_view("RenderPipelineService.").size()), arguments, result, failure
+				);
 			}
 			if (name.rfind("ChangeHistoryService.", 0) == 0) {
 				return History(
@@ -1368,6 +1375,74 @@ namespace studio {
 			}
 
 			failure = "ChangeHistoryService has no member '" + std::string(method) + "'";
+			return false;
+		}
+
+		// --- RenderPipelineService ----------------------------------------------
+		//
+		// Read only, over the universe's rendering profiles. A profile is named
+		// by its string, the same name a world's `RenderingProfile` setting holds.
+		bool RenderPipelines(
+			std::string_view method, HostArguments arguments, HostValue &result, std::string &failure
+		) {
+			const engine::graph::PipelineSet &profiles = Owner.RenderingProfiles;
+
+			// `GetProfiles()`: every profile name, in the set's order.
+			if (method == "GetProfiles") {
+				std::vector<HostValue> names;
+				for (const engine::core::Name profile : profiles.Names()) {
+					names.push_back(HostValue::Of(profile.Text()));
+				}
+				result = HostValue::List(std::move(names));
+				return true;
+			}
+
+			// `GetNodePositions(profile)`: `{ [node] = { X, Y } }` for every node
+			// the profile has moved. A node never moved is absent, as in
+			// `graph::PositionsOf`. Nil for an unknown profile.
+			if (method == "GetNodePositions") {
+				const engine::graph::PipelineDocument *document =
+					profiles.Find(engine::core::Name(At(arguments, 0).AsText()));
+				if (document == nullptr) {
+					return true;
+				}
+				HostValue positions(HostTag::Map);
+				for (const auto &[id, at] : engine::graph::PositionsOf(*document)) {
+					const engine::core::Name node = engine::core::Name::FromId(id);
+					if (!node.IsValid()) continue;
+					HostValue point(HostTag::Map);
+					point.Entries.emplace_back("X", HostValue::Of(static_cast<double>(at.first)));
+					point.Entries.emplace_back("Y", HostValue::Of(static_cast<double>(at.second)));
+					positions.Entries.emplace_back(std::string(node.Text()), std::move(point));
+				}
+				result = std::move(positions);
+				return true;
+			}
+
+			// `WhatIsLost(from, to)`: one line saying what wiring a `from` output
+			// into a `to` input drops, or nil when nothing is lost. Formats are
+			// named as the pipeline text writes them, such as `RGBA16F`.
+			if (method == "WhatIsLost") {
+				engine::graph::ResourceFormat from{};
+				engine::graph::ResourceFormat to{};
+				const std::string_view fromText = At(arguments, 0).AsText();
+				const std::string_view toText = At(arguments, 1).AsText();
+				if (!engine::graph::ParseResourceFormat(fromText, from)) {
+					failure = "WhatIsLost: unknown format '" + std::string(fromText) + "'";
+					return false;
+				}
+				if (!engine::graph::ParseResourceFormat(toText, to)) {
+					failure = "WhatIsLost: unknown format '" + std::string(toText) + "'";
+					return false;
+				}
+				const std::string_view lost = engine::graph::WhatIsLost(from, to);
+				if (!lost.empty()) {
+					result = HostValue::Of(lost);
+				}
+				return true;
+			}
+
+			failure = "RenderPipelineService has no member '" + std::string(method) + "'";
 			return false;
 		}
 

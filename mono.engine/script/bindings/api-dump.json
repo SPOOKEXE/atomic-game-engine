@@ -2992,6 +2992,15 @@
 			]
 		},
 		{
+			"name": "RenderPipelineService",
+			"members": [
+				{"kind":"method","name":"GetNodePositions","parameters":[{"name":"profile","type":"string"}],"returns":"{ [string]: { X: number, Y: number } }?"},
+				{"kind":"method","name":"GetProfiles","parameters":[],"returns":"{string}"},
+				{"kind":"method","name":"WhatIsLost","parameters":[{"name":"from","type":"string"},{"name":"to","type":"string"}],"returns":"string?"}
+			],
+			"tags": ["Service"]
+		},
+		{
 			"name": "RunService",
 			"members": [
 				{"kind":"event","name":"Heartbeat","type":"HeartbeatSignal","parameters":[{"name":"deltaTime","type":"number"}]},
@@ -4263,6 +4272,13 @@
 			"languages": ["luau","javascript"]
 		},
 		{
+			"name": "RenderPipelineService",
+			"type": "RenderPipelineService",
+			"capabilities": [],
+			"availability": "always",
+			"languages": ["luau","javascript"]
+		},
+		{
 			"name": "ReplicatedFirst",
 			"type": "ReplicatedFirst",
 			"capabilities": [],
@@ -5024,7 +5040,7 @@
 		{
 			"name": "DataModel",
 			"fields": [
-				{"name":"GetService","type":"<T>(self: DataModel, service: (\"ChangeHistoryService\" | \"CollectionService\" | \"ComputeService\" | \"ContentService\" | \"ContextActionService\" | \"CrossWorldService\" | \"DataSceneService\" | \"DataStoreService\" | \"Debris\" | \"HttpService\" | \"Lighting\" | \"MemoryStoreService\" | \"MessagingService\" | \"NodeGraphService\" | \"PhysicsService\" | \"Players\" | \"ProceduralService\" | \"ReplicatedFirst\" | \"ReplicatedStorage\" | \"RunService\" | \"Selection\" | \"ServerScriptService\" | \"ServerStorage\" | \"SettingsService\" | \"SoundService\" | \"StarterCharacterScripts\" | \"StarterGui\" | \"StarterPack\" | \"StarterPlayer\" | \"StarterPlayerScripts\" | \"Teams\" | \"TeleportService\" | \"TweenService\" | \"UpdateCadenceService\" | \"UserInputService\" | \"Workspace\") & T) -> index<Services, T>"},
+				{"name":"GetService","type":"<T>(self: DataModel, service: (\"ChangeHistoryService\" | \"CollectionService\" | \"ComputeService\" | \"ContentService\" | \"ContextActionService\" | \"CrossWorldService\" | \"DataSceneService\" | \"DataStoreService\" | \"Debris\" | \"HttpService\" | \"Lighting\" | \"MemoryStoreService\" | \"MessagingService\" | \"NodeGraphService\" | \"PhysicsService\" | \"Players\" | \"ProceduralService\" | \"RenderPipelineService\" | \"ReplicatedFirst\" | \"ReplicatedStorage\" | \"RunService\" | \"Selection\" | \"ServerScriptService\" | \"ServerStorage\" | \"SettingsService\" | \"SoundService\" | \"StarterCharacterScripts\" | \"StarterGui\" | \"StarterPack\" | \"StarterPlayer\" | \"StarterPlayerScripts\" | \"Teams\" | \"TeleportService\" | \"TweenService\" | \"UpdateCadenceService\" | \"UserInputService\" | \"Workspace\") & T) -> index<Services, T>"},
 				{"name":"JobId","type":"string"},
 				{"name":"Workspace","type":"Workspace"}
 			]
@@ -5405,6 +5421,7 @@
 				{"name":"PhysicsService","type":"PhysicsService"},
 				{"name":"Players","type":"Players"},
 				{"name":"ProceduralService","type":"ProceduralService"},
+				{"name":"RenderPipelineService","type":"RenderPipelineService"},
 				{"name":"ReplicatedFirst","type":"ReplicatedFirst"},
 				{"name":"ReplicatedStorage","type":"ReplicatedStorage"},
 				{"name":"RunService","type":"RunService"},

@@ -3937,6 +3937,21 @@ declare interface SelectionService {
 }
 
 declare const Selection: SelectionService;
+
+// The universe's rendering profiles, read only. A profile is named by the
+// string a world's `RenderingProfile` setting holds.
+declare interface RenderPipelineService {
+	// Every profile name.
+	GetProfiles(): string[];
+	// Where each moved node sits on the canvas. A node never moved is absent.
+	// Null for an unknown profile.
+	GetNodePositions(profile: string): { [node: string]: { X: number; Y: number } } | null;
+	// What wiring a `from` output into a `to` input drops, such as
+	// `("RGBA16F", "RGBA8")`, or null when nothing is lost.
+	WhatIsLost(from: string, to: string): string | null;
+}
+
+declare const RenderPipelineService: RenderPipelineService;
 declare const ChangeHistoryService: ChangeHistoryService;
 
 // `DockWidgetPluginGuiInfo.new(...)`, a plain object rather than an instance.
@@ -4018,6 +4033,7 @@ declare const game: {
 		(service: "SoundService"): SoundService;
 		(service: "PhysicsService"): PhysicsService;
 		(service: "Selection"): SelectionService;
+		(service: "RenderPipelineService"): RenderPipelineService;
 	};
 };
 

@@ -4400,6 +4400,20 @@ declare extern type SelectionService with
 	SelectionChanged: GuiSignal
 end
 
+-- The universe's rendering profiles, read only, offered to plugins by the
+-- editor's host surface. A profile is named by the string a world's
+-- `RenderingProfile` setting holds.
+declare extern type RenderPipelineService with
+	-- Every profile name.
+	function GetProfiles(self): { string }
+	-- Where each moved node sits on the canvas. A node never moved is absent.
+	-- Nil for an unknown profile.
+	function GetNodePositions(self, profile: string): { [string]: { X: number, Y: number } }?
+	-- What wiring a `from` output into a `to` input drops, such as
+	-- `("RGBA16F", "RGBA8")`, or nil when nothing is lost.
+	function WhatIsLost(self, from: string, to: string): string?
+end
+
 -- `DockWidgetPluginGuiInfo.new(...)`, a plain table here rather than a userdata.
 type DockWidgetPluginGuiInfo = {
 	InitialDockState: string?,
@@ -4485,6 +4499,7 @@ type Services = {
 	ContextActionService: ContextActionServiceType,
 	SettingsService: SettingsServiceType,
 	Selection: SelectionService,
+	RenderPipelineService: RenderPipelineService,
 	SoundService: SoundService,
 	PhysicsService: PhysicsService,
 	UserInputService: UserInputServiceType,
